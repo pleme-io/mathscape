@@ -1,0 +1,14 @@
+[package]
+name = "mathscape-config"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Shared configuration: defaults → YAML → env vars (figment)"
+
+[dependencies]
+figment.workspace = true
+serde.workspace = true
+mathscape-reward.workspace = true
+mathscape-compress.workspace = true
+mathscape-evolve.workspace = true

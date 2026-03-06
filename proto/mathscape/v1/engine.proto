@@ -1,0 +1,144 @@
+syntax = "proto3";
+
+package mathscape.v1;
+
+// Engine status and control service.
+service EngineService {
+  // Get current engine status.
+  rpc GetStatus(GetStatusRequest) returns (StatusResponse);
+  // Stream epoch updates in real-time.
+  rpc StreamEpochs(StreamEpochsRequest) returns (stream EpochResponse);
+  // Pause the engine.
+  rpc Pause(PauseRequest) returns (ControlResponse);
+  // Resume the engine.
+  rpc Resume(ResumeRequest) returns (ControlResponse);
+  // Set maximum epoch ceiling.
+  rpc SetMaxEpoch(SetMaxEpochRequest) returns (ControlResponse);
+  // Update reward weights.
+  rpc SetRewardWeights(SetRewardWeightsRequest) returns (ControlResponse);
+  // Get epoch history.
+  rpc ListEpochs(ListEpochsRequest) returns (ListEpochsResponse);
+  // Get library symbols.
+  rpc ListLibrary(ListLibraryRequest) returns (ListLibraryResponse);
+  // Get current configuration.
+  rpc GetConfig(GetConfigRequest) returns (ConfigResponse);
+  // Update configuration.
+  rpc UpdateConfig(UpdateConfigRequest) returns (ControlResponse);
+}
+
+message GetStatusRequest {}
+message StreamEpochsRequest {}
+message PauseRequest {}
+message ResumeRequest {}
+
+message SetMaxEpochRequest {
+  optional uint64 max_epoch = 1;
+}
+
+message SetRewardWeightsRequest {
+  double alpha = 1;
+  double beta = 2;
+  double gamma = 3;
+}
+
+message ListEpochsRequest {
+  int32 limit = 1;
+  int32 offset = 2;
+}
+
+message ListLibraryRequest {}
+message GetConfigRequest {}
+
+message UpdateConfigRequest {
+  optional bool running = 1;
+  optional uint64 max_epoch = 2;
+  optional uint64 epoch_delay_ms = 3;
+  optional double alpha = 4;
+  optional double beta = 5;
+  optional double gamma = 6;
+  optional uint32 population_size = 7;
+  optional uint32 tournament_k = 8;
+  optional uint32 max_depth = 9;
+}
+
+message StatusResponse {
+  uint64 epoch = 1;
+  bool running = 2;
+  int32 library_size = 3;
+  int32 population_size = 4;
+  double avg_fitness = 5;
+  double diversity = 6;
+  optional RewardSnapshot latest_reward = 7;
+}
+
+message RewardSnapshot {
+  double reward = 1;
+  double compression_ratio = 2;
+  int32 description_length = 3;
+  int32 raw_length = 4;
+  double novelty_total = 5;
+  double meta_compression = 6;
+}
+
+message EpochResponse {
+  int32 epoch = 1;
+  double compression_ratio = 2;
+  int32 description_length = 3;
+  double novelty_total = 4;
+  double meta_compression = 5;
+  int32 library_size = 6;
+  optional double population_diversity = 7;
+  optional string phase = 8;
+  optional int32 duration_ms = 9;
+  double alpha = 10;
+  double beta = 11;
+  double gamma = 12;
+}
+
+message ControlResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message LibrarySymbol {
+  int32 symbol_id = 1;
+  string name = 2;
+  int32 epoch_discovered = 3;
+  int32 arity = 4;
+  string lhs_sexpr = 5;
+  string rhs_sexpr = 6;
+  optional double generality = 7;
+  optional double irreducibility = 8;
+  bool is_meta = 9;
+  string status = 10;
+}
+
+message ListEpochsResponse {
+  repeated EpochResponse epochs = 1;
+  int32 total = 2;
+}
+
+message ListLibraryResponse {
+  repeated LibrarySymbol symbols = 1;
+}
+
+message ConfigResponse {
+  // Engine
+  bool running = 1;
+  optional uint64 max_epoch = 2;
+  uint64 epoch_delay_ms = 3;
+  // Reward
+  double alpha = 4;
+  double beta = 5;
+  double gamma = 6;
+  // Population
+  uint32 population_size = 7;
+  uint32 tournament_k = 8;
+  uint32 max_depth = 9;
+  double elite_fraction = 10;
+  double crossover_rate = 11;
+  // Extract
+  uint32 min_shared_size = 12;
+  uint32 min_matches = 13;
+  uint32 max_new_rules = 14;
+}

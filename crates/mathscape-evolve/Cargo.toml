@@ -10,3 +10,6 @@ description = "Genetic operators, population management, tournament selection, M
 mathscape-core.workspace = true
 mathscape-store.workspace = true
 rand.workspace = true
+
+[dev-dependencies]
+mathscape-core = { workspace = true, features = ["test-helpers"] }

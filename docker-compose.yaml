@@ -1,0 +1,68 @@
+# Mathscape — local development environment
+#
+# Images are built with Nix (no Dockerfiles):
+#   nix build .#image       # engine image (requires Linux builder)
+#   docker load < result    # load into local Docker
+#
+# Development workflow (recommended):
+#   nix run .#dev           # start postgres, migrate, cargo run
+#   nix run .#dev-down      # stop postgres
+#
+# Full stack (Nix-built images):
+#   nix build .#image && docker load < result
+#   docker compose up -d
+#   docker compose logs -f engine
+#   docker compose down -v
+#
+# Services:
+#   postgres  — PostgreSQL 16 (metadata store)
+#   engine    — mathscape-service (pre-built Nix image)
+
+services:
+  # ── PostgreSQL ──────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-bookworm
+    environment:
+      POSTGRES_DB: mathscape
+      POSTGRES_USER: mathscape
+      POSTGRES_PASSWORD: mathscape
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mathscape -d mathscape"]
+      interval: 2s
+      timeout: 5s
+      retries: 10
+
+  # ── Engine (Nix-built image) ───────────────────────────────────────
+  # Build: nix build .#image && docker load < result
+  engine:
+    image: ghcr.io/pleme-io/mathscape:latest
+    ports:
+      - "8080:8080"   # HTTP (REST + GraphQL)
+      - "8081:8081"   # gRPC
+      - "9090:9090"   # metrics
+    environment:
+      DATABASE_URL: postgres://mathscape:mathscape@postgres/mathscape
+      MATHSCAPE_STORE__PATH: /data/expressions.redb
+      MATHSCAPE_ENGINE__EPOCH_DELAY_MS: "100"
+      MATHSCAPE_POPULATION__TARGET_SIZE: "500"
+      RUST_LOG: info,mathscape=debug
+    volumes:
+      - engine-data:/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8080/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    profiles:
+      - full
+
+volumes:
+  pgdata:
+  engine-data:

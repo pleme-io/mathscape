@@ -399,11 +399,12 @@ Detailed subsystem designs live in `docs/arch/`:
 | [compression](docs/arch/compression.md) | STITCH-style abstraction learning, incremental e-graphs, anti-unification |
 | [search](docs/arch/search.md) | Evolutionary search, MAP-Elites quality-diversity archive, PSE |
 | [reward](docs/arch/reward.md) | Adaptive weight schedule, continuous irreducibility, dimensional probes |
-| [storage](docs/arch/storage.md) | redb + SQLite schema, epoch transactions, memory budget, growth estimates |
+| [storage](docs/arch/storage.md) | redb + PostgreSQL (SeaORM), epoch transactions, memory budget, growth estimates |
 | [proofs](docs/arch/proofs.md) | Curry-Howard, e-graph verification, Lean 4 export, AI prover integration |
 | [mcp](docs/arch/mcp.md) | MCP interface: observe-only tools, security boundary, agent interaction patterns |
 | [service](docs/arch/service.md) | Service mode: HTTP endpoints, engine loop, Prometheus metrics, three binaries |
 | [deployment](docs/arch/deployment.md) | K8s deployment: Docker image, Helm chart, FluxCD, substrate patterns |
+| [discovery](docs/arch/discovery.md) | Discovery mining: epoch analysis, known-math mapping, representation layer for React UI |
 
 ## The Three Computational Primitives
 
@@ -478,6 +479,61 @@ of a repeated pattern, like `+` or `assoc` or `derivative`.
 
 The entire search process is: start with Point, Number, and Fn. Evolve
 expressions. Find patterns. Compress them into Symbols. Repeat.
+
+### Data Representation Design Decisions
+
+The expression representation is the most performance-critical data
+structure in the system. Every epoch touches every expression. These
+choices were deliberated carefully:
+
+**Two-tier representation (Term vs StoredTerm)**:
+- `Term` — in-memory, children inline (owned). Used during evaluation,
+  mutation, and pattern matching within a single epoch. Optimized for
+  traversal speed (cache locality, no indirection).
+- `StoredTerm` — on-disk, children are `TermRef` (32-byte blake3 hash).
+  Used in redb. Optimized for deduplication and structural sharing.
+- Converting between them is cheap and only happens at epoch boundaries.
+
+**Why `enum` not trait objects**:
+- Expressions are small, frequently cloned, and pattern-matched on every
+  access. An enum with inline data beats trait object indirection + vtable
+  dispatch. The compiler can optimize match arms into jump tables.
+
+**Why `Vec<Term>` args not fixed-size**:
+- Mathematical operations vary in arity (nullary constants, unary negation,
+  binary add, n-ary sum). Fixed-size would require separate variants for
+  each arity, bloating the enum. Vec is heap-allocated but amortizes well
+  for the 1-4 arg range typical of mathematical expressions.
+- Future optimization: `SmallVec<[Term; 2]>` to inline the common case
+  (2 args) and only heap-allocate for 3+ args.
+
+**Why `u32` not `String` for variable IDs**:
+- Variables are compared millions of times per epoch (pattern matching,
+  substitution). `u32` comparison is 1 instruction vs String comparison
+  requiring pointer chase + length check + memcmp.
+
+**Why `blake3` not `sha256`**:
+- blake3 is ~5x faster than SHA-256 on modern hardware (SIMD-accelerated).
+  Hash computation happens for every new expression. At 10k individuals
+  × ~50 nodes each × mutation rate, that's ~500k hashes per epoch.
+
+**Why `bincode` for serialization**:
+- Compact binary format (no field names), fast serialize/deserialize.
+  Expressions are internal data, not an interchange format. JSON/msgpack
+  overhead is wasted here.
+
+**StoredTerm in redb**: write-once immutable. The hash IS the key.
+Zero-copy reads via redb's mmap. No serialization on read path for
+cached entries.
+
+**PostgreSQL metadata**: relational data (population snapshots, epoch
+metrics, lineage) where SQL queries are natural. SeaORM entities provide
+type safety. Connection pooling for concurrent access from service + MCP.
+
+**Discovery representation (JSON)**: designed for React UI consumption.
+Deliberate denormalization — each Discovery object contains everything
+the frontend needs for one card/row without additional queries. This
+trades storage for rendering speed.
 
 ## Symbolic Compression — Formalized
 
@@ -707,68 +763,44 @@ Why not RocksDB: C++ dependency, complex tuning, overkill for
 write-once workloads. Why not sled: stability concerns, unclear
 maintenance status. redb is simple, correct, and pure Rust.
 
-#### 2. SQLite — Structured Metadata
+#### 2. PostgreSQL — Structured Metadata (via SeaORM)
 
-SQLite via `rusqlite` for everything that benefits from relational
-queries, ordering, and aggregation:
+PostgreSQL via `sea-orm` for everything that benefits from relational
+queries, ordering, aggregation, and `WITH RECURSIVE` graph traversals:
 
-```sql
--- Population snapshot per epoch (bulk-replaced each epoch)
-CREATE TABLE population (
-    epoch       INTEGER NOT NULL,
-    individual  INTEGER NOT NULL,
-    root_hash   BLOB NOT NULL,     -- 32-byte blake3 hash
-    fitness     REAL NOT NULL,
-    cr_contrib  REAL,              -- compression contribution
-    novelty     REAL,              -- novelty contribution
-    PRIMARY KEY (epoch, individual)
-);
+**Tables** (managed by SeaORM Rust migrations in `mathscape-migration`):
+- `population` — per-epoch population snapshots with MAP-Elites bins
+- `library` — discovered symbols (append-only)
+- `epochs` — per-epoch metrics (compression ratio, novelty, weights, phase)
+- `eval_traces` — atomic proof steps (rule applied, before/after hashes)
+- `proofs` — proof certificates with Lean 4 export
+- `lineage_events` — derivation DAG (denormalized from redb for relational queries)
+- `symbol_deps` — symbol dependency graph (materialized from redb)
+- `proof_deps` — proof dependency graph (materialized from redb)
 
--- Library of discovered symbols (append-only)
-CREATE TABLE library (
-    symbol_id       INTEGER PRIMARY KEY,
-    name            TEXT NOT NULL,
-    epoch_discovered INTEGER NOT NULL,
-    lhs_hash        BLOB NOT NULL,  -- pattern hash
-    rhs_hash        BLOB NOT NULL,  -- replacement hash
-    arity           INTEGER NOT NULL,
-    generality      REAL,
-    irreducibility  REAL,
-    is_meta         BOOLEAN DEFAULT FALSE  -- compresses other symbols
-);
+SeaORM entity models live in `mathscape-store/src/entity/`.
+Migrations live in `mathscape-migration/src/`.
 
--- Epoch-level metrics (one row per epoch, append-only)
-CREATE TABLE epochs (
-    epoch               INTEGER PRIMARY KEY,
-    compression_ratio   REAL NOT NULL,
-    description_length  INTEGER NOT NULL,
-    raw_length          INTEGER NOT NULL,
-    novelty_total       REAL NOT NULL,
-    meta_compression    REAL NOT NULL,
-    library_size        INTEGER NOT NULL,
-    population_diversity REAL,
-    alpha               REAL NOT NULL,
-    beta                REAL NOT NULL,
-    gamma               REAL NOT NULL,
-    duration_ms         INTEGER
-);
+Why PostgreSQL over SQLite: `WITH RECURSIVE` CTEs for lineage/dependency
+graph traversal, JSONB for flexible metadata, concurrent read access from
+the service + MCP + CLI binaries without file locking, and natural
+integration with K8s (CNPG operator or external managed Postgres).
 
--- Lineage tracking (how expressions were derived)
-CREATE TABLE lineage (
-    child_hash    BLOB NOT NULL,
-    parent1_hash  BLOB,              -- NULL for initial population
-    parent2_hash  BLOB,              -- NULL if not crossover
-    mutation_type TEXT NOT NULL,      -- "init", "mutate", "crossover", "compress"
-    epoch         INTEGER NOT NULL
-);
-CREATE INDEX idx_lineage_child ON lineage(child_hash);
-CREATE INDEX idx_lineage_epoch ON lineage(epoch);
-```
+#### 3. Graph Data Architecture
 
-Why SQLite: it's the most deployed database engine in existence,
-`rusqlite` is mature, it handles the structured query patterns
-(leaderboard queries, epoch aggregation, lineage traversal) that
-a KV store cannot. Single file, no server, embeds into the binary.
+Graph structure lives in **redb adjacency tables** (source of truth):
+- `lineage_forward` / `lineage_reverse` — parent->child derivation edges
+- `symbol_deps_forward` / `symbol_deps_reverse` — symbol dependency edges
+- `proof_deps_forward` / `proof_deps_reverse` — proof dependency edges
+
+Hot-path graph ops (single-hop: "get parents", "get children") use redb
+for O(1) embedded lookup. Cold-path analytics (multi-hop traversals,
+ancestor chains) use PostgreSQL `WITH RECURSIVE` over denormalized copies.
+
+No dedicated graph database — redb handles hot-path graph traversal,
+PostgreSQL handles cold-path graph analytics. If graph analytics become
+a bottleneck, Apache AGE (openCypher extension for PostgreSQL) can be
+added without architecture changes.
 
 ### Epoch Memory Budget
 
@@ -882,7 +914,9 @@ capability.
 | Crate | Purpose |
 |---|---|
 | `mathscape-core` | `Point`, `Number`, `Fn`, `Term` enum, hash-consing, evaluation, substitution, s-expr parser |
-| `mathscape-store` | redb expression store, SQLite metadata, epoch transaction logic, LRU cache, eval traces |
+| `mathscape-store` | redb expression store, PostgreSQL metadata (SeaORM entities), epoch transaction logic, LRU cache |
+| `mathscape-migration` | SeaORM database migrations for PostgreSQL schema lifecycle |
+| `mathscape-db` | Database management CLI: migrate, rollback, status, verify, reset |
 | `mathscape-proof` | Proof construction, verification status tracking, proof composition, Lean 4 export |
 | `mathscape-compress` | Anti-unification, e-graph integration (`egg`), library extraction, rewriting |
 | `mathscape-evolve` | Genetic operators, population management, tournament selection |
@@ -891,6 +925,7 @@ capability.
 | `mathscape-cli` | REPL for step-by-step epoch execution, population/library inspection, history queries |
 | `mathscape-mcp` | MCP server (stdio transport) — observe-only tools for agent interaction, `Arc<Engine>` read boundary |
 | `mathscape-service` | Long-running HTTP service — engine loop + health/metrics + read-only query API for K8s deployment |
+| `mathscape-discovery` | Discovery mining: epoch analysis, known-math pattern matching, representation data for React UI |
 
 ## Service Mode
 
@@ -904,6 +939,7 @@ See [docs/arch/service.md](docs/arch/service.md) for full details.
 | `mathscape-service` | HTTP (8080 health/query, 9090 metrics) | K8s StatefulSet — leave it traversing, check in later |
 | `mathscape-mcp` | stdio (MCP protocol) | Local Claude Code agent interaction |
 | `mathscape-cli` | Terminal REPL | Interactive human exploration |
+| `mathscape-db` | CLI | Database migrations, status, verify, reset |
 
 The service binary auto-starts the engine loop and runs epochs
 continuously. All state persists to `/data/` (redb + SQLite).
@@ -990,10 +1026,12 @@ evaluator over naturals using Peano arithmetic (`zero`, `succ`, `add`,
 `mul`). Property tests for evaluation correctness.
 
 ### Phase 1.5: Storage Layer
-redb for hash-consed expression store. SQLite for population, library,
-epochs, lineage tables. Epoch transaction logic — load working set,
-compute, write, release. LRU cache for expression reads. Verify: write
-10k expressions, restart process, load population from SQLite, resolve
+redb for hash-consed expression store. PostgreSQL (via SeaORM) for
+population, library, epochs, lineage, proofs, dependency tables. SeaORM
+migration crate (`mathscape-migration`) + DB management CLI
+(`mathscape-db`). Epoch transaction logic — load working set, compute,
+write, release. LRU cache for expression reads. Verify: write 10k
+expressions, restart process, load population from PostgreSQL, resolve
 expressions from redb.
 
 ### Phase 2: Evolutionary Search
@@ -1039,6 +1077,19 @@ read-only query API. Docker image via `buildLayeredImage`. Helm chart
 (StatefulSet + PVC) with pleme-lib. helm-unittest tests. Verify: deploy
 to K8s, engine runs unattended, query API returns epoch metrics.
 
+### Phase 6.9: Discovery Mining
+MCP tool (`mathscape-discovery`) that iterates over epoch data, mines
+discovered symbols, and maps them to known mathematical concepts.
+Produces structured representation data (JSON) suitable for a React UI
+that presents findings to human mathematicians. Includes:
+- Known-math catalog with structural pattern matchers (commutativity,
+  associativity, distributivity, identity, inverse, etc.)
+- Epoch-by-epoch discovery timeline with confidence scores
+- Expression tree visualization data (nodes, edges, labels)
+- Proof chain rendering data
+- Symbol relationship graph for interactive exploration
+- Export formats: JSON API, static JSON files, LaTeX snippets
+
 ### Phase 7: RL Policy (stretch)
 Small policy network (simple MLP) trained via REINFORCE to guide
 mutation selection. State = expression encoding, action = mutation
@@ -1048,11 +1099,16 @@ choice, reward = delta compression ratio.
 
 ```bash
 # Development
-nix develop                    # devShell (Rust + SQLite + Helm + kubectl)
+nix develop                    # devShell (Rust + PostgreSQL + Helm + kubectl)
 cargo build                    # build all crates
 cargo test                     # run all tests
 cargo run -p mathscape-cli     # interactive REPL
 cargo run -p mathscape-service # local service (HTTP on 8080)
+
+# Database
+cargo run -p mathscape-db -- migrate   # run pending migrations
+cargo run -p mathscape-db -- status    # show migration status
+cargo run -p mathscape-db -- rollback  # roll back last migration
 
 # Docker
 nix build .#image              # build Docker image (Linux only)
@@ -1070,9 +1126,11 @@ nix run .#release:mathscape    # lint + package + push chart to OCI registry
 
 - **Language**: Rust (2024 edition)
 - **Build**: substrate builders via Nix (rust overlay, mkRustDevShell, mkImageReleaseApp, mkHelmSdlcApps)
+- **Database**: PostgreSQL via SeaORM (Rust migrations in `mathscape-migration`, entities in `mathscape-store/src/entity/`)
+- **Expression store**: redb (embedded, content-addressed, pure Rust)
 - **Docker**: `dockerTools.buildLayeredImage` (Nix-native, no Dockerfile)
 - **Helm**: pleme-lib library chart dependency, helm-unittest tests
-- **Deployment**: FluxCD HelmRelease -> K8s StatefulSet with PVC
+- **Deployment**: FluxCD HelmRelease -> K8s StatefulSet with PVC + PostgreSQL (CNPG or external)
 - **Testing**: `cargo test` + `nix flake check` + `helm unittest`
 - **Expression format**: S-expression — `(add (succ zero) (succ zero))`
 - **Library format**: Named rewrite rules — `add-identity: (add ?x zero) => ?x`

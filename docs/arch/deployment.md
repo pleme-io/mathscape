@@ -3,7 +3,7 @@
 ## Overview
 
 Mathscape is deployed as a StatefulSet in Kubernetes with persistent
-storage for the expression database (redb) and metadata (SQLite).
+storage for the expression database (redb) and PostgreSQL for metadata.
 The Helm chart follows helmworks conventions with pleme-lib dependency.
 
 ## Build Pipeline
@@ -76,9 +76,13 @@ traversals. `replicaCount: 1` is the default and recommended setting.
 are memory-intensive. Default: 256Mi request, 2Gi limit. Adjust based
 on population size and library complexity.
 
-**Persistent storage**: Default 10Gi PVC. Estimated growth:
+**Persistent storage**: Default 10Gi PVC for redb. Estimated growth:
 ~50 KB/epoch, ~500 MB after 10k epochs, ~5 GB after 100k epochs.
-Resize as needed.
+Resize as needed. PostgreSQL is external (CNPG operator or managed).
+
+**Database**: PostgreSQL via CNPG (CloudNativePG) operator or external
+managed Postgres. `DATABASE_URL` is injected via Secret. Migrations
+run as an init container or pre-install Job using `mathscape-db migrate`.
 
 ## Kubernetes Manifest (FluxCD)
 
@@ -126,7 +130,7 @@ spec:
 
 ```bash
 # Development
-nix develop             # Enter devShell (Rust + SQLite + Helm + kubectl)
+nix develop             # Enter devShell (Rust + PostgreSQL + Helm + kubectl)
 cargo build             # Build all crates
 cargo test              # Run all tests
 cargo run -p mathscape-cli   # Interactive REPL

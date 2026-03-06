@@ -25,7 +25,7 @@ tests:
           path: spec.type
           value: ClusterIP
 
-  - it: should expose http and metrics ports on headless service
+  - it: should expose http, grpc, and metrics ports on headless service
     documentIndex: 0
     asserts:
       - contains:
@@ -38,12 +38,19 @@ tests:
       - contains:
           path: spec.ports
           content:
+            name: grpc
+            port: 8081
+            targetPort: grpc
+            protocol: TCP
+      - contains:
+          path: spec.ports
+          content:
             name: metrics
             port: 9090
             targetPort: metrics
             protocol: TCP
 
-  - it: should expose http and metrics ports on regular service
+  - it: should expose http, grpc, and metrics ports on regular service
     documentIndex: 1
     asserts:
       - contains:
@@ -52,6 +59,13 @@ tests:
             name: http
             port: 8080
             targetPort: http
+            protocol: TCP
+      - contains:
+          path: spec.ports
+          content:
+            name: grpc
+            port: 8081
+            targetPort: grpc
             protocol: TCP
       - contains:
           path: spec.ports

@@ -1,5 +1,6 @@
 # mathscape — Evolutionary symbolic compression engine
 # Defaults for single-replica StatefulSet with persistent storage.
+# Serves REST + GraphQL + gRPC APIs and frontend static files.
 
 image:
   # -- Image repository (set at deploy time via HelmRelease patches)
@@ -25,6 +26,9 @@ ports:
   - name: http
     containerPort: 8080
     protocol: TCP
+  - name: grpc
+    containerPort: 8081
+    protocol: TCP
   - name: metrics
     containerPort: 9090
     protocol: TCP
@@ -36,6 +40,10 @@ service:
     - name: http
       port: 8080
       targetPort: http
+      protocol: TCP
+    - name: grpc
+      port: 8081
+      targetPort: grpc
       protocol: TCP
     - name: metrics
       port: 9090
@@ -50,6 +58,11 @@ env:
     value: "/data"
   - name: LOG_FORMAT
     value: "json"
+  - name: DATABASE_URL
+    valueFrom:
+      secretKeyRef:
+        name: mathscape-db
+        key: DATABASE_URL
 
 # -- Environment variables from ConfigMaps/Secrets
 envFrom: []
@@ -63,11 +76,11 @@ resources:
     cpu: 1000m
     memory: 2Gi
 
-# -- Persistent storage configuration
+# -- Persistent storage configuration (redb expression store only — metadata is in PostgreSQL)
 persistence:
   # -- Enable persistent storage
   enabled: true
-  # -- Storage size for mathematical expression databases (redb + SQLite)
+  # -- Storage size for redb expression database
   size: 10Gi
   # -- Storage class (empty string uses cluster default)
   storageClass: ""
@@ -115,7 +128,7 @@ networkPolicy:
   allowDns: true
   # -- Additional ingress rules
   additionalIngress: []
-  # -- Additional egress rules
+  # -- Additional egress rules (e.g., PostgreSQL)
   additionalEgress: []
 
 # -- Pod security context

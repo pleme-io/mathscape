@@ -13,7 +13,7 @@ read-only query API for remote observation.
 mathscape-service
   ├── Engine loop      (runs epochs, writes to storage)
   ├── HTTP server      (health, metrics, read-only queries)
-  └── Storage layer    (redb + SQLite in /data/)
+  └── Storage layer    (redb in /data/ + PostgreSQL)
 ```
 
 ### Engine Loop
@@ -80,12 +80,14 @@ interface layer:
 
 ```
 /data/
-  expressions.redb    -- hash-consed expression store
-  metadata.sqlite     -- population, library, epochs, lineage, proofs
+  expressions.redb    -- hash-consed expression store (local)
+PostgreSQL              -- population, library, epochs, lineage, proofs (external)
 ```
 
-Both databases use ACID transactions with fsync at epoch boundaries.
-The /data/ directory is a PersistentVolume in Kubernetes.
+redb uses ACID transactions with fsync at epoch boundaries. PostgreSQL
+transactions are committed at the same boundary. The /data/ directory
+is a PersistentVolume in Kubernetes for redb. PostgreSQL is external
+(CNPG operator or managed service).
 
 ## Configuration
 
@@ -93,7 +95,8 @@ Environment variables:
 
 | Variable | Default | Description |
 |---|---|---|
-| `DATA_DIR` | `/data` | Path to storage directory |
+| `DATA_DIR` | `/data` | Path to redb storage directory |
+| `DATABASE_URL` | `postgres://localhost/mathscape` | PostgreSQL connection URL |
 | `RUST_LOG` | `info,mathscape=debug` | Log level filter |
 | `LOG_FORMAT` | `json` | Log format (json or pretty) |
 | `HTTP_PORT` | `8080` | HTTP server port |

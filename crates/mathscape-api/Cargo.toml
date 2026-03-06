@@ -1,0 +1,19 @@
+[package]
+name = "mathscape-api"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Shared API types with REST (serde), GraphQL (async-graphql), and gRPC (prost) representations"
+
+[dependencies]
+mathscape-entity.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+async-graphql.workspace = true
+prost.workspace = true
+tonic.workspace = true
+async-trait.workspace = true
+
+[build-dependencies]
+tonic-build.workspace = true

@@ -11,6 +11,12 @@ members = [
     "crates/mathscape-cli",
     "crates/mathscape-mcp",
     "crates/mathscape-service",
+    "crates/mathscape-db",
+    "crates/mathscape-migration",
+    "crates/mathscape-discovery",
+    "crates/mathscape-config",
+    "crates/mathscape-entity",
+    "crates/mathscape-api",
 ]
 
 [workspace.package]
@@ -28,16 +34,25 @@ mathscape-evolve = { path = "crates/mathscape-evolve" }
 mathscape-reward = { path = "crates/mathscape-reward" }
 mathscape-proof = { path = "crates/mathscape-proof" }
 mathscape-policy = { path = "crates/mathscape-policy" }
+mathscape-migration = { path = "crates/mathscape-migration" }
+mathscape-discovery = { path = "crates/mathscape-discovery" }
+mathscape-config = { path = "crates/mathscape-config" }
+mathscape-entity = { path = "crates/mathscape-entity" }
+mathscape-api = { path = "crates/mathscape-api" }
 
 # Hashing
 blake3 = "1"
 
-# Storage
+# Storage — redb for content-addressed expressions, PostgreSQL for metadata
 redb = "2"
-rusqlite = { version = "0.32", features = ["bundled"] }
+sea-orm = { version = "1", features = ["sqlx-postgres", "runtime-tokio-rustls", "macros"] }
+sea-orm-migration = { version = "1" }
 
 # E-graph
 egg = "0.9"
+
+# Configuration
+figment = { version = "0.10", features = ["yaml", "env"] }
 
 # Serialization
 bincode = "1"
@@ -50,9 +65,35 @@ axum = "0.8"
 
 # MCP
 rmcp = { version = "0.1", features = ["server", "transport-io"] }
+schemars = "0.8"
+
+# GraphQL
+async-graphql = "7"
+async-graphql-axum = "7"
+
+# Tower middleware
+tower = { version = "0.4", features = ["full"] }
+
+# gRPC
+tonic = "0.12"
+prost = "0.13"
+prost-types = "0.13"
+
+# gRPC build
+tonic-build = "0.12"
+prost-build = "0.13"
+
+# Time
+chrono = { version = "0.4", features = ["serde"] }
+
+# Async trait
+async-trait = "0.1"
 
 # CLI
 clap = { version = "4", features = ["derive"] }
+
+# Streaming
+tokio-stream = "0.1"
 
 # Logging
 tracing = "0.1"

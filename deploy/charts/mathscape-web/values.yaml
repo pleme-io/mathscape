@@ -1,0 +1,197 @@
+# mathscape-web — React frontend served by Hanabi BFF
+# Same architecture as lilitu-web: frontend dist baked into Hanabi container.
+
+image:
+  # -- Image repository (set at deploy time via HelmRelease patches)
+  repository: ""
+  # -- Image tag
+  tag: latest
+  # -- Image pull policy
+  pullPolicy: Always
+
+# -- Image pull secrets for private registries
+imagePullSecrets: []
+
+# -- Override the chart name
+nameOverride: ""
+# -- Override the full release name
+fullnameOverride: ""
+
+# -- Number of replicas
+replicaCount: 1
+
+# -- Container ports (Hanabi dual-port: user HTTP + health/metrics)
+ports:
+  - name: http
+    containerPort: 80
+    protocol: TCP
+  - name: health
+    containerPort: 8080
+    protocol: TCP
+
+# -- Service configuration
+service:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+      protocol: TCP
+    - name: health
+      port: 8080
+      targetPort: health
+      protocol: TCP
+
+# -- Environment variables
+env:
+  - name: NODE_ENV
+    value: "production"
+
+# -- Environment variables from ConfigMaps/Secrets
+envFrom: []
+
+# -- Resource requests and limits
+resources:
+  requests:
+    cpu: 50m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+
+# -- Volume mounts for hanabi config (optional)
+volumeMounts: []
+
+# -- Volumes
+volumes: []
+
+# -- Health check configuration
+health:
+  # -- Liveness probe path
+  path: /health/live
+  # -- Readiness probe path
+  readyPath: /health/ready
+  # -- Port name for probes
+  port: health
+  livenessInitialDelay: 3
+  livenessPeriod: 10
+  livenessFailureThreshold: 3
+  readinessInitialDelay: 3
+  readinessPeriod: 5
+  readinessFailureThreshold: 2
+
+# -- Startup probe
+startupProbe:
+  enabled: true
+  path: /health/startup
+  port: health
+  initialDelaySeconds: 0
+  periodSeconds: 2
+  failureThreshold: 15
+
+# -- Monitoring configuration
+monitoring:
+  # -- Enable ServiceMonitor creation
+  enabled: true
+  # -- Metrics port name
+  port: health
+  # -- Metrics path
+  path: /metrics
+  # -- Scrape interval
+  interval: 30s
+  # -- Scrape timeout
+  scrapeTimeout: 10s
+
+# -- NetworkPolicy configuration
+networkPolicy:
+  # -- Enable NetworkPolicy creation
+  enabled: true
+  # -- Allow ingress from Prometheus for scraping
+  allowPrometheus: true
+  # -- Allow DNS egress
+  allowDns: true
+  # -- Additional ingress rules
+  additionalIngress: []
+  # -- Additional egress rules (e.g., backend API)
+  additionalEgress: []
+
+# -- Pod security context
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
+
+# -- Container security context
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL
+
+# -- Service account configuration
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+# -- PodDisruptionBudget configuration
+pdb:
+  enabled: true
+  minAvailable: 1
+
+# -- Autoscaling (disabled by default)
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 3
+  targetCPUUtilizationPercentage: 80
+
+# -- Termination grace period
+terminationGracePeriodSeconds: 30
+
+# -- Pod annotations
+podAnnotations: {}
+
+# -- Node selector
+nodeSelector: {}
+
+# -- Tolerations
+tolerations: []
+
+# -- Affinity rules
+affinity: {}
+
+# -- Topology spread constraints
+topologySpreadConstraints: []
+
+# -- Priority class name
+priorityClassName: ""
+
+# -- Container command override
+command: []
+
+# -- Container args override
+args: []
+
+# -- Additional labels for all resources
+additionalLabels: {}
+
+# -- Resource-level annotations
+annotations: {}
+
+# -- ConfigMaps to create
+configMaps: []
+
+# -- Downward API environment variables
+downwardApi:
+  enabled: false
+
+# -- Istio sidecar configuration
+istio:
+  enabled: false
+
+# -- Attestation framework integration
+attestation:
+  enabled: false

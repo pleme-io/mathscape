@@ -6,6 +6,9 @@ license.workspace = true
 repository.workspace = true
 description = "Point, Number, Fn, Term enum, hash-consing, evaluation"
 
+[features]
+test-helpers = []
+
 [dependencies]
 blake3.workspace = true
 serde.workspace = true

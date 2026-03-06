@@ -5,3 +5,11 @@
 *.sqlite-journal
 result
 result-*
+
+# Helm chart dependencies (pulled from OCI registry)
+deploy/charts/*/charts/
+deploy/charts/*/Chart.lock
+
+# Frontend build artifacts
+frontend/node_modules/
+frontend/dist/

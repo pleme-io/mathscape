@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Long-running service with HTTP health/metrics and engine loop"
+description = "Long-running service with REST, GraphQL, and gRPC — all from central API types"
 
 [[bin]]
 name = "mathscape-service"
@@ -17,8 +17,20 @@ mathscape-compress.workspace = true
 mathscape-evolve.workspace = true
 mathscape-reward.workspace = true
 mathscape-proof.workspace = true
+mathscape-config.workspace = true
+mathscape-api.workspace = true
 axum.workspace = true
+async-graphql.workspace = true
+async-graphql-axum.workspace = true
+tonic.workspace = true
+prost.workspace = true
 tokio.workspace = true
+serde.workspace = true
 serde_json.workspace = true
+rand.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
+async-trait.workspace = true
+tower.workspace = true
+tower-http = { version = "0.6", features = ["fs", "set-header", "compression-gzip", "compression-br"] }
+tokio-stream.workspace = true

@@ -9,3 +9,7 @@ description = "Proof construction, verification, composition, Lean 4 export"
 [dependencies]
 mathscape-core.workspace = true
 mathscape-store.workspace = true
+serde.workspace = true
+
+[dev-dependencies]
+mathscape-core = { workspace = true, features = ["test-helpers"] }

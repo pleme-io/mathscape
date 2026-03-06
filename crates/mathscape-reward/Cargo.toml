@@ -10,3 +10,6 @@ description = "Description length, compression ratio, novelty, meta-compression,
 mathscape-core.workspace = true
 mathscape-store.workspace = true
 mathscape-compress.workspace = true
+
+[dev-dependencies]
+mathscape-core = { workspace = true, features = ["test-helpers"] }

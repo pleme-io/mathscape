@@ -1,0 +1,10 @@
+[package]
+name = "mathscape-migration"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "SeaORM database migrations for mathscape PostgreSQL metadata"
+
+[dependencies]
+sea-orm-migration.workspace = true

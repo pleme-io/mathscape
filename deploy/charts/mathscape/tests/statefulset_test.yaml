@@ -113,13 +113,19 @@ tests:
           path: spec.replicas
           value: 1
 
-  - it: should expose http and metrics container ports
+  - it: should expose http, grpc, and metrics container ports
     asserts:
       - contains:
           path: spec.template.spec.containers[0].ports
           content:
             name: http
             containerPort: 8080
+            protocol: TCP
+      - contains:
+          path: spec.template.spec.containers[0].ports
+          content:
+            name: grpc
+            containerPort: 8081
             protocol: TCP
       - contains:
           path: spec.template.spec.containers[0].ports

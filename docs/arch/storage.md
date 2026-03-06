@@ -48,94 +48,82 @@ Why redb:
 - Pure key-value — hash IS the key
 - Embeds into binary, no server process
 
-### 2. SQLite -- Structured Metadata
+### 2. PostgreSQL -- Structured Metadata (via SeaORM)
 
-SQLite via `rusqlite` for relational queries, ordering, aggregation.
+PostgreSQL via `sea-orm` for relational queries, ordering, aggregation,
+and graph traversals via `WITH RECURSIVE`.
 
-```sql
--- Population snapshot (bulk-replaced each epoch)
-CREATE TABLE population (
-    epoch       INTEGER NOT NULL,
-    individual  INTEGER NOT NULL,
-    root_hash   BLOB NOT NULL,
-    fitness     REAL NOT NULL,
-    cr_contrib  REAL,
-    novelty     REAL,
-    PRIMARY KEY (epoch, individual)
-);
+**Tables** (managed by SeaORM Rust migrations in `mathscape-migration`):
 
--- Library of discovered Symbols (append-only)
-CREATE TABLE library (
-    symbol_id        INTEGER PRIMARY KEY,
-    name             TEXT NOT NULL,
-    epoch_discovered INTEGER NOT NULL,
-    lhs_hash         BLOB NOT NULL,
-    rhs_hash         BLOB NOT NULL,
-    arity            INTEGER NOT NULL,
-    generality       REAL,
-    irreducibility   REAL,
-    is_meta          BOOLEAN DEFAULT FALSE
-);
+| Table | Purpose | Access pattern |
+|---|---|---|
+| `population` | Per-epoch population snapshot with MAP-Elites bins | Bulk-replace per epoch |
+| `library` | Discovered symbols | Append-only |
+| `epochs` | Per-epoch metrics | Append-only, time-series queries |
+| `eval_traces` | Atomic proof steps | Append per epoch, join with proofs |
+| `proofs` | Proof certificates with Lean 4 export | Append, status updates |
+| `lineage_events` | Derivation DAG (denormalized from redb) | Append, recursive traversal |
+| `symbol_deps` | Symbol dependency graph (materialized) | Bulk update on library changes |
+| `proof_deps` | Proof dependency graph (materialized) | Bulk update on proof changes |
 
--- Epoch metrics (one row per epoch, append-only)
-CREATE TABLE epochs (
-    epoch                INTEGER PRIMARY KEY,
-    compression_ratio    REAL NOT NULL,
-    description_length   INTEGER NOT NULL,
-    raw_length           INTEGER NOT NULL,
-    novelty_total        REAL NOT NULL,
-    meta_compression     REAL NOT NULL,
-    library_size         INTEGER NOT NULL,
-    population_diversity REAL,
-    alpha                REAL NOT NULL,
-    beta                 REAL NOT NULL,
-    gamma                REAL NOT NULL,
-    duration_ms          INTEGER
-);
+Why PostgreSQL over SQLite:
+- `WITH RECURSIVE` CTEs for lineage/dependency graph traversal
+- Concurrent read access from service + MCP + CLI (no file locking)
+- JSONB for flexible metadata extensions
+- Natural K8s integration (CNPG operator or managed Postgres)
+- Connection pooling for the service binary
 
--- Lineage (derivation DAG)
-CREATE TABLE lineage (
-    child_hash    BLOB NOT NULL,
-    parent1_hash  BLOB,
-    parent2_hash  BLOB,
-    mutation_type TEXT NOT NULL,
-    epoch         INTEGER NOT NULL
-);
-CREATE INDEX idx_lineage_child ON lineage(child_hash);
-CREATE INDEX idx_lineage_epoch ON lineage(epoch);
+### 3. Graph Data Architecture
 
--- Evaluation traces (proof steps)
-CREATE TABLE eval_traces (
-    trace_id      INTEGER PRIMARY KEY,
-    expr_hash     BLOB NOT NULL,
-    step_index    INTEGER NOT NULL,
-    rule_applied  TEXT NOT NULL,
-    before_hash   BLOB NOT NULL,
-    after_hash    BLOB NOT NULL,
-    epoch         INTEGER NOT NULL
-);
-CREATE INDEX idx_traces_expr ON eval_traces(expr_hash);
+Graph structure lives in **redb adjacency tables** (source of truth):
 
--- Proof certificates
-CREATE TABLE proofs (
-    proof_id       INTEGER PRIMARY KEY,
-    symbol_id      INTEGER NOT NULL REFERENCES library(symbol_id),
-    proof_type     TEXT NOT NULL,
-    status         TEXT NOT NULL,
-    lhs_hash       BLOB NOT NULL,
-    rhs_hash       BLOB NOT NULL,
-    trace_ids      BLOB NOT NULL,
-    epoch_found    INTEGER NOT NULL,
-    epoch_verified INTEGER,
-    lean_export    TEXT
-);
+```
+lineage_forward:     blake3::Hash -> Vec<blake3::Hash>  // parent -> children
+lineage_reverse:     blake3::Hash -> Vec<blake3::Hash>  // child -> parents
+symbol_deps_forward: SymbolId -> Vec<SymbolId>
+symbol_deps_reverse: SymbolId -> Vec<SymbolId>
+proof_deps_forward:  ProofId -> Vec<ProofId>
+proof_deps_reverse:  ProofId -> Vec<ProofId>
+```
 
--- Proof dependency graph
-CREATE TABLE proof_deps (
-    proof_id   INTEGER NOT NULL REFERENCES proofs(proof_id),
-    depends_on INTEGER NOT NULL REFERENCES proofs(proof_id),
-    PRIMARY KEY (proof_id, depends_on)
-);
+**Hot path** (evolution loop): redb O(1) edge lookups — "get parents of
+X", "get children of X". In-process, zero network latency.
+
+**Cold path** (analysis): PostgreSQL `WITH RECURSIVE` over denormalized
+copies — "all ancestors of X", "longest derivation chain", "dependency
+closure of symbol S".
+
+No dedicated graph database. Apache AGE can be added if needed.
+
+## SeaORM Migration Pattern
+
+Migrations are Rust code in `crates/mathscape-migration/`:
+
+```
+mathscape-migration/src/
+  lib.rs                              -- Migrator with migration list
+  m20250101_000001_initial_schema.rs  -- population, library, epochs, traces, proofs
+  m20250101_000002_graph_metadata.rs  -- lineage_events, symbol_deps, proof_deps
+```
+
+Entity models in `crates/mathscape-store/src/entity/`:
+
+```
+entity/
+  mod.rs
+  population.rs    library.rs       epochs.rs
+  eval_traces.rs   proofs.rs        lineage_events.rs
+  symbol_deps.rs   proof_deps.rs
+```
+
+Database management via `mathscape-db`:
+
+```bash
+mathscape-db migrate     # run pending migrations
+mathscape-db status      # show migration status
+mathscape-db rollback    # roll back last migration
+mathscape-db verify      # check schema matches expectations
+mathscape-db reset       # drop all + re-migrate (destructive)
 ```
 
 ## Memory Budget Per Epoch
@@ -155,12 +143,12 @@ CREATE TABLE proof_deps (
 After each epoch, in a single transaction:
 
 1. Batch-write new expressions to redb (mutations + crossover products)
-2. Bulk-insert population into SQLite (DELETE old, INSERT new)
+2. Bulk-insert population into PostgreSQL (DELETE old, INSERT new)
 3. Append library entries for new Symbols
 4. Append epoch metrics row
 5. Append lineage records
 6. Write eval traces and proof records if applicable
-7. fsync both databases
+7. Commit both transactions (redb + PostgreSQL)
 
 The epoch boundary IS the transaction boundary. Crash mid-epoch rolls
 both databases back to end of previous epoch. No partial state.
@@ -168,13 +156,11 @@ both databases back to end of previous epoch. No partial state.
 ## MAP-Elites Archive Persistence
 
 The MAP-Elites archive (see [search.md](search.md)) is persisted as
-part of the population table, with additional columns:
+part of the population table with bin columns:
 
-```sql
-ALTER TABLE population ADD COLUMN depth_bin    INTEGER;
-ALTER TABLE population ADD COLUMN op_diversity INTEGER;
-ALTER TABLE population ADD COLUMN cr_bin       INTEGER;
-```
+- `depth_bin` — expression depth bin
+- `op_diversity` — distinct operator count bin
+- `cr_bin` — compression contribution bin
 
 On restart, the archive is reconstructed from the latest epoch's
 population rows. Each cell's elite is the row with highest fitness
@@ -195,7 +181,7 @@ population member, library entry, or proof trace.
 
 ## Queryable History
 
-All state is epoch-tagged. Full search history is queryable post-hoc:
+All state is epoch-tagged. Full search history is queryable:
 
 ```sql
 -- Compression ratio over time
@@ -208,12 +194,21 @@ SELECT epoch_discovered, name FROM library WHERE name LIKE '%assoc%';
 SELECT epoch, population_diversity, novelty_total
 FROM epochs WHERE novelty_total > 0.5;
 
--- Lineage of a specific expression
+-- Lineage of a specific expression (recursive CTE)
 WITH RECURSIVE ancestors AS (
-    SELECT * FROM lineage WHERE child_hash = ?
+    SELECT * FROM lineage_events WHERE child_hash = $1
     UNION ALL
-    SELECT l.* FROM lineage l
+    SELECT l.* FROM lineage_events l
     JOIN ancestors a ON l.child_hash = a.parent1_hash
 )
 SELECT * FROM ancestors;
+
+-- Symbol dependency closure
+WITH RECURSIVE deps AS (
+    SELECT depends_on FROM symbol_deps WHERE symbol_id = $1
+    UNION ALL
+    SELECT sd.depends_on FROM symbol_deps sd
+    JOIN deps d ON sd.symbol_id = d.depends_on
+)
+SELECT DISTINCT depends_on FROM deps;
 ```
