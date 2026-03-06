@@ -19,218 +19,317 @@ Given a minimal computational substrate and a reward signal that favors
 shorter descriptions of more phenomena, can a search process rediscover
 known mathematics — and find new compressions humans haven't seen?
 
-## Foundational Primitives
+## The Three Computational Primitives
 
-### Why Not "Point, Number, Function"?
+All of mathematics can be explored from three irreducible kinds of object:
 
-The intuition that math reduces to three kinds of objects (atoms, values,
-transformations) is sound as a *computational basis*, but the standard
-mathematical foundations use fewer primitives:
+### 1. Point — the atom of identity
 
-| Foundation | Primitives | Everything else is... |
-|---|---|---|
-| **Set theory (ZFC)** | Sets + membership (`in`) | Sets of sets |
-| **Lambda calculus** | Variable, Abstraction, Application | Lambda terms |
-| **Type theory (Martin-Lof)** | Types + terms | Typed constructions |
-| **Category theory** | Objects + morphisms | Compositions |
+A point is a thing that *is* — nothing more. It has no internal structure,
+no value, no behavior. It exists only to be distinguished from other points.
+Points are the ground truth of mathematics: before you can count, compare,
+or transform, you need *things* to act on.
 
-Lambda calculus is the closest match: three syntactic forms, and all of
-computable mathematics emerges from them. Church numerals encode numbers,
-combinators encode logic, fixed-point operators encode recursion.
-
-### Mathscape's Computational Substrate
-
-We adopt a typed expression tree that unifies the user's intuition with
-lambda calculus:
+In set theory, a point is an element. In geometry, it is a location. In
+type theory, it is an inhabitant. The specific formalism doesn't matter —
+what matters is that points are the irreducible substrate on which all
+structure is built.
 
 ```
-Term ::= Atom(id)             -- irreducible elements (the "point")
-       | Lit(value)            -- numeric/boolean literals (the "number")
-       | Fn(param, body)       -- lambda abstraction (the "function")
-       | App(func, arg)        -- function application
-       | Op(name, args)        -- built-in operator (add, mul, eq, ...)
-       | Sym(name)             -- named abstraction (compressed pattern)
+Point(id)    -- an opaque, distinguishable atom
 ```
 
-`Atom`, `Lit`, and `Fn` are the three irreducible *kinds* — everything
-else (`App`, `Op`, `Sym`) is sugar for applying functions to atoms and
-literals. This preserves the "three primitives" insight while being
-computationally precise.
+### 2. Number — the atom of quantity
 
-## The Compression-Novelty Reward
+A number is a point with *position* — it encodes magnitude, order, or
+cardinality. Numbers emerge the moment you distinguish "how many" from
+"which one." The simplest construction: a point is `zero`, and `succ`
+applied to a number is the next number. From this, all of arithmetic
+follows.
 
-### Insight: Comprehension = Compression
-
-From Kolmogorov complexity theory: the complexity of an object is the
-length of the shortest program that produces it. A "theory" or "law" is
-a short program that produces many observations. The shorter the program
-relative to the data it explains, the better the compression — and the
-deeper the understanding.
-
-This gives us a principled reward function:
+Numbers are not just integers — they are any value that admits comparison
+and combination: naturals, rationals, reals, complex numbers, ordinals.
+The key property is that numbers carry *quantitative information* that
+points do not.
 
 ```
-reward(library, corpus) = compression_ratio + novelty_bonus
+Number(value)    -- a quantity: natural, rational, real, or symbolic
+```
 
-compression_ratio = 1 - (description_length(corpus, library) / raw_length(corpus))
+### 3. Function — the atom of transformation
 
-novelty_bonus = sum over each new identity i:
-    generality(i) * irreducibility(i)
+A function is a *rule that maps inputs to outputs*. It is the only
+dynamic primitive — points and numbers are static, functions are active.
+Every operation in mathematics is a function: addition maps two numbers
+to a number, a proof maps hypotheses to conclusions, a symmetry maps
+a structure to itself.
+
+Functions are what make mathematics *generative*. Without them, you have
+a static collection of points and numbers. With them, you can build
+the entire edifice: arithmetic is functions over numbers, algebra is
+functions over functions, calculus is functions over continuous functions.
+
+```
+Fn(params, body)    -- a transformation: input -> output
+```
+
+### The Expression Tree
+
+These three primitives compose into an expression tree — the universal
+representation for mathematical objects in Mathscape:
+
+```
+Term ::= Point(id)               -- irreducible identity
+       | Number(value)            -- irreducible quantity
+       | Fn(params, body)         -- irreducible transformation
+       | Apply(func, args)        -- function application
+       | Symbol(name, arity)      -- compressed pattern (learned)
+```
+
+The first three are the primitives. `Apply` is the act of using a
+function. `Symbol` is what Mathscape *discovers* — a named compression
+of a repeated pattern, like `+` or `assoc` or `derivative`.
+
+The entire search process is: start with Point, Number, and Fn. Evolve
+expressions. Find patterns. Compress them into Symbols. Repeat.
+
+## Symbolic Compression — Formalized
+
+### The Compression Function
+
+Let `L` be a library of symbols (named rewrite rules), and `C` be a
+corpus of expressions. The **description length** of the corpus under
+the library is:
+
+```
+DL(C, L) = |L| + sum over e in C: size(rewrite(e, L))
 ```
 
 Where:
-- **description_length**: size of the corpus when rewritten using the
-  library's abstractions (Sym nodes replace repeated subexpressions)
-- **raw_length**: size of the corpus as flat expression trees
-- **generality**: how many distinct expressions an identity applies to
-- **irreducibility**: the identity cannot be derived from existing library entries
+- `|L|` is the total size of all library definitions (you pay for the
+  abstractions you create)
+- `size(rewrite(e, L))` is the size of expression `e` after replacing
+  all matching subexpressions with their Symbol names
+- `size(t)` counts nodes in the expression tree
 
-### What Gets Rewarded
-
-1. **Finding common subexpressions** — if `(add x (add y z))` and
-   `(add (add x y) z)` appear often, discovering associativity and
-   compressing both to `assoc(add, x, y, z)` is rewarded.
-
-2. **Finding identities** — if `(mul x 1) => x` holds for all x,
-   naming this `mul-identity` compresses every occurrence.
-
-3. **Building abstraction towers** — using `assoc` and `mul-identity`
-   together to derive distributivity earns compound rewards because the
-   new law compresses *further* on top of existing compressions.
-
-4. **Novel discoveries** — an identity that cannot be decomposed into
-   known library entries gets the highest novelty bonus.
-
-## Search Architecture
-
-### Why Not a Neural Network Alone?
-
-A neural network is a function approximator — it maps inputs to outputs
-via learned parameters. What the user described ("trying different things
-across epochs with a reward function") is **reinforcement learning** or
-**evolutionary search**, where the neural network is one component:
-
-| Approach | Strengths | Weaknesses |
-|---|---|---|
-| **Pure neural net** (supervised) | Fast inference | Needs labeled data we don't have |
-| **Reinforcement learning** (AlphaProof-style) | Proven on formal math | Needs a formal verifier (Lean/Coq) |
-| **Genetic programming** | Natural fit for expression trees | Slow convergence on large spaces |
-| **DreamCoder (wake-sleep)** | Library learning + compression | Complex, needs domain-specific DSL |
-| **Hybrid: evolutionary + neural guide** | Best of both worlds | Implementation complexity |
-
-### Mathscape's Approach: Evolutionary Library Learning
-
-We combine genetic programming with DreamCoder-style library extraction:
+The **compression ratio** is:
 
 ```
-Phase 1: EVOLVE (wake)
-  - Maintain a population of expression trees
-  - Mutate: random subtree replacement, crossover, simplification
-  - Evaluate: run expressions, collect input-output behaviors
-  - Select: fitness = compression_ratio + novelty_bonus
-
-Phase 2: COMPRESS (sleep-abstraction)
-  - Scan population for repeated subexpressions (anti-unification)
-  - Extract common patterns as new Sym entries in the library
-  - Rewrite population using new symbols (shorter trees = higher fitness)
-  - Use e-graph equality saturation to find equivalent forms
-
-Phase 3: DREAM (sleep-fantasy)
-  - Generate synthetic problems using the current library
-  - Attempt to solve them, discovering new compositions
-  - Failed attempts guide future mutations
-
-Repeat for N epochs.
+CR(C, L) = 1 - DL(C, L) / DL(C, {})
 ```
 
-### Key Rust Components
+A compression ratio of 0 means the library is useless. A ratio of 0.5
+means the library halves the total description length. Higher is better.
+
+### The Novelty Function
+
+Not all compressions are equal. Discovering `(add x 0) = x` is more
+valuable than noticing that `(add 3 4)` appears twice. Novelty measures
+the *independence* and *generality* of a discovery:
+
+```
+novelty(symbol, L) = generality(symbol) * irreducibility(symbol, L)
+
+generality(s) = |{ e in C : s matches a subexpression of e }| / |C|
+
+irreducibility(s, L) = 1  if s cannot be derived by composing existing symbols in L
+                        0  otherwise
+```
+
+A symbol that matches 80% of the corpus and cannot be derived from
+existing library entries has `novelty = 0.8 * 1.0 = 0.8`.
+
+### The Reward Function
+
+The total reward for an epoch combines compression and novelty:
+
+```
+R(C, L, L_new) = alpha * CR(C, L_new) + beta * sum over s in (L_new - L): novelty(s, L)
+```
+
+Where:
+- `alpha` weights compression (exploitation — use what you've found)
+- `beta` weights novelty (exploration — find new things)
+- `L_new - L` is the set of newly discovered symbols this epoch
+
+Default: `alpha = 0.6, beta = 0.4` — slightly favor compression over
+novelty, since a compression that doesn't hold generally will be pruned
+anyway.
+
+## Search Process — Evolutionary with RL Guidance
+
+### Architecture
+
+```
+                    +------------------+
+                    |   Expression     |
+                    |   Population     |
+                    +--------+---------+
+                             |
+              +--------------+--------------+
+              |                             |
+     +--------v---------+        +---------v--------+
+     |  EVOLVE           |        |  EVALUATE        |
+     |  - mutate trees   |        |  - run exprs     |
+     |  - crossover      |        |  - collect I/O   |
+     |  - guided by      |        |  - check eqs     |
+     |    policy net     |        |                  |
+     +--------+----------+        +---------+--------+
+              |                             |
+              +--------------+--------------+
+                             |
+                    +--------v---------+
+                    |  COMPRESS         |
+                    |  - anti-unify     |
+                    |  - e-graph sat    |
+                    |  - extract Syms   |
+                    |  - rewrite corpus |
+                    +--------+---------+
+                             |
+                    +--------v---------+
+                    |  REWARD           |
+                    |  - CR(C, L)       |
+                    |  - novelty(s, L)  |
+                    |  - update policy  |
+                    +------------------+
+                             |
+                         next epoch
+```
+
+### Evolutionary Search (primary)
+
+The population is a set of expression trees. Each epoch:
+
+1. **Selection**: Tournament selection — pick k random individuals,
+   keep the one with highest fitness.
+2. **Mutation**: Random subtree replacement, operator swap, constant
+   perturbation, argument reordering.
+3. **Crossover**: Swap subtrees between two parent expressions.
+4. **Evaluation**: Run each expression on a set of test inputs,
+   record input-output behavior.
+5. **Fitness**: `compression_contribution + novelty_contribution`
+   where compression_contribution measures how much this individual's
+   patterns contribute to the library's compression power.
+
+### RL Policy (optional, Phase 7+)
+
+A small policy network learns which mutations are productive:
+
+- **State**: current expression tree (encoded as a sequence of tokens)
+- **Action**: which mutation operator to apply and where
+- **Reward**: change in compression ratio after the epoch
+
+This is standard policy gradient RL (REINFORCE). The policy starts
+uniform-random and gradually learns to prefer mutations that lead to
+compressible patterns. This is an optimization over pure evolutionary
+search — not a replacement.
+
+### Compression via E-Graphs
+
+After each epoch, the `egg` e-graph library performs equality saturation:
+
+1. Insert all evaluated expressions into the e-graph
+2. Apply known rewrite rules (from the library)
+3. Extract the smallest equivalent expression for each
+4. Anti-unify across expressions to find new common patterns
+5. Patterns that compress the corpus become new library Symbols
+
+## Rust Crate Structure
 
 | Crate | Purpose |
 |---|---|
-| `mathscape-core` | Expression tree, evaluation, substitution |
-| `mathscape-compress` | Anti-unification, e-graph integration, library extraction |
-| `mathscape-evolve` | Genetic operators, population management, selection |
-| `mathscape-reward` | Compression ratio, novelty scoring, fitness |
-| `mathscape-cli` | REPL for step-by-step execution and observation |
+| `mathscape-core` | `Point`, `Number`, `Fn`, `Term` enum, evaluation, substitution, s-expr parser |
+| `mathscape-compress` | Anti-unification, e-graph integration (`egg`), library extraction, rewriting |
+| `mathscape-evolve` | Genetic operators, population management, tournament selection |
+| `mathscape-reward` | Description length, compression ratio, novelty scoring, combined fitness |
+| `mathscape-policy` | Optional RL policy network for guided mutation (Phase 7+) |
+| `mathscape-cli` | REPL for step-by-step epoch execution, population/library inspection |
 
-### Prior Art This Builds On
+## Prior Art
 
 - **DreamCoder** (Ellis et al., MIT) — wake-sleep library learning for
-  program synthesis. We adapt the library extraction but replace the
-  neural recognition model with evolutionary search for simplicity.
+  program synthesis. We adapt the library extraction and compression
+  reward but use evolutionary search instead of enumeration.
   [Paper](https://arxiv.org/abs/2006.08381)
 
-- **AlphaProof** (DeepMind) — RL for formal mathematical proof via
-  Lean. We share the "search + verify" philosophy but operate on
-  expression trees rather than formal proof terms.
+- **AlphaProof** (DeepMind) — RL for formal mathematical proof in Lean.
+  Demonstrates that RL + formal verification can solve Olympiad-level
+  problems. We share the search-and-verify philosophy.
   [Paper](https://www.nature.com/articles/s41586-025-09833-y)
 
-- **egg** (Willsey et al.) — Rust e-graph library for equality
-  saturation. We use this for finding equivalent expressions efficiently.
+- **egg** (Willsey et al.) — Rust e-graph library for equality saturation.
+  Core dependency for finding equivalent expressions.
   [Crate](https://crates.io/crates/egg)
 
-- **Kolmogorov complexity / MDL** — the theoretical foundation for our
-  reward function. Compression = understanding.
+- **Kolmogorov complexity / MDL** — theoretical foundation for the reward
+  function. The minimum description length principle: the best model is
+  the shortest one that explains the data.
   [Overview](https://en.wikipedia.org/wiki/Kolmogorov_complexity)
 
-- **LILO** — neurosymbolic framework extending DreamCoder with LLM-
-  grounded library learning.
+- **LILO** — neurosymbolic framework extending DreamCoder with LLM-grounded
+  library learning and documentation.
   [Paper](https://openreview.net/forum?id=TqYbAWKMIe)
 
 ## Development Plan
 
-### Phase 0: Substrate (scaffold)
-Scaffold the repo using substrate's `rust-library` builder for the core
-crate and `rust-binary` for the CLI. Standard pleme-io flake structure.
+### Phase 0: Scaffold
+Scaffold the repo using substrate's `rust-library` builder for core crates
+and `rust-binary` for the CLI. Standard pleme-io flake structure with
+workspace Cargo.toml.
 
-### Phase 1: Expression Trees + Evaluation
-Implement `Term` enum, pattern matching, substitution, and a simple
-evaluator over natural numbers. Verify: `(add (succ zero) (succ zero))`
-evaluates to `(succ (succ zero))`.
+### Phase 1: Primitives + Expression Trees
+Implement `Point`, `Number`, `Fn`, `Apply`, `Symbol` as a Rust enum.
+S-expression parser and printer. Simple evaluator over naturals using
+Peano arithmetic (`zero`, `succ`, `add`, `mul`). Property tests for
+evaluation correctness.
 
-### Phase 2: Genetic Operators
-Implement mutation (random subtree swap, constant perturbation, operator
-change), crossover, and tournament selection. Verify: population evolves
-toward expressions that produce target output sequences.
+### Phase 2: Evolutionary Search
+Population of expression trees. Mutation operators (subtree swap, op
+change, constant perturb). Crossover. Tournament selection. Fitness =
+output correctness for now. Verify: evolve expressions that compute
+`add(2,3) = 5`.
 
 ### Phase 3: Compression Reward
-Implement anti-unification to find common subexpressions. Implement
-description length computation. Verify: when many trees contain
-`(add x (add y z))`, the system extracts `assoc` and rewriting shortens
-the corpus.
+Description length computation. Anti-unification to find common
+subexpressions. Library as a `Vec<(Symbol, RewriteRule)>`. Compression
+ratio calculation. Verify: repeated `(add x 0)` patterns get extracted
+into an `add-identity` Symbol.
 
-### Phase 4: Library + E-Graphs
-Integrate the `egg` crate for equality saturation. Build the library as
-a set of rewrite rules. Verify: the system discovers commutativity and
-associativity of addition from examples.
+### Phase 4: E-Graph Integration
+Integrate `egg` for equality saturation. Insert expressions, apply
+library rules, extract minimal forms. Verify: discovers that
+`(add a (add b c))` and `(add (add a b) c)` are equivalent.
 
-### Phase 5: Novelty Bonus + Identity Discovery
-Add the novelty component to the reward. Track which identities are
-derivable from the library. Verify: the system discovers multiplicative
-identity `(mul x 1) = x` and gets a novelty bonus because it's not
-derivable from additive laws.
+### Phase 5: Novelty Scoring
+Track derivability — can a Symbol be composed from existing library
+entries? Score novel discoveries higher. Combined reward function with
+alpha/beta weights. Verify: discovering `mul-identity` earns novelty
+bonus when library only contains additive laws.
 
-### Phase 6: REPL + Observation
-Build the CLI with step-by-step epoch execution, population inspection,
-library browsing, and compression metrics visualization.
+### Phase 6: CLI + Observation
+REPL with commands: `step` (one epoch), `run N` (N epochs), `pop`
+(inspect population), `lib` (browse library), `stats` (compression
+metrics). Step-by-step execution to observe the system bootstrapping
+from primitives.
+
+### Phase 7: RL Policy (stretch)
+Small policy network (simple MLP) trained via REINFORCE to guide
+mutation selection. State = expression encoding, action = mutation
+choice, reward = delta compression ratio.
 
 ## Build & Run
 
 ```bash
-# Build all crates
-nix build
-
-# Run the REPL
-nix run .#mathscape-cli
-
-# Run tests
-nix run .#test
+nix build              # build all crates
+nix run .#cli          # launch the REPL
+nix run .#test         # run all tests
 ```
 
 ## Conventions
 
 - **Language**: Rust (2024 edition)
-- **Build**: substrate `rust-library` / `rust-binary` via Nix
-- **Testing**: `cargo test` + nix check
-- **Expression format**: S-expression style `(op arg1 arg2)`
-- **Library format**: Named rewrite rules `name: lhs => rhs`
+- **Build**: substrate builders via Nix
+- **Testing**: `cargo test` + `nix flake check`
+- **Expression format**: S-expression — `(add (succ zero) (succ zero))`
+- **Library format**: Named rewrite rules — `add-identity: (add ?x zero) => ?x`
+- **Compression metrics**: Reported per-epoch as `CR`, `DL`, `novelty`, `|L|`
