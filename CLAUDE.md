@@ -439,16 +439,219 @@ After each epoch, the `egg` e-graph library performs equality saturation:
 4. Anti-unify across expressions to find new common patterns
 5. Patterns that compress the corpus become new library Symbols
 
+## Storage Architecture
+
+### Principle: Memory is a Window, Disk is the Landscape
+
+The expression space is unbounded. Holding the full population, all
+discovered expressions, the e-graph, and the library in memory is
+naive — it grows without limit as epochs accumulate. Instead, memory
+holds only what the current epoch needs. Everything else lives on disk
+in purpose-matched databases. Each epoch is a transaction: load the
+working set, compute, write results, release.
+
+### Data Types and Their Storage Characteristics
+
+| Data | Shape | Access pattern | Volume | Lifetime |
+|---|---|---|---|---|
+| **Expression trees** | Tree (DAG with sharing) | Write-once, read-many by hash | Unbounded, grows every epoch | Permanent |
+| **Population** | Set of (root_hash, fitness) | Bulk replace each epoch | Fixed size (e.g., 10k) | Current epoch |
+| **Library** | Ordered list of rewrite rules | Append-mostly, full scan for rewrite | Grows slowly | Permanent |
+| **E-graph state** | Union-find + hash-cons | Build from scratch each epoch | Large but transient | Single epoch |
+| **Epoch metrics** | Time series of scalars | Append-only | One row per epoch | Permanent |
+| **Lineage** | DAG of derivations | Write-once, query by hash | Grows every epoch | Permanent |
+| **Evaluation cache** | (expr_hash, inputs) -> outputs | Write-once, lookup by key | Large, deduplicates | Permanent |
+
+### Hash-Consing: The Foundation
+
+Every expression tree is **hash-consed** — each unique subtree is
+identified by its content hash (blake3). Children are stored as hash
+references, not inline. This gives:
+
+- **Deduplication**: a population of 10,000 trees sharing common
+  subtrees (e.g., `(add ?x zero)`) stores each unique subtree exactly
+  once. In practice, populations share 60-90% of their subtrees.
+- **O(1) equality**: same hash = same expression. No tree traversal.
+- **Natural content-addressing**: expressions are their own keys.
+- **Structural sharing across epochs**: mutations that change one
+  subtree reuse all other subtrees by reference.
+
+```rust
+struct TermRef(blake3::Hash);  // 32 bytes, points into the store
+
+enum StoredTerm {
+    Point(u64),
+    Number(Value),
+    Fn(Vec<TermRef>, TermRef),     // param hashes, body hash
+    Apply(TermRef, Vec<TermRef>),  // func hash, arg hashes
+    Symbol(SymbolId, Vec<TermRef>), // symbol id, arg hashes
+}
+```
+
+A depth-10 expression tree with 1,000 nodes but heavy subtree sharing
+may only require 50 unique `StoredTerm` entries in the database.
+
+### Database Selection
+
+Two databases, clean separation by access pattern:
+
+#### 1. redb — Content-Addressed Expression Store
+
+[redb](https://crates.io/crates/redb) is a pure-Rust embedded key-value
+store. No C dependencies, no FFI, ACID transactions, crash-safe. Ideal
+for the hash-consed expression store because:
+
+- **Write-once semantics**: expressions are immutable once hashed
+- **Sequential write, random read**: mutations write new subtrees,
+  evaluation reads by hash
+- **No query language needed**: pure key-value, the hash is the key
+- **Zero-copy reads**: redb supports zero-copy access to values
+- **Embeds into the binary**: no external server process
+
+Tables in redb:
+
+```
+expressions:    blake3::Hash -> bincode(StoredTerm)
+eval_cache:     (blake3::Hash, InputSet) -> OutputSet
+```
+
+Why not RocksDB: C++ dependency, complex tuning, overkill for
+write-once workloads. Why not sled: stability concerns, unclear
+maintenance status. redb is simple, correct, and pure Rust.
+
+#### 2. SQLite — Structured Metadata
+
+SQLite via `rusqlite` for everything that benefits from relational
+queries, ordering, and aggregation:
+
+```sql
+-- Population snapshot per epoch (bulk-replaced each epoch)
+CREATE TABLE population (
+    epoch       INTEGER NOT NULL,
+    individual  INTEGER NOT NULL,
+    root_hash   BLOB NOT NULL,     -- 32-byte blake3 hash
+    fitness     REAL NOT NULL,
+    cr_contrib  REAL,              -- compression contribution
+    novelty     REAL,              -- novelty contribution
+    PRIMARY KEY (epoch, individual)
+);
+
+-- Library of discovered symbols (append-only)
+CREATE TABLE library (
+    symbol_id       INTEGER PRIMARY KEY,
+    name            TEXT NOT NULL,
+    epoch_discovered INTEGER NOT NULL,
+    lhs_hash        BLOB NOT NULL,  -- pattern hash
+    rhs_hash        BLOB NOT NULL,  -- replacement hash
+    arity           INTEGER NOT NULL,
+    generality      REAL,
+    irreducibility  REAL,
+    is_meta         BOOLEAN DEFAULT FALSE  -- compresses other symbols
+);
+
+-- Epoch-level metrics (one row per epoch, append-only)
+CREATE TABLE epochs (
+    epoch               INTEGER PRIMARY KEY,
+    compression_ratio   REAL NOT NULL,
+    description_length  INTEGER NOT NULL,
+    raw_length          INTEGER NOT NULL,
+    novelty_total       REAL NOT NULL,
+    meta_compression    REAL NOT NULL,
+    library_size        INTEGER NOT NULL,
+    population_diversity REAL,
+    alpha               REAL NOT NULL,
+    beta                REAL NOT NULL,
+    gamma               REAL NOT NULL,
+    duration_ms         INTEGER
+);
+
+-- Lineage tracking (how expressions were derived)
+CREATE TABLE lineage (
+    child_hash    BLOB NOT NULL,
+    parent1_hash  BLOB,              -- NULL for initial population
+    parent2_hash  BLOB,              -- NULL if not crossover
+    mutation_type TEXT NOT NULL,      -- "init", "mutate", "crossover", "compress"
+    epoch         INTEGER NOT NULL
+);
+CREATE INDEX idx_lineage_child ON lineage(child_hash);
+CREATE INDEX idx_lineage_epoch ON lineage(epoch);
+```
+
+Why SQLite: it's the most deployed database engine in existence,
+`rusqlite` is mature, it handles the structured query patterns
+(leaderboard queries, epoch aggregation, lineage traversal) that
+a KV store cannot. Single file, no server, embeds into the binary.
+
+### Epoch Memory Budget
+
+Each epoch loads into memory only:
+
+| Data | In-memory representation | Size estimate |
+|---|---|---|
+| Population index | `Vec<(TermRef, f64)>` — hashes + fitness | ~240 KB for 10k individuals |
+| Active subtrees | LRU cache of recently accessed `StoredTerm` | Configurable, e.g., 100 MB |
+| Library | Full `Vec<Symbol>` — always small | < 1 MB even with 1000s of symbols |
+| E-graph | Built from scratch, dropped after compress phase | Transient, bounded by population size |
+| Reward state | Scalar accumulators | Negligible |
+
+Total working memory: **~100-200 MB** regardless of how many epochs
+have run or how large the total expression store has grown. The redb
+file may grow to gigabytes over thousands of epochs, but the memory
+footprint stays constant.
+
+### Write Strategy
+
+After each epoch:
+
+1. **Batch-write new expressions** to redb (mutations + crossover
+   products). Single transaction, sequential writes.
+2. **Bulk-insert population** into SQLite (DELETE old epoch rows,
+   INSERT new). Single transaction.
+3. **Append library entries** if new Symbols were discovered.
+4. **Append epoch metrics** row.
+5. **Append lineage records** for all new expressions.
+6. **fsync** both databases.
+
+The epoch boundary is the transaction boundary. If the process crashes
+mid-epoch, both databases roll back to the end of the previous epoch.
+No partial state, no corruption, deterministic resume.
+
+### Queryable History
+
+Because everything is persisted with epoch tags, the full history of
+the search is queryable after the fact:
+
+```sql
+-- Compression ratio over time
+SELECT epoch, compression_ratio FROM epochs ORDER BY epoch;
+
+-- When was associativity discovered?
+SELECT epoch_discovered, name FROM library WHERE name LIKE '%assoc%';
+
+-- What was the population diversity when novelty spiked?
+SELECT e.epoch, e.population_diversity, e.novelty_total
+FROM epochs e WHERE e.novelty_total > 0.5;
+
+-- Trace the lineage of a specific expression
+WITH RECURSIVE ancestors AS (
+    SELECT * FROM lineage WHERE child_hash = ?
+    UNION ALL
+    SELECT l.* FROM lineage l JOIN ancestors a ON l.child_hash = a.parent1_hash
+)
+SELECT * FROM ancestors;
+```
+
 ## Rust Crate Structure
 
 | Crate | Purpose |
 |---|---|
-| `mathscape-core` | `Point`, `Number`, `Fn`, `Term` enum, evaluation, substitution, s-expr parser |
+| `mathscape-core` | `Point`, `Number`, `Fn`, `Term` enum, hash-consing, evaluation, substitution, s-expr parser |
+| `mathscape-store` | redb expression store, SQLite metadata, epoch transaction logic, LRU cache |
 | `mathscape-compress` | Anti-unification, e-graph integration (`egg`), library extraction, rewriting |
 | `mathscape-evolve` | Genetic operators, population management, tournament selection |
-| `mathscape-reward` | Description length, compression ratio, novelty scoring, combined fitness |
+| `mathscape-reward` | Description length, compression ratio, novelty scoring, meta-compression, combined fitness |
 | `mathscape-policy` | Optional RL policy network for guided mutation (Phase 7+) |
-| `mathscape-cli` | REPL for step-by-step epoch execution, population/library inspection |
+| `mathscape-cli` | REPL for step-by-step epoch execution, population/library inspection, history queries |
 
 ## Prior Art
 
@@ -484,9 +687,16 @@ workspace Cargo.toml.
 
 ### Phase 1: Primitives + Expression Trees
 Implement `Point`, `Number`, `Fn`, `Apply`, `Symbol` as a Rust enum.
-S-expression parser and printer. Simple evaluator over naturals using
-Peano arithmetic (`zero`, `succ`, `add`, `mul`). Property tests for
-evaluation correctness.
+Hash-consing with blake3. S-expression parser and printer. Simple
+evaluator over naturals using Peano arithmetic (`zero`, `succ`, `add`,
+`mul`). Property tests for evaluation correctness.
+
+### Phase 1.5: Storage Layer
+redb for hash-consed expression store. SQLite for population, library,
+epochs, lineage tables. Epoch transaction logic — load working set,
+compute, write, release. LRU cache for expression reads. Verify: write
+10k expressions, restart process, load population from SQLite, resolve
+expressions from redb.
 
 ### Phase 2: Evolutionary Search
 Population of expression trees. Mutation operators (subtree swap, op
