@@ -19,6 +19,57 @@ Given a minimal computational substrate and a reward signal that favors
 shorter descriptions of more phenomena, can a search process rediscover
 known mathematics — and find new compressions humans haven't seen?
 
+### Compression as Tractability
+
+The expression space over three primitives is infinite. With just `Point`,
+`Number`, and `Fn`, you can construct every computable function — which
+means the search space is at least as large as the space of all programs.
+Naively enumerating expression trees of depth `d` with `k` operators
+produces `O(k^(2^d))` candidates — double exponential growth. This is
+why brute-force mathematical discovery is intractable.
+
+**Compression is the mechanism that makes traversal feasible.**
+
+Each time the system discovers a Symbol (a named compression), it
+collapses an entire region of the expression space into a single node.
+The expression `(add (mul x x) (add (mul y y) (mul z z)))` is 11 nodes.
+After discovering `square: (mul ?a ?a) => ?a^2`, it becomes
+`(add (square x) (add (square y) (square z)))` — 7 nodes. After
+discovering `sum3: (add ?a (add ?b ?c)) => (sum3 ?a ?b ?c)`, it becomes
+`(sum3 (square x) (square y) (square z))` — 4 nodes. The search tree
+that once branched through all possible mul/add combinations now sees a
+single `sum3-of-squares` node.
+
+This is not just memory efficiency — it changes what the search process
+can *reach*. Without compression:
+
+```
+Depth 1:  ~k expressions
+Depth 2:  ~k^2
+Depth 3:  ~k^4
+Depth 4:  ~k^8        (millions with k=10)
+Depth 5:  ~k^16       (intractable)
+```
+
+With a library of `n` Symbols, each Symbol compresses `m` nodes into 1.
+The effective branching factor drops from `k` to `k + n` but the
+effective depth drops faster — a depth-5 raw expression may be depth-2
+in the compressed representation. The search at depth 5 in compressed
+space reaches expressions equivalent to depth 15+ in raw space.
+
+**This is exactly how human mathematics works.** No one reasons about
+calculus in terms of Peano successor operations. The tower of
+abstractions — arithmetic, algebra, analysis — is a compression stack
+that lets finite minds traverse an infinite space. Mathscape replicates
+this: each epoch's compressions become the next epoch's primitives,
+and the frontier of reachable mathematics advances.
+
+The central hypothesis: **the rate of useful compression outpaces the
+rate of combinatorial explosion**, making unbounded mathematical
+exploration feasible with bounded memory. Each abstraction layer
+compresses the layer below it more than the new layer's own
+definitions cost, yielding net negative growth in working set size.
+
 ## The Three Computational Primitives
 
 All of mathematics can be explored from three irreducible kinds of object:
