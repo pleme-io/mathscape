@@ -224,6 +224,172 @@ discovery, discoveries yield meta-compressions, meta-compressions
 reshape the reward landscape to seek further dimensional structure.
 The system bootstraps its own capacity to explore.
 
+### Determinism, Proof, and the Derivation Record
+
+The primitives are fixed. The evaluation rules are fixed. The rewrite
+rules, once discovered, are fixed. This means:
+
+**Every chain of computation from primitives to result is deterministic
+and reproducible.** Given the same expression and the same library, you
+get the same evaluation trace every time. The randomness lives in the
+*search* (which mutations to try), never in the *verification* (whether
+a discovered identity actually holds).
+
+This has a profound consequence: **every verified discovery carries an
+inherent constructive proof.**
+
+#### The Curry-Howard Lens
+
+The [Curry-Howard correspondence](https://en.wikipedia.org/wiki/Curry%E2%80%93Howard_correspondence)
+establishes that programs ARE proofs and types ARE propositions. When
+Mathscape evaluates `(add (succ zero) (succ (succ zero)))` and gets
+`(succ (succ (succ zero)))`, the evaluation trace IS a constructive
+proof that `1 + 2 = 3`. Not a claim, not a test — the computation
+itself is the proof object.
+
+For identities (universally quantified equations like `(add x zero) = x`),
+the proof structure is inductive because the primitives are inductive:
+
+```
+Numbers are inductively defined:
+    zero : Number
+    succ : Number -> Number
+
+Operations are defined by structural recursion:
+    add(zero, y)    = y              -- base case
+    add(succ(x), y) = succ(add(x, y))  -- inductive step
+
+Therefore add(x, zero) = x is proved by induction on x:
+    Base:      add(zero, zero) = zero            ✓ (by definition)
+    Inductive: assume add(x, zero) = x
+               add(succ(x), zero)
+               = succ(add(x, zero))              (by definition of add)
+               = succ(x)                         (by inductive hypothesis)  ✓
+```
+
+The evaluation engine performs exactly these steps. The chain of
+rewrites it applies IS the induction. If the system discovers that
+`(add x zero)` always reduces to `x` by exhaustive evaluation AND the
+e-graph confirms the equivalence via rewrite rules derived from the
+inductive definitions, then the e-graph derivation is a formal proof.
+
+#### Two Levels of Verification
+
+There is a nuance: testing an identity on finitely many values is
+empirical evidence, not a proof. Mathscape operates at two levels:
+
+1. **Empirical discovery** (evolutionary search): test `(add x zero) = x`
+   for `x = 0, 1, 2, ..., 100`. This is how the identity is *found*.
+   It's strong evidence but not a proof — maybe it fails at `x = 101`.
+
+2. **Structural verification** (e-graph + rewrite rules): insert both
+   sides into the e-graph, apply the rewrite rules (which are derived
+   from inductive definitions), and check if both sides land in the
+   same equivalence class. If they do, the [Church-Rosser property](https://en.wikipedia.org/wiki/Church%E2%80%93Rosser_theorem)
+   guarantees that the equivalence holds for ALL inputs, not just the
+   tested ones. This IS a proof.
+
+The system should track which level each discovery has reached:
+
+```
+Status::Conjectured  -- observed empirically, not yet verified
+Status::Verified     -- confirmed via e-graph equivalence (proof exists)
+Status::Exported     -- proof certificate emitted for external verification
+```
+
+#### What This Means for Storage
+
+The lineage table is not just bookkeeping — **it is a proof database**.
+Every row in the lineage table is a step in a derivation. The chain
+from primitives to a discovered Symbol, reconstructed from the lineage
+table, is a complete proof of that Symbol's validity.
+
+This changes what we store and how:
+
+```sql
+-- Evaluation traces: the atomic proof steps
+CREATE TABLE eval_traces (
+    trace_id      INTEGER PRIMARY KEY,
+    expr_hash     BLOB NOT NULL,       -- expression being evaluated
+    step_index    INTEGER NOT NULL,     -- position in the trace
+    rule_applied  TEXT NOT NULL,        -- which rewrite rule fired
+    before_hash   BLOB NOT NULL,       -- expression before rewrite
+    after_hash    BLOB NOT NULL,       -- expression after rewrite
+    epoch         INTEGER NOT NULL
+);
+CREATE INDEX idx_traces_expr ON eval_traces(expr_hash);
+
+-- Proof certificates: completed proofs of verified identities
+CREATE TABLE proofs (
+    proof_id      INTEGER PRIMARY KEY,
+    symbol_id     INTEGER NOT NULL REFERENCES library(symbol_id),
+    proof_type    TEXT NOT NULL,        -- "inductive", "equational", "compositional"
+    status        TEXT NOT NULL,        -- "conjectured", "verified", "exported"
+    lhs_hash      BLOB NOT NULL,
+    rhs_hash      BLOB NOT NULL,
+    trace_ids     BLOB NOT NULL,       -- serialized list of trace_ids constituting the proof
+    epoch_found   INTEGER NOT NULL,
+    epoch_verified INTEGER,
+    lean_export   TEXT                  -- optional Lean 4 proof term
+);
+
+-- Proof dependencies: which proofs depend on which
+CREATE TABLE proof_deps (
+    proof_id      INTEGER NOT NULL REFERENCES proofs(proof_id),
+    depends_on    INTEGER NOT NULL REFERENCES proofs(proof_id),
+    PRIMARY KEY (proof_id, depends_on)
+);
+```
+
+#### What We Can Do With It
+
+1. **Independent verification**: replay any proof by loading its trace
+   from the database and re-executing the rewrite chain. Deterministic
+   inputs + deterministic rules = same result every time.
+
+2. **Proof export**: emit proof certificates in Lean 4 or Coq syntax.
+   The e-graph derivation maps directly to equational reasoning steps
+   in a formal proof assistant. An external verifier can confirm every
+   discovery without trusting Mathscape's implementation.
+
+3. **Proof composition**: if Symbol A is proven and Symbol B is proven,
+   a derivation that uses both A and B inherits their proofs. The
+   `proof_deps` table tracks this — the proof of `distributivity` depends
+   on the proofs of `associativity` and `mul-identity`.
+
+4. **Proof compression**: proofs are themselves expressions. A proof
+   that appears repeatedly across different Symbols can be compressed
+   into a proof *lemma* — a meta-proof. This feeds back into the
+   compression reward: **compressing proofs is discovering deeper
+   mathematical structure**.
+
+5. **Searchable proof corpus**: over thousands of epochs, the proofs
+   table becomes a growing body of machine-generated, machine-verified
+   mathematical knowledge. Query it:
+   ```sql
+   -- All proven identities involving multiplication
+   SELECT l.name, p.proof_type, p.status
+   FROM proofs p JOIN library l ON p.symbol_id = l.symbol_id
+   WHERE l.name LIKE '%mul%' AND p.status = 'verified';
+
+   -- Proof dependency tree for distributivity
+   WITH RECURSIVE deps AS (
+       SELECT depends_on FROM proof_deps WHERE proof_id = ?
+       UNION ALL
+       SELECT pd.depends_on FROM proof_deps pd
+       JOIN deps d ON pd.proof_id = d.depends_on
+   )
+   SELECT l.name FROM deps d
+   JOIN proofs p ON p.proof_id = d.depends_on
+   JOIN library l ON l.symbol_id = p.symbol_id;
+   ```
+
+6. **Proof-guided search**: the structure of existing proofs informs
+   the search. If every proven identity about `add` was discovered
+   via induction on the first argument, the system can bias mutations
+   to try induction on the first argument of `mul` — transferring
+   proof strategies across domains.
+
 ## The Three Computational Primitives
 
 All of mathematics can be explored from three irreducible kinds of object:
@@ -646,7 +812,8 @@ SELECT * FROM ancestors;
 | Crate | Purpose |
 |---|---|
 | `mathscape-core` | `Point`, `Number`, `Fn`, `Term` enum, hash-consing, evaluation, substitution, s-expr parser |
-| `mathscape-store` | redb expression store, SQLite metadata, epoch transaction logic, LRU cache |
+| `mathscape-store` | redb expression store, SQLite metadata, epoch transaction logic, LRU cache, eval traces |
+| `mathscape-proof` | Proof construction, verification status tracking, proof composition, Lean 4 export |
 | `mathscape-compress` | Anti-unification, e-graph integration (`egg`), library extraction, rewriting |
 | `mathscape-evolve` | Genetic operators, population management, tournament selection |
 | `mathscape-reward` | Description length, compression ratio, novelty scoring, meta-compression, combined fitness |
