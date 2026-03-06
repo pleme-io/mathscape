@@ -70,6 +70,60 @@ exploration feasible with bounded memory. Each abstraction layer
 compresses the layer below it more than the new layer's own
 definitions cost, yielding net negative growth in working set size.
 
+### Compression Equilibrium and Novelty Escape
+
+Compression cannot improve forever in a fixed region. Eventually the
+system extracts every reusable pattern from a domain — addition is
+commutative, associative, has an identity, and there's nothing left
+to compress. The compression ratio plateaus. This is **compression
+equilibrium**: the local structure is fully described.
+
+At equilibrium, the compression term `alpha * CR` stops growing. The
+reward function naturally pivots — the only way to increase total
+reward is through the novelty term `beta * novelty(s, L)`. This is
+the escape mechanism:
+
+```
+Phase 1 (compression-dominant):
+  CR rising, novelty low → system extracts patterns within the current domain
+  Example: discovers add-commutative, add-associative, add-identity
+
+Phase 2 (equilibrium):
+  CR plateaus → compression reward flatlines
+  Novelty becomes the only gradient → system must find NEW structure
+  that doesn't decompose into existing library symbols
+
+Phase 3 (novelty-driven escape):
+  System explores outside the current domain
+  Discovers mul, discovers it interacts with add (distributivity)
+  Fresh compression opportunities open → CR rises again → Phase 1 restarts
+  in the expanded domain
+```
+
+This creates a natural oscillation: **compress locally until equilibrium,
+then escape to novel territory, then compress again**. The system cannot
+get stuck in a local optimum because equilibrium itself kills the
+compression gradient and forces novelty-seeking.
+
+The irreducibility requirement in the novelty function is critical here.
+Without it, the system could score novelty by trivially recombining
+existing symbols — `(add (mul x y) z)` uses known symbols but discovers
+nothing. Irreducibility demands that a novel discovery cannot be derived
+by composing existing library entries. This forces genuine exploration:
+the system must find structure that is *fundamentally new* relative to
+everything it already knows.
+
+The dynamics mirror the history of mathematics itself: centuries of work
+within Euclidean geometry (compression), then the escape to non-Euclidean
+geometry (novelty), then decades compressing the new territory into
+Riemannian manifolds. Arithmetic to algebra to abstract algebra. Each
+transition is a compression equilibrium followed by a novelty escape
+into a larger space.
+
+**Locality is impossible when novelty is irreducible.** The system is
+algebraically prohibited from scoring points by rearranging what it
+already has. It must leave.
+
 ## The Three Computational Primitives
 
 All of mathematics can be explored from three irreducible kinds of object:
