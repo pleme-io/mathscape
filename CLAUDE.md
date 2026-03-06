@@ -390,6 +390,18 @@ CREATE TABLE proof_deps (
    to try induction on the first argument of `mul` — transferring
    proof strategies across domains.
 
+## Architecture Documents
+
+Detailed subsystem designs live in `docs/arch/`:
+
+| Document | Covers |
+|---|---|
+| [compression](docs/arch/compression.md) | STITCH-style abstraction learning, incremental e-graphs, anti-unification |
+| [search](docs/arch/search.md) | Evolutionary search, MAP-Elites quality-diversity archive, PSE |
+| [reward](docs/arch/reward.md) | Adaptive weight schedule, continuous irreducibility, dimensional probes |
+| [storage](docs/arch/storage.md) | redb + SQLite schema, epoch transactions, memory budget, growth estimates |
+| [proofs](docs/arch/proofs.md) | Curry-Howard, e-graph verification, Lean 4 export, AI prover integration |
+
 ## The Three Computational Primitives
 
 All of mathematics can be explored from three irreducible kinds of object:
@@ -523,11 +535,14 @@ Where:
 - `beta` weights novelty (exploration — find new things)
 - `L_new - L` is the set of newly discovered symbols this epoch
 
-Default: `alpha = 0.6, beta = 0.4` — slightly favor compression over
-novelty, since a compression that doesn't hold generally will be pruned
-anyway.
+Default: `alpha = 0.6, beta = 0.3, gamma = 0.1` (gamma is the
+meta-compression term introduced in "Recursive Compression" below).
+See [docs/arch/reward.md](docs/arch/reward.md) for adaptive weight schedules.
 
 ## Search Process — Evolutionary with RL Guidance
+
+See [docs/arch/search.md](docs/arch/search.md) for full details including
+MAP-Elites quality-diversity archive and parallel symbolic enumeration.
 
 ### Architecture
 
@@ -596,6 +611,10 @@ compressible patterns. This is an optimization over pure evolutionary
 search — not a replacement.
 
 ### Compression via E-Graphs
+
+See [docs/arch/compression.md](docs/arch/compression.md) for STITCH-style
+library extraction (1000x faster than DreamCoder) and incremental e-graphs
+(persist across epochs instead of rebuilding).
 
 After each epoch, the `egg` e-graph library performs equality saturation:
 
@@ -844,6 +863,26 @@ SELECT * FROM ancestors;
 - **LILO** — neurosymbolic framework extending DreamCoder with LLM-grounded
   library learning and documentation.
   [Paper](https://openreview.net/forum?id=TqYbAWKMIe)
+
+- **STITCH** (Bowers et al.) — fast abstraction learning via branch-and-bound.
+  1000-10000x faster than DreamCoder's compression, 100x less memory.
+  Core technique for library extraction in Mathscape.
+  [Repo](https://github.com/mlb2251/stitch)
+
+- **MAP-Elites** (Mouret & Clune) — quality-diversity algorithm maintaining
+  a grid of elite solutions across behavioral dimensions. Ensures
+  structural diversity in the population.
+  [Paper](https://www.frontiersin.org/articles/10.3389/frobt.2016.00040/full)
+
+- **Incremental Equality Saturation** (EGRAPHS 2025) — persist e-graphs
+  across iterations instead of rebuilding, reusing previously derived
+  equalities.
+  [Paper](https://rupanshusoi.github.io/pdfs/egraphs-25.pdf)
+
+- **Parallel Symbolic Enumeration** (Nature Comp. Sci. 2025) — systematic
+  enumeration of mathematical expressions, complementary to evolutionary
+  search for small-expression discovery.
+  [Paper](https://www.nature.com/articles/s43588-025-00904-8)
 
 ## Development Plan
 
