@@ -1,0 +1,22 @@
+[package]
+name = "mathscape-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "REPL for step-by-step epoch execution and inspection"
+
+[[bin]]
+name = "mathscape-cli"
+path = "src/main.rs"
+
+[dependencies]
+mathscape-core.workspace = true
+mathscape-store.workspace = true
+mathscape-compress.workspace = true
+mathscape-evolve.workspace = true
+mathscape-reward.workspace = true
+mathscape-proof.workspace = true
+clap.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true

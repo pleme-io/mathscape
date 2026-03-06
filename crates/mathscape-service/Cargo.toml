@@ -1,0 +1,24 @@
+[package]
+name = "mathscape-service"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Long-running service with HTTP health/metrics and engine loop"
+
+[[bin]]
+name = "mathscape-service"
+path = "src/main.rs"
+
+[dependencies]
+mathscape-core.workspace = true
+mathscape-store.workspace = true
+mathscape-compress.workspace = true
+mathscape-evolve.workspace = true
+mathscape-reward.workspace = true
+mathscape-proof.workspace = true
+axum.workspace = true
+tokio.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true

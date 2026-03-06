@@ -1,0 +1,12 @@
+[package]
+name = "mathscape-reward"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Description length, compression ratio, novelty, meta-compression, fitness"
+
+[dependencies]
+mathscape-core.workspace = true
+mathscape-store.workspace = true
+mathscape-compress.workspace = true

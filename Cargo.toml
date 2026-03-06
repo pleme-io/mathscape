@@ -1,0 +1,62 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/mathscape-core",
+    "crates/mathscape-store",
+    "crates/mathscape-compress",
+    "crates/mathscape-evolve",
+    "crates/mathscape-reward",
+    "crates/mathscape-proof",
+    "crates/mathscape-policy",
+    "crates/mathscape-cli",
+    "crates/mathscape-mcp",
+    "crates/mathscape-service",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+repository = "https://github.com/pleme-io/mathscape"
+
+[workspace.dependencies]
+# Internal crates
+mathscape-core = { path = "crates/mathscape-core" }
+mathscape-store = { path = "crates/mathscape-store" }
+mathscape-compress = { path = "crates/mathscape-compress" }
+mathscape-evolve = { path = "crates/mathscape-evolve" }
+mathscape-reward = { path = "crates/mathscape-reward" }
+mathscape-proof = { path = "crates/mathscape-proof" }
+mathscape-policy = { path = "crates/mathscape-policy" }
+
+# Hashing
+blake3 = "1"
+
+# Storage
+redb = "2"
+rusqlite = { version = "0.32", features = ["bundled"] }
+
+# E-graph
+egg = "0.9"
+
+# Serialization
+bincode = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Async + HTTP (service binary)
+tokio = { version = "1", features = ["full"] }
+axum = "0.8"
+
+# MCP
+rmcp = { version = "0.1", features = ["server", "transport-io"] }
+
+# CLI
+clap = { version = "4", features = ["derive"] }
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
+# RNG
+rand = "0.8"

@@ -402,6 +402,8 @@ Detailed subsystem designs live in `docs/arch/`:
 | [storage](docs/arch/storage.md) | redb + SQLite schema, epoch transactions, memory budget, growth estimates |
 | [proofs](docs/arch/proofs.md) | Curry-Howard, e-graph verification, Lean 4 export, AI prover integration |
 | [mcp](docs/arch/mcp.md) | MCP interface: observe-only tools, security boundary, agent interaction patterns |
+| [service](docs/arch/service.md) | Service mode: HTTP endpoints, engine loop, Prometheus metrics, three binaries |
+| [deployment](docs/arch/deployment.md) | K8s deployment: Docker image, Helm chart, FluxCD, substrate patterns |
 
 ## The Three Computational Primitives
 
@@ -888,6 +890,45 @@ capability.
 | `mathscape-policy` | Optional RL policy network for guided mutation (Phase 7+) |
 | `mathscape-cli` | REPL for step-by-step epoch execution, population/library inspection, history queries |
 | `mathscape-mcp` | MCP server (stdio transport) — observe-only tools for agent interaction, `Arc<Engine>` read boundary |
+| `mathscape-service` | Long-running HTTP service — engine loop + health/metrics + read-only query API for K8s deployment |
+
+## Service Mode
+
+Mathscape runs as a long-running service for unattended operation.
+See [docs/arch/service.md](docs/arch/service.md) for full details.
+
+**Three binaries, one engine:**
+
+| Binary | Transport | Use case |
+|---|---|---|
+| `mathscape-service` | HTTP (8080 health/query, 9090 metrics) | K8s StatefulSet — leave it traversing, check in later |
+| `mathscape-mcp` | stdio (MCP protocol) | Local Claude Code agent interaction |
+| `mathscape-cli` | Terminal REPL | Interactive human exploration |
+
+The service binary auto-starts the engine loop and runs epochs
+continuously. All state persists to `/data/` (redb + SQLite).
+A crash mid-epoch rolls back to the previous complete epoch.
+
+The HTTP API mirrors the MCP query tools — same read-only semantics,
+same observe-don't-interfere boundary. No endpoint can alter the
+computation.
+
+## Deployment
+
+See [docs/arch/deployment.md](docs/arch/deployment.md) for full details.
+
+**Pipeline:** Nix build -> Docker image -> GHCR push -> Helm chart ->
+FluxCD HelmRelease -> K8s StatefulSet with PVC.
+
+**Docker image**: Built with `pkgs.dockerTools.buildLayeredImage`
+(Nix-native, no Dockerfile). Non-root, read-only rootfs, /data volume.
+
+**Helm chart**: `deploy/charts/mathscape/` depends on pleme-lib.
+StatefulSet with volumeClaimTemplates (10Gi default). Fully tested
+with helm-unittest.
+
+**Substrate patterns used**: `mkRustOverlay`, `mkRustDevShell`,
+`mkDarwinBuildInputs`, `mkImageReleaseApp`, `mkHelmSdlcApps`.
 
 ## Prior Art
 
@@ -937,9 +978,10 @@ capability.
 ## Development Plan
 
 ### Phase 0: Scaffold
-Scaffold the repo using substrate's `rust-library` builder for core crates
-and `rust-binary` for the CLI. Standard pleme-io flake structure with
-workspace Cargo.toml.
+Cargo workspace with 10 crates. flake.nix using substrate's rust overlay,
+`mkRustDevShell`, `mkImageReleaseApp`, `mkHelmSdlcApps`. Docker image via
+`buildLayeredImage`. Helm chart with pleme-lib dependency and helm-unittest.
+Verify: `nix develop` enters devShell, `cargo check` succeeds.
 
 ### Phase 1: Primitives + Expression Trees
 Implement `Point`, `Number`, `Fn`, `Apply`, `Symbol` as a Rust enum.
@@ -991,6 +1033,12 @@ observes the traversal but cannot interfere. Verify: agent can step
 through epochs, query library, read proofs, and narrate the discovery
 process without altering outcomes.
 
+### Phase 6.75: Service Mode + Docker + Helm
+HTTP service binary (`mathscape-service`) with Axum. Health, metrics,
+read-only query API. Docker image via `buildLayeredImage`. Helm chart
+(StatefulSet + PVC) with pleme-lib. helm-unittest tests. Verify: deploy
+to K8s, engine runs unattended, query API returns epoch metrics.
+
 ### Phase 7: RL Policy (stretch)
 Small policy network (simple MLP) trained via REINFORCE to guide
 mutation selection. State = expression encoding, action = mutation
@@ -999,17 +1047,33 @@ choice, reward = delta compression ratio.
 ## Build & Run
 
 ```bash
-nix build              # build all crates
-nix run .#cli          # launch the REPL
-nix run .#mcp          # start MCP server (stdio transport)
-nix run .#test         # run all tests
+# Development
+nix develop                    # devShell (Rust + SQLite + Helm + kubectl)
+cargo build                    # build all crates
+cargo test                     # run all tests
+cargo run -p mathscape-cli     # interactive REPL
+cargo run -p mathscape-service # local service (HTTP on 8080)
+
+# Docker
+nix build .#image              # build Docker image (Linux only)
+nix run .#release              # push multi-arch image to GHCR
+
+# MCP
+nix run .#mcp                  # start MCP server (stdio transport)
+
+# Helm
+nix run .#lint:mathscape       # lint chart
+nix run .#release:mathscape    # lint + package + push chart to OCI registry
 ```
 
 ## Conventions
 
 - **Language**: Rust (2024 edition)
-- **Build**: substrate builders via Nix
-- **Testing**: `cargo test` + `nix flake check`
+- **Build**: substrate builders via Nix (rust overlay, mkRustDevShell, mkImageReleaseApp, mkHelmSdlcApps)
+- **Docker**: `dockerTools.buildLayeredImage` (Nix-native, no Dockerfile)
+- **Helm**: pleme-lib library chart dependency, helm-unittest tests
+- **Deployment**: FluxCD HelmRelease -> K8s StatefulSet with PVC
+- **Testing**: `cargo test` + `nix flake check` + `helm unittest`
 - **Expression format**: S-expression — `(add (succ zero) (succ zero))`
 - **Library format**: Named rewrite rules — `add-identity: (add ?x zero) => ?x`
 - **Compression metrics**: Reported per-epoch as `CR`, `DL`, `novelty`, `|L|`

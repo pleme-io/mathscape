@@ -10,5 +10,7 @@ Detailed design documents for each Mathscape subsystem.
 | [storage.md](storage.md) | Storage architecture: redb expression store, SQLite metadata, epoch transactions, memory budget |
 | [proofs.md](proofs.md) | Proof system: Curry-Howard, e-graph verification, proof certificates, Lean 4 export |
 | [mcp.md](mcp.md) | MCP interface: observe-only tools, security boundary, interaction patterns |
+| [service.md](service.md) | Service mode: HTTP endpoints, engine loop, Prometheus metrics, three binaries |
+| [deployment.md](deployment.md) | K8s deployment: Docker image, Helm chart, FluxCD, substrate patterns |
 
 See [CLAUDE.md](../../CLAUDE.md) for the unified project vision and development plan.

@@ -1,0 +1,71 @@
+suite: service tests
+templates:
+  - templates/service.yaml
+tests:
+  - it: should render a Service
+    asserts:
+      - hasDocuments:
+          count: 2
+
+  - it: should render a headless service
+    documentIndex: 0
+    asserts:
+      - isKind:
+          of: Service
+      - equal:
+          path: spec.clusterIP
+          value: None
+
+  - it: should render a regular ClusterIP service
+    documentIndex: 1
+    asserts:
+      - isKind:
+          of: Service
+      - equal:
+          path: spec.type
+          value: ClusterIP
+
+  - it: should expose http and metrics ports on headless service
+    documentIndex: 0
+    asserts:
+      - contains:
+          path: spec.ports
+          content:
+            name: http
+            port: 8080
+            targetPort: http
+            protocol: TCP
+      - contains:
+          path: spec.ports
+          content:
+            name: metrics
+            port: 9090
+            targetPort: metrics
+            protocol: TCP
+
+  - it: should expose http and metrics ports on regular service
+    documentIndex: 1
+    asserts:
+      - contains:
+          path: spec.ports
+          content:
+            name: http
+            port: 8080
+            targetPort: http
+            protocol: TCP
+      - contains:
+          path: spec.ports
+          content:
+            name: metrics
+            port: 9090
+            targetPort: metrics
+            protocol: TCP
+
+  - it: should have headless service name with -headless suffix
+    release:
+      name: mathscape
+    documentIndex: 0
+    asserts:
+      - equal:
+          path: metadata.name
+          value: mathscape-headless

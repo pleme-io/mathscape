@@ -1,0 +1,12 @@
+[package]
+name = "mathscape-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Point, Number, Fn, Term enum, hash-consing, evaluation"
+
+[dependencies]
+blake3.workspace = true
+serde.workspace = true
+bincode.workspace = true

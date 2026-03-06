@@ -1,0 +1,12 @@
+[package]
+name = "mathscape-evolve"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Genetic operators, population management, tournament selection, MAP-Elites"
+
+[dependencies]
+mathscape-core.workspace = true
+mathscape-store.workspace = true
+rand.workspace = true

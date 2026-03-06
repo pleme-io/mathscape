@@ -1,0 +1,11 @@
+apiVersion: v2
+name: mathscape
+description: Evolutionary symbolic compression engine — discovers mathematical abstractions
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+
+dependencies:
+  - name: pleme-lib
+    version: "~0.4.0"
+    repository: "file://../../../../helmworks/charts/pleme-lib"

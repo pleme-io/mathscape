@@ -1,0 +1,11 @@
+[package]
+name = "mathscape-compress"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Anti-unification, e-graph integration (egg), library extraction"
+
+[dependencies]
+mathscape-core.workspace = true
+egg.workspace = true

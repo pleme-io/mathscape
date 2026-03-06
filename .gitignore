@@ -1,0 +1,7 @@
+/target
+/data
+*.redb
+*.sqlite
+*.sqlite-journal
+result
+result-*

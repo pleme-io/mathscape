@@ -1,0 +1,204 @@
+# mathscape — Evolutionary symbolic compression engine
+# Defaults for single-replica StatefulSet with persistent storage.
+
+image:
+  # -- Image repository (set at deploy time via HelmRelease patches)
+  repository: ""
+  # -- Image tag
+  tag: latest
+  # -- Image pull policy
+  pullPolicy: Always
+
+# -- Image pull secrets for private registries
+imagePullSecrets: []
+
+# -- Override the chart name
+nameOverride: ""
+# -- Override the full release name
+fullnameOverride: ""
+
+# -- Number of replicas (single replica — deterministic engine)
+replicaCount: 1
+
+# -- Container ports
+ports:
+  - name: http
+    containerPort: 8080
+    protocol: TCP
+  - name: metrics
+    containerPort: 9090
+    protocol: TCP
+
+# -- Service configuration
+service:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+      protocol: TCP
+    - name: metrics
+      port: 9090
+      targetPort: metrics
+      protocol: TCP
+
+# -- Environment variables
+env:
+  - name: RUST_LOG
+    value: "info,mathscape=debug"
+  - name: DATA_DIR
+    value: "/data"
+  - name: LOG_FORMAT
+    value: "json"
+
+# -- Environment variables from ConfigMaps/Secrets
+envFrom: []
+
+# -- Resource requests and limits (computation-heavy workload)
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: 1000m
+    memory: 2Gi
+
+# -- Persistent storage configuration
+persistence:
+  # -- Enable persistent storage
+  enabled: true
+  # -- Storage size for mathematical expression databases (redb + SQLite)
+  size: 10Gi
+  # -- Storage class (empty string uses cluster default)
+  storageClass: ""
+  # -- Mount path inside the container
+  mountPath: /data
+  # -- Access modes for the PVC
+  accessModes:
+    - ReadWriteOnce
+
+# -- Health check configuration
+health:
+  # -- Liveness probe path
+  path: /healthz
+  # -- Readiness probe path
+  readyPath: /readyz
+  # -- Port name for probes
+  port: http
+  livenessInitialDelay: 5
+  livenessPeriod: 10
+  livenessFailureThreshold: 3
+  readinessInitialDelay: 5
+  readinessPeriod: 5
+  readinessFailureThreshold: 2
+
+# -- Monitoring configuration
+monitoring:
+  # -- Enable ServiceMonitor creation
+  enabled: true
+  # -- Metrics port name
+  port: metrics
+  # -- Metrics path
+  path: /metrics
+  # -- Scrape interval
+  interval: 30s
+  # -- Scrape timeout
+  scrapeTimeout: 10s
+
+# -- NetworkPolicy configuration
+networkPolicy:
+  # -- Enable NetworkPolicy creation
+  enabled: true
+  # -- Allow ingress from Prometheus for scraping
+  allowPrometheus: true
+  # -- Allow DNS egress
+  allowDns: true
+  # -- Additional ingress rules
+  additionalIngress: []
+  # -- Additional egress rules
+  additionalEgress: []
+
+# -- Pod security context
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  fsGroup: 1000
+
+# -- Container security context
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL
+
+# -- Service account configuration
+serviceAccount:
+  # -- Create a service account
+  create: true
+  # -- Annotations to add to the service account
+  annotations: {}
+  # -- Name override (defaults to fullname)
+  name: ""
+
+# -- PodDisruptionBudget configuration (disabled by default — single replica)
+pdb:
+  enabled: false
+  minAvailable: 1
+
+# -- Termination grace period
+terminationGracePeriodSeconds: 30
+
+# -- Pod annotations
+podAnnotations: {}
+
+# -- Node selector
+nodeSelector: {}
+
+# -- Tolerations
+tolerations: []
+
+# -- Affinity rules
+affinity: {}
+
+# -- Topology spread constraints
+topologySpreadConstraints: []
+
+# -- Priority class name
+priorityClassName: ""
+
+# -- Container command override
+command: []
+
+# -- Container args override
+args: []
+
+# -- Additional labels for all resources
+additionalLabels: {}
+
+# -- Resource-level annotations
+annotations: {}
+
+# -- ConfigMaps to create
+configMaps: []
+
+# -- Downward API environment variables (POD_NAME, POD_NAMESPACE, NODE_NAME)
+downwardApi:
+  enabled: false
+
+# -- Startup probe configuration (disabled by default)
+startupProbe:
+  enabled: false
+  path: /healthz
+  port: http
+  initialDelaySeconds: 0
+  periodSeconds: 5
+  failureThreshold: 30
+
+# -- Istio sidecar configuration
+istio:
+  enabled: false
+
+# -- Attestation framework integration
+attestation:
+  enabled: false

@@ -1,0 +1,23 @@
+{{/* Headless service for StatefulSet pod DNS */}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "pleme-lib.fullname" . }}-headless
+  namespace: {{ include "pleme-lib.namespace" . }}
+  labels:
+    {{- include "pleme-lib.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  clusterIP: None
+  ports:
+    {{- range (.Values.service).ports }}
+    - name: {{ .name }}
+      port: {{ .port }}
+      targetPort: {{ .targetPort }}
+      protocol: {{ .protocol | default "TCP" }}
+    {{- end }}
+  selector:
+    {{- include "pleme-lib.selectorLabels" . | nindent 4 }}
+---
+{{/* Regular ClusterIP service for HTTP access */}}
+{{- include "pleme-lib.service" . }}
