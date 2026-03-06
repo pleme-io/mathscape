@@ -23,6 +23,10 @@
     };
 
     flake-utils.url = "github:numtide/flake-utils";
+    devenv = {
+      url = "github:cachix/devenv";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
   outputs = {
@@ -61,7 +65,7 @@
       linuxSystems = ["x86_64-linux" "aarch64-linux"];
 
       commonBuildInputs =
-        [pkgs.sqlite pkgs.pkg-config]
+        [pkgs.openssl pkgs.pkg-config pkgs.postgresql]
         ++ darwinBuildInputs;
 
       # ── Packages ─────────────────────────────────────────────────────
@@ -81,6 +85,7 @@
       service = mkMathscape {pname = "mathscape-service";};
       cli = mkMathscape {pname = "mathscape-cli";};
       mcp = mkMathscape {pname = "mathscape-mcp";};
+      db = mkMathscape {pname = "mathscape-db";};
 
       # ── Docker image (Linux only) ───────────────────────────────────
       mkImage = imgSystem: let
@@ -105,6 +110,7 @@
             Env = [
               "RUST_LOG=info,mathscape=debug"
               "DATA_DIR=/data"
+              "DATABASE_URL=postgres://mathscape:mathscape@localhost/mathscape"
               "LOG_FORMAT=json"
               "SSL_CERT_FILE=${imgPkgs.cacert}/etc/ssl/certs/ca-bundle.crt"
             ];
@@ -137,6 +143,7 @@
           mathscape-service = service;
           mathscape-cli = cli;
           mathscape-mcp = mcp;
+          mathscape-db = db;
         }
         // lib.optionalAttrs (builtins.elem system linuxSystems) {
           image = mkImage system;
@@ -157,6 +164,10 @@
             type = "app";
             program = "${mcp}/bin/mathscape-mcp";
           };
+          db = {
+            type = "app";
+            program = "${db}/bin/mathscape-db";
+          };
           release = substrateLib.mkImageReleaseApp {
             name = "mathscape";
             inherit registry mkImage;
@@ -166,16 +177,18 @@
 
       # ── Dev shell (using substrate mkRustDevShell) ─────────────────
       devShells.default = substrateLib.mkRustDevShell {
-        withSqlite = true;
         withHelm = true;
         withKubernetes = true;
         withDocker = true;
         extraPackages = with pkgs; [
           rust-analyzer
           cargo-watch
+          postgresql
+          sea-orm-cli
         ];
         extraEnv = {
           DATA_DIR = "./data";
+          DATABASE_URL = "postgres://localhost/mathscape";
           RUST_LOG = "debug";
         };
       };
