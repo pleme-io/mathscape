@@ -124,6 +124,106 @@ into a larger space.
 algebraically prohibited from scoring points by rearranging what it
 already has. It must leave.
 
+### Recursive Compression and Reward Evolution
+
+The most powerful discoveries are not those that compress raw expressions
+but those that compress *the library itself*. When a new Symbol
+simplifies already-discovered Symbols, it is a higher-order abstraction
+— a compression of compressions. These are the discoveries that open
+entirely new dimensions of the problem space.
+
+**Example — the discovery of "identity element":**
+
+The library contains:
+```
+add-identity:  (add ?x zero) => ?x
+mul-identity:  (mul ?x one)  => ?x
+```
+
+These are two independent Symbols. But a new abstraction can compress
+them both:
+```
+identity-element: (op ?x (identity op)) => ?x
+    where add-identity = identity-element[op=add, identity=zero]
+    and   mul-identity = identity-element[op=mul, identity=one]
+```
+
+This is not just a new Symbol — it *retroactively simplifies the
+library*. Two entries become instantiations of one. The library itself
+gets shorter. And the new Symbol generates a *search directive*: for
+any future operator `op` the system discovers, it should look for an
+identity element. It predicts the existence of structure it hasn't
+seen yet.
+
+#### Meta-Compression Reward
+
+This recursive compression introduces a third reward term beyond
+compression ratio and novelty:
+
+```
+R(C, L, L_new) = alpha * CR(C, L_new)
+               + beta  * novelty(L_new - L, L)
+               + gamma * meta_compression(L, L_new)
+
+meta_compression(L, L_new) = 1 - |L_new| / |L_expanded|
+
+where L_expanded is L_new with all meta-symbols expanded back to
+their base definitions
+```
+
+`meta_compression` measures how much the new library compresses the old
+one. A value of 0 means no library-level compression occurred. A value
+of 0.5 means the library definitions themselves halved in total size.
+
+#### Dimensional Escape
+
+Meta-compressions don't just save space — they reveal **new problem
+space dimensions**. When `identity-element` is discovered, the system
+implicitly learns that operators can be parameterized and that structural
+properties (identity, associativity, commutativity) are themselves
+objects that vary across operators. This is the jump from arithmetic
+to algebra — from "addition has properties" to "operators have
+properties."
+
+The reward function should adapt when meta-compressions occur:
+
+```
+When meta_compression(L, L_new) > threshold:
+  - Increase gamma (reward more meta-compression — there may be more)
+  - Generate dimensional probes: for each meta-symbol, instantiate it
+    with every known operator and check which instances hold
+  - Bias mutations toward the new dimension (e.g., try other operators
+    in the slot where identity-element was parameterized)
+```
+
+This is **reward function evolution** — not a fixed objective but one
+that reshapes itself as the system's understanding deepens. The three
+regimes become:
+
+| Regime | Dominant term | What the system does |
+|---|---|---|
+| **Compression** | `alpha * CR` | Extract patterns within a domain |
+| **Novelty escape** | `beta * novelty` | Leave exhausted domains for new ones |
+| **Dimensional discovery** | `gamma * meta_compression` | Find cross-domain structure that compresses the library itself |
+
+The third regime is the most powerful because it doesn't just find new
+territory — it reveals that territories previously thought separate
+are *instances of the same structure*. This is how mathematics discovers
+its deepest unifications: group theory unifies symmetries across geometry
+and number theory, category theory unifies group theory and topology,
+homotopy type theory unifies category theory and logic.
+
+Each dimensional discovery doesn't just compress — it generates a new
+**axis of variation** that the evolutionary search can explore. Before
+`identity-element`, the system searched over specific operator-value
+pairs. After it, the system searches over *structural properties of
+operators* — a qualitatively different and more powerful search space.
+
+The compression stack becomes self-reinforcing: compressions power
+discovery, discoveries yield meta-compressions, meta-compressions
+reshape the reward landscape to seek further dimensional structure.
+The system bootstraps its own capacity to explore.
+
 ## The Three Computational Primitives
 
 All of mathematics can be explored from three irreducible kinds of object:
