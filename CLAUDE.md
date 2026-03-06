@@ -401,6 +401,7 @@ Detailed subsystem designs live in `docs/arch/`:
 | [reward](docs/arch/reward.md) | Adaptive weight schedule, continuous irreducibility, dimensional probes |
 | [storage](docs/arch/storage.md) | redb + SQLite schema, epoch transactions, memory budget, growth estimates |
 | [proofs](docs/arch/proofs.md) | Curry-Howard, e-graph verification, Lean 4 export, AI prover integration |
+| [mcp](docs/arch/mcp.md) | MCP interface: observe-only tools, security boundary, agent interaction patterns |
 
 ## The Three Computational Primitives
 
@@ -826,6 +827,54 @@ WITH RECURSIVE ancestors AS (
 SELECT * FROM ancestors;
 ```
 
+## MCP Interface — Observe, Don't Interfere
+
+Mathscape exposes an MCP (Model Context Protocol) server for agent
+interaction. The interface is strictly **read-and-trigger** — an agent
+can run epochs and query all results, but cannot alter the computation.
+
+See [docs/arch/mcp.md](docs/arch/mcp.md) for the full tool reference.
+
+### What MCP Can Do
+
+- **Trigger epochs**: `step` (one epoch), `run` (N epochs), `run_until`
+  (stop on compression plateau, novelty spike, etc.)
+- **Query in-memory state**: population, library, MAP-Elites archive,
+  reward weights, engine status
+- **Query database history**: epoch metrics, symbol discovery timeline,
+  expression trees, lineage chains, proof certificates, eval traces
+- **Visualization helpers**: compression curves, phase transitions,
+  archive heatmaps, pretty-printed expressions and proofs
+
+### What MCP Cannot Do
+
+- Alter the reward function, weights, mutation operators, or selection logic
+- Inject expressions into the population or modify library entries
+- Compute or simulate an epoch outside the engine
+- Override compression, novelty, or meta-compression calculations
+- Modify any stored data (expressions, proofs, lineage, metrics)
+
+### Why This Boundary Exists
+
+Mathscape is an observable experiment. The search dynamics — compression
+equilibrium, novelty escape, dimensional discovery — emerge from the
+fixed algorithm interacting with the fixed primitives. If an external
+agent perturbs the computation, the traversal is no longer reproducible
+and discoveries lose their inherent proof status. The determinism
+guarantee (same inputs + same algorithm = same outputs) breaks the
+moment an external actor injects state.
+
+**The MCP interface is a one-way glass: full visibility, zero influence.**
+
+### Security Enforcement
+
+The boundary is enforced at the Rust type level. The MCP handler holds
+an `Arc<Engine>` (shared read-only reference) and an `mpsc::Sender` for
+`EngineCommand` (step/run signals only). No `&mut Engine` is ever
+exposed across the MCP boundary. There is no API surface to reach
+internal state mutably — the interface simply doesn't expose the
+capability.
+
 ## Rust Crate Structure
 
 | Crate | Purpose |
@@ -838,6 +887,7 @@ SELECT * FROM ancestors;
 | `mathscape-reward` | Description length, compression ratio, novelty scoring, meta-compression, combined fitness |
 | `mathscape-policy` | Optional RL policy network for guided mutation (Phase 7+) |
 | `mathscape-cli` | REPL for step-by-step epoch execution, population/library inspection, history queries |
+| `mathscape-mcp` | MCP server (stdio transport) — observe-only tools for agent interaction, `Arc<Engine>` read boundary |
 
 ## Prior Art
 
@@ -933,6 +983,14 @@ REPL with commands: `step` (one epoch), `run N` (N epochs), `pop`
 metrics). Step-by-step execution to observe the system bootstrapping
 from primitives.
 
+### Phase 6.5: MCP Server
+MCP server over stdio using `rmcp`. Read-only query tools for all
+engine state (population, library, metrics, proofs, lineage). Execution
+tools limited to step/run/run_until. No mutation tools — the agent
+observes the traversal but cannot interfere. Verify: agent can step
+through epochs, query library, read proofs, and narrate the discovery
+process without altering outcomes.
+
 ### Phase 7: RL Policy (stretch)
 Small policy network (simple MLP) trained via REINFORCE to guide
 mutation selection. State = expression encoding, action = mutation
@@ -943,6 +1001,7 @@ choice, reward = delta compression ratio.
 ```bash
 nix build              # build all crates
 nix run .#cli          # launch the REPL
+nix run .#mcp          # start MCP server (stdio transport)
 nix run .#test         # run all tests
 ```
 
