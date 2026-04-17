@@ -3,6 +3,7 @@ use mathscape_axiom_bridge::{run_promotion, BridgeConfig};
 use mathscape_compress::{extract::ExtractConfig, CompressionGenerator};
 use mathscape_config::Config;
 use mathscape_core::{
+    control::{Allocator, EpochAction, RealizationPolicy, RegimeDetector, RewardEstimator},
     corpus::{CorpusLog, CorpusSnapshot},
     epoch::{
         AcceptanceCertificate, Artifact, Epoch, EpochTrace, Generator, InMemoryRegistry,
@@ -259,22 +260,55 @@ struct EpochSummary {
     compression_ratio: f64,
     description_length: usize,
     novelty_total: f64,
+    regime: mathscape_core::control::Regime,
+    action: EpochAction,
+}
+
+/// Control-plane state that persists across epochs. Consolidated so
+/// the CLI can print regime + ΔDL trajectory without threading
+/// through multiple args.
+struct ControlState {
+    allocator: Allocator,
+    detector: RegimeDetector,
+}
+
+impl ControlState {
+    fn new(policy: RealizationPolicy) -> Self {
+        let estimator = RewardEstimator::new(0.3);
+        Self {
+            allocator: Allocator::new(policy, estimator),
+            detector: RegimeDetector::new(10),
+        }
+    }
 }
 
 fn run_epoch(
     config: &Config,
     pop: &mut mathscape_evolve::Population,
     epoch: &mut MathscapeEpoch,
+    control: &mut ControlState,
     rng: &mut impl rand::Rng,
 ) -> EpochSummary {
     let corpus: Vec<_> = pop.individuals.iter().map(|i| i.term.clone()).collect();
 
-    // Gates 1–3 (discovery pass) happen here.
-    let trace = epoch.step(&corpus);
+    // Allocator chooses the action for this epoch based on estimator
+    // state. Promote/Migrate are epoch-level no-ops (executed out-of-
+    // crate by the bridge); for now the CLI only sees Reinforce and
+    // Discover, which is the common case.
+    let action = control
+        .allocator
+        .choose(corpus.len(), epoch.registry.len());
+
+    // Gates 1–3 (discovery pass) or the reinforce scaffold, depending
+    // on action.
+    let trace = epoch.step_with_action(&corpus, action.clone());
+
+    // Feed the trace back into the estimator + detector.
+    control.allocator.estimator.update(&trace.events);
+    let regime = control.detector.observe(&trace);
 
     // Population feedback: re-compute an aggregate reward view over the
-    // post-epoch library so fitness signal stays comparable. The NEW
-    // rules added this epoch come from the trace's Accept events.
+    // post-epoch library so fitness signal stays comparable.
     let new_rules: Vec<_> = trace
         .events
         .iter()
@@ -299,6 +333,8 @@ fn run_epoch(
         compression_ratio: result.compression_ratio,
         description_length: result.description_length,
         novelty_total: result.novelty_total,
+        regime,
+        action,
     }
 }
 
@@ -307,28 +343,38 @@ fn run_epochs(config: &Config, n_epochs: usize) {
     let mut pop = config.to_population();
     pop.initialize(&mut rng);
     let mut epoch = build_epoch(config);
+    let mut control = ControlState::new(RealizationPolicy::default());
 
     println!(
         "Running {n_epochs} epochs with population size {}...\n",
         config.population.target_size
     );
     println!(
-        "{:>6} {:>8} {:>6} {:>8} {:>5} {:>8} {:>9}",
-        "Epoch", "CR", "DL", "Novelty", "|L|", "Diversity", "Accepted"
+        "{:>6} {:>10} {:>9} {:>8} {:>6} {:>8} {:>5} {:>5}",
+        "Epoch", "Action", "Regime", "CR", "DL", "Novelty", "|L|", "Acc"
     );
-    println!("{}", "-".repeat(60));
+    println!("{}", "-".repeat(70));
 
     for epoch_num in 1..=n_epochs {
-        let summary = run_epoch(config, &mut pop, &mut epoch, &mut rng);
+        let summary = run_epoch(config, &mut pop, &mut epoch, &mut control, &mut rng);
+
+        let action_str = match summary.action {
+            EpochAction::Discover => "Discover",
+            EpochAction::Reinforce => "Reinforce",
+            EpochAction::Promote(_) => "Promote",
+            EpochAction::Migrate(_) => "Migrate",
+        };
+        let regime_str = format!("{:?}", summary.regime);
 
         println!(
-            "{:>6} {:>8.4} {:>6} {:>8.4} {:>5} {:>8.4} {:>9}",
+            "{:>6} {:>10} {:>9} {:>8.4} {:>6} {:>8.4} {:>5} {:>5}",
             epoch_num,
+            action_str,
+            regime_str,
             summary.compression_ratio,
             summary.description_length,
             summary.novelty_total,
             epoch.registry.len(),
-            pop.diversity(),
             summary.trace.accepted,
         );
     }
@@ -347,6 +393,7 @@ fn repl(config: &Config) {
     let mut pop = config.to_population();
     pop.initialize(&mut rng);
     let mut epoch = build_epoch(config);
+    let mut control = ControlState::new(RealizationPolicy::default());
     let mut epoch_ctr = 0u64;
 
     println!("Mathscape REPL — type 'help' for commands\n");
@@ -376,7 +423,7 @@ fn repl(config: &Config) {
             }
             "step" | "s" => {
                 epoch_ctr += 1;
-                let summary = run_epoch(config, &mut pop, &mut epoch, &mut rng);
+                let summary = run_epoch(config, &mut pop, &mut epoch, &mut control, &mut rng);
                 println!(
                     "  epoch={epoch_ctr} CR={:.4} DL={} novelty={:.4} |L|={} accepted={}",
                     summary.compression_ratio,
@@ -441,7 +488,7 @@ fn repl(config: &Config) {
                 if let Ok(n) = cmd[4..].trim().parse::<usize>() {
                     for _ in 0..n {
                         epoch_ctr += 1;
-                        run_epoch(config, &mut pop, &mut epoch, &mut rng);
+                        run_epoch(config, &mut pop, &mut epoch, &mut control, &mut rng);
                     }
                     println!("  ran {n} epochs (now at epoch {epoch_ctr})");
                     println!(

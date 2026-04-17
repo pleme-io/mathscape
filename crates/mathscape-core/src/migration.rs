@@ -15,7 +15,6 @@
 //! promoted artifact becomes a Primitive; the report is auditable.
 
 use crate::epoch::Registry;
-use crate::hash::TermRef;
 use crate::lifecycle::{AxiomIdentity, ProofStatus};
 use crate::promotion::{MigrationReport, PromotionSignal};
 
@@ -55,6 +54,7 @@ mod tests {
     use super::*;
     use crate::epoch::{AcceptanceCertificate, Artifact, InMemoryRegistry};
     use crate::eval::RewriteRule;
+    use crate::hash::TermRef;
     use crate::term::Term;
 
     fn mk_artifact(name: &str, sym: u32) -> Artifact {
