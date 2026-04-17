@@ -185,15 +185,16 @@ fn run_flex(label: &str, corpus: Vec<Term>, max_layers: u32, max_epochs_per_laye
     for layer in &report.layers {
         let reduced = matches!(layer.terminal_verdict, ReductionVerdict::Reduced);
         println!(
-            "  layer {}: {} epochs, reduced={}, hit_cap={}, ΔDL-disc={:.2}, ΔDL-reinf={:.2}, terminal_root={}",
+            "  layer {}: {} epochs, reduced={}, hit_cap={}, ΔDL-disc={:.2}, ΔDL-reinf={:.2}",
             layer.layer_id,
             layer.epoch_count(),
             reduced,
             layer.hit_epoch_cap,
             layer.total_discovery_delta(),
             layer.total_reinforce_delta(),
-            layer.terminal_root,
         );
+        println!("    terminal_root: {}", layer.terminal_root);
+        println!("    diagnostic:    {}", layer.diagnostic.narrative());
     }
 
     println!("\n▶ Migrations");

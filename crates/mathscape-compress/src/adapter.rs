@@ -9,7 +9,7 @@
 use crate::extract::{extract_rules, ExtractConfig};
 use mathscape_core::{
     epoch::{Artifact, Candidate, Generator},
-    eval::RewriteRule,
+    eval::{pattern_match, RewriteRule},
     term::{SymbolId, Term},
 };
 
@@ -51,8 +51,39 @@ impl Generator for CompressionGenerator {
             &mut self.next_symbol_id,
             &self.config,
         );
-        rules
-            .into_iter()
+        // Generator-side dedup (inter-batch AND intra-batch): drop
+        // any candidate whose lhs is pattern-equivalent to either an
+        // existing library entry's lhs or another candidate already
+        // accepted in this same batch.
+        //
+        // Inter-batch catches "I already extracted this pattern last
+        // epoch." Intra-batch catches "anti-unification produced two
+        // different candidate terms with equivalent lhs patterns" —
+        // observed as S_001 and S_002 with identical lhs but
+        // different Symbol ids in rhs. Both are identical
+        // rediscovery; the reinforcement pass would clean them up
+        // via mutual subsumption, but catching them here saves a
+        // round-trip through the collapse machinery.
+        //
+        // Two lhs terms are "pattern-equivalent" iff each
+        // pattern-matches the other (equivalence class under
+        // rewriting).
+        let equivalent =
+            |a: &Term, b: &Term| pattern_match(a, b).is_some() && pattern_match(b, a).is_some();
+
+        let mut kept: Vec<RewriteRule> = Vec::new();
+        for rule in rules {
+            // Inter-batch: already in library?
+            if existing.iter().any(|e| equivalent(&rule.lhs, &e.lhs)) {
+                continue;
+            }
+            // Intra-batch: equivalent to a candidate already kept?
+            if kept.iter().any(|k| equivalent(&rule.lhs, &k.lhs)) {
+                continue;
+            }
+            kept.push(rule);
+        }
+        kept.into_iter()
             .map(|rule| Candidate {
                 rule,
                 origin: self.origin.clone(),

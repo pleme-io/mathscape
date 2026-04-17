@@ -28,7 +28,9 @@ use crate::hash::TermRef;
 use crate::lifecycle::AxiomIdentity;
 use crate::migration::migrate_library;
 use crate::promotion::{MigrationReport, PromotionSignal};
-use crate::reduction::{check_reduction, reduction_pressure, ReductionPolicy, ReductionVerdict};
+use crate::reduction::{
+    check_reduction, reduction_pressure, ReductionBarrier, ReductionPolicy, ReductionVerdict,
+};
 use crate::term::Term;
 use serde::{Deserialize, Serialize};
 
@@ -47,6 +49,135 @@ pub struct LayerEpochSnapshot {
     pub registry_root: TermRef,
 }
 
+/// Why a layer terminated. Populated by the orchestrator; makes
+/// the machine's blockers a first-class output — if the machine
+/// can identify what it couldn't do, the identification itself
+/// is part of its algorithm.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum DiscoveryDiagnostic {
+    /// Verdict was `Reduced` — the layer converged cleanly under
+    /// its policy. Nothing more to discover at this layer depth.
+    ReducedCleanly,
+    /// Every remaining barrier is `AdvancableStatus`. The machine
+    /// needs a reinforcement step beyond subsumption — e-graph
+    /// (gate V), Lean export (gate X), or canonicality window
+    /// (gate A) — to advance rule statuses. Currently none of
+    /// those are wired; that's the next machinery to build.
+    MissingStatusAdvancement { count: usize },
+    /// Every remaining barrier is `SubsumablePair`. The reinforcement
+    /// pass didn't fire the collapses. Usually means the allocator
+    /// got stuck on Discover (known pressure-awareness gap).
+    StuckOnDiscover { pending_collapses: usize },
+    /// Barriers include both types. The layer needs multiple
+    /// machinery upgrades to reduce.
+    MixedBarriers {
+        advancable: usize,
+        subsumable_pairs: usize,
+    },
+    /// The layer ran past its `max_epochs` cap without reducing.
+    /// Carries the classification of barriers at termination so
+    /// tuning the cap or the machinery it's blocked on is visible.
+    HitEpochCap {
+        advancable: usize,
+        subsumable_pairs: usize,
+    },
+    /// The library is empty and the generator produced nothing —
+    /// the corpus has no extractable patterns under the current
+    /// policy's compression thresholds.
+    EmptyLibraryNoDiscovery,
+}
+
+impl DiscoveryDiagnostic {
+    /// Classify the reduction verdict + hit-cap flag into a
+    /// structured termination reason. `library_size` disambiguates
+    /// "reduced-cleanly" from "empty library".
+    #[must_use]
+    pub fn classify(
+        verdict: &ReductionVerdict,
+        hit_cap: bool,
+        library_size: usize,
+    ) -> Self {
+        if hit_cap {
+            let (advancable, subsumable_pairs) = match verdict {
+                ReductionVerdict::Reduced => (0, 0),
+                ReductionVerdict::Barriers(bs) => {
+                    let mut a = 0;
+                    let mut s = 0;
+                    for b in bs {
+                        match b {
+                            ReductionBarrier::AdvancableStatus { .. } => a += 1,
+                            ReductionBarrier::SubsumablePair { .. } => s += 1,
+                        }
+                    }
+                    (a, s)
+                }
+            };
+            return Self::HitEpochCap { advancable, subsumable_pairs };
+        }
+        match verdict {
+            ReductionVerdict::Reduced => {
+                if library_size == 0 {
+                    Self::EmptyLibraryNoDiscovery
+                } else {
+                    Self::ReducedCleanly
+                }
+            }
+            ReductionVerdict::Barriers(bs) => {
+                let mut advancable = 0usize;
+                let mut subsumable = 0usize;
+                for b in bs {
+                    match b {
+                        ReductionBarrier::AdvancableStatus { .. } => advancable += 1,
+                        ReductionBarrier::SubsumablePair { .. } => subsumable += 1,
+                    }
+                }
+                match (advancable, subsumable) {
+                    (_, 0) => Self::MissingStatusAdvancement { count: advancable },
+                    (0, _) => Self::StuckOnDiscover {
+                        pending_collapses: subsumable,
+                    },
+                    _ => Self::MixedBarriers {
+                        advancable,
+                        subsumable_pairs: subsumable,
+                    },
+                }
+            }
+        }
+    }
+
+    /// Human-readable narrative of what the diagnostic means and
+    /// what machinery would unblock it. Used by the CLI / flex
+    /// output to surface findings.
+    #[must_use]
+    pub fn narrative(&self) -> String {
+        match self {
+            Self::ReducedCleanly => {
+                "layer reduced cleanly under policy — nothing more to discover at this depth".into()
+            }
+            Self::MissingStatusAdvancement { count } => format!(
+                "{count} rule(s) cannot advance past Conjectured. \
+                 Need: reinforcement beyond subsumption — gate V (e-graph equivalence), \
+                 gate X (Lean export), or gate A (canonicality window). This is the \
+                 NEXT MACHINERY TO BUILD."
+            ),
+            Self::StuckOnDiscover { pending_collapses } => format!(
+                "{pending_collapses} pending subsumption collapse(s) but allocator \
+                 stayed on Discover. Need: pressure-aware allocator (native; currently \
+                 bypassed only in Epoch::step_auto workaround)."
+            ),
+            Self::MixedBarriers { advancable, subsumable_pairs } => format!(
+                "{advancable} advancement barrier(s) + {subsumable_pairs} subsumable pair(s). \
+                 Need both: real status advancement AND pressure-aware allocator."
+            ),
+            Self::HitEpochCap { advancable, subsumable_pairs } => format!(
+                "epoch cap hit with {advancable} advancable + {subsumable_pairs} subsumable \
+                 barriers. Either raise max_epochs or build the machinery named above."
+            ),
+            Self::EmptyLibraryNoDiscovery => "corpus yielded no extractable patterns under current policy".into(),
+        }
+    }
+}
+
 /// Terminal state + telemetry of a single layer run.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LayerTrajectory {
@@ -60,6 +191,9 @@ pub struct LayerTrajectory {
     pub terminal_root: TermRef,
     /// Whether the layer hit max_epochs before reducing.
     pub hit_epoch_cap: bool,
+    /// Why the layer terminated — structured diagnostic the caller
+    /// can act on.
+    pub diagnostic: DiscoveryDiagnostic,
 }
 
 impl LayerTrajectory {
@@ -169,12 +303,15 @@ where
 
     let terminal_verdict = check_reduction(&epoch.registry, policy);
     let terminal_root = epoch.registry.root();
+    let diagnostic =
+        DiscoveryDiagnostic::classify(&terminal_verdict, hit_epoch_cap, epoch.registry.len());
     LayerTrajectory {
         layer_id,
         epochs,
         terminal_verdict,
         terminal_root,
         hit_epoch_cap,
+        diagnostic,
     }
 }
 
