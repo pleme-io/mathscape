@@ -9,13 +9,15 @@ pub mod hash;
 pub mod lifecycle;
 pub mod parse;
 pub mod promotion;
+pub mod promotion_gate;
 pub mod term;
 #[cfg(any(test, feature = "test-helpers"))]
 pub mod test_helpers;
 pub mod value;
 
 pub use control::{
-    Allocator, EpochAction, Regime, RegimeWeights, RealizationPolicy, RewardEstimator,
+    Allocator, EpochAction, Regime, RegimeDetector, RegimeWeights, RealizationPolicy,
+    RewardEstimator,
 };
 pub use epoch::{
     AcceptanceCertificate, Artifact, Candidate, Emitter, Epoch, EpochTrace, Generator,
@@ -25,5 +27,6 @@ pub use event::{Event, EventCategory, StatusAdvance};
 pub use hash::TermRef;
 pub use lifecycle::{AxiomIdentity, DemotionReason, ProofStatus};
 pub use promotion::{CorpusId, MigrationReport, PromotionSignal};
+pub use promotion_gate::{ArtifactHistory, PromotionGate, ThresholdGate};
 pub use term::{StoredTerm, SymbolId, Term};
 pub use value::Value;

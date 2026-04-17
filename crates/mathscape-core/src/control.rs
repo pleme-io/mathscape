@@ -6,11 +6,12 @@
 //! `EpochAction` based on expected ΔDL per unit compute over recent
 //! event history; the policy parameterizes every gate threshold.
 
+use crate::epoch::EpochTrace;
 use crate::event::{Event, EventCategory};
 use crate::hash::TermRef;
 use crate::lifecycle::AxiomIdentity;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 
 /// The three regimes, named by which event category dominates ΔDL in
 /// recent epochs. Canonical names from
@@ -247,6 +248,77 @@ impl Allocator {
     }
 }
 
+/// Level-4 regime detector from `docs/arch/minimal-model-ladder.md`.
+///
+/// Observes the last `W` epoch traces and classifies the current
+/// regime by which `EventCategory` contributed the most ΔDL. A
+/// tiny FSM with no trained parameters.
+#[derive(Debug, Clone)]
+pub struct RegimeDetector {
+    window: usize,
+    history: VecDeque<(f64, f64, f64)>, // (reinforce, discover, promote)
+}
+
+impl RegimeDetector {
+    #[must_use]
+    pub fn new(window: usize) -> Self {
+        Self {
+            window: window.max(1),
+            history: VecDeque::with_capacity(window.max(1)),
+        }
+    }
+
+    /// Fold one trace into the history and return the regime the
+    /// detector classifies the current window as.
+    pub fn observe(&mut self, trace: &EpochTrace) -> Regime {
+        let mut reinforce = 0.0_f64;
+        let mut discover = 0.0_f64;
+        let mut promote = 0.0_f64;
+        for ev in &trace.events {
+            match ev.category() {
+                EventCategory::Reinforce => reinforce += ev.delta_dl(),
+                EventCategory::Discovery => discover += ev.delta_dl(),
+                EventCategory::Promote => promote += ev.delta_dl(),
+                EventCategory::Meta => {}
+            }
+        }
+        if self.history.len() == self.window {
+            self.history.pop_front();
+        }
+        self.history.push_back((reinforce, discover, promote));
+        self.current()
+    }
+
+    /// Compute the current regime from the observation window. Ties
+    /// resolve toward the most-committed regime: Promotive > Explosive
+    /// > Reductive (the later phases "win" — they are rarer and more
+    /// load-bearing when they happen).
+    #[must_use]
+    pub fn current(&self) -> Regime {
+        let (r, d, p) = self.history.iter().fold((0.0, 0.0, 0.0), |(a, b, c), (x, y, z)| {
+            (a + *x, b + *y, c + *z)
+        });
+        if p > 0.0 && p >= d && p >= r {
+            Regime::Promotive
+        } else if d > r {
+            Regime::Explosive
+        } else {
+            Regime::Reductive
+        }
+    }
+
+    /// How many traces are in the observation window.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.history.len()
+    }
+
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.history.is_empty()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -320,6 +392,52 @@ mod tests {
             RewardEstimator::new(0.5),
         );
         assert_eq!(alloc.choose(10, 0), EpochAction::Discover);
+    }
+
+    // ── RegimeDetector ──────────────────────────────────────────────
+
+    #[test]
+    fn regime_detector_defaults_to_reductive_when_empty() {
+        let det = RegimeDetector::new(10);
+        assert_eq!(det.current(), Regime::Reductive);
+    }
+
+    #[test]
+    fn regime_detector_flags_reductive_on_reinforce_heavy_traces() {
+        use crate::event::StatusAdvance;
+        use crate::lifecycle::ProofStatus;
+        let mut det = RegimeDetector::new(5);
+        let advance_event = Event::StatusAdvance(StatusAdvance {
+            artifact: TermRef([0; 32]),
+            from: ProofStatus::Conjectured,
+            to: ProofStatus::Verified,
+            evidence_hash: TermRef([1; 32]),
+            delta_dl: 10.0,
+        });
+        let mut tr = EpochTrace::default();
+        tr.events.push(advance_event);
+        assert_eq!(det.observe(&tr), Regime::Reductive);
+    }
+
+    #[test]
+    fn regime_detector_flags_explosive_on_discovery_heavy_traces() {
+        use crate::epoch::{AcceptanceCertificate, Artifact};
+        use crate::eval::RewriteRule;
+        use crate::term::Term;
+        let mut det = RegimeDetector::new(5);
+        let rule = RewriteRule {
+            name: "r".into(),
+            lhs: Term::Symbol(1, vec![]),
+            rhs: Term::Point(0),
+        };
+        let cert = AcceptanceCertificate::trivial_conjecture(1.0);
+        let artifact = Artifact::seal(rule, 0, cert, vec![]);
+        let mut tr = EpochTrace::default();
+        tr.events.push(Event::Accept {
+            artifact,
+            delta_dl: 50.0,
+        });
+        assert_eq!(det.observe(&tr), Regime::Explosive);
     }
 
     #[test]

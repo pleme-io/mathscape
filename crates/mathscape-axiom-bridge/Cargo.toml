@@ -1,0 +1,14 @@
+[package]
+name = "mathscape-axiom-bridge"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Mathscape ↔ axiom-forge handoff — gates 6 and 7 of the realization lattice"
+
+[dependencies]
+mathscape-core.workspace = true
+axiom-forge = { git = "https://github.com/pleme-io/axiom-forge" }
+
+[dev-dependencies]
+mathscape-core = { workspace = true, features = ["test-helpers"] }

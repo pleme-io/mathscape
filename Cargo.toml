@@ -17,6 +17,7 @@ members = [
     "crates/mathscape-config",
     "crates/mathscape-entity",
     "crates/mathscape-api",
+    "crates/mathscape-axiom-bridge",
 ]
 
 [workspace.package]
