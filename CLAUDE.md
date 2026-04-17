@@ -16,22 +16,26 @@ machine produces the trajectory.
 
 **Canonical architecture docs** (read in this order):
 
-1. `docs/arch/machine-synthesis.md` — **the canonical picture**. Five
+1. `docs/arch/rust-lisp-duality.md` — **the foundation**. Why the
+   architecture is what it is: Rust solidifies ground rules; Lisp
+   runs the epochs that propose them; axiom-forge is the rivet. Read
+   first; everything else is a consequence.
+2. `docs/arch/machine-synthesis.md` — **the canonical picture**. Five
    architectural objects, ten gates, five forces, three regimes,
-   type-level invariants. If you only read one, read this.
-2. `docs/arch/forced-realization.md` — why the machine must exist;
+   type-level invariants.
+3. `docs/arch/forced-realization.md` — why the machine must exist;
    the control-system framing.
-3. `docs/arch/axiomatization-pressure.md` — reinforcement is the
+4. `docs/arch/axiomatization-pressure.md` — reinforcement is the
    default loop; discovery fires only on plateau.
-4. `docs/arch/reward-calculus.md` — ΔDL as the single currency; the
+5. `docs/arch/reward-calculus.md` — ΔDL as the single currency; the
    allocator decides reinforce vs discover on expected ΔDL / cost.
-5. `docs/arch/condensation-reward.md` — MDL objective per proposal;
+6. `docs/arch/condensation-reward.md` — MDL objective per proposal;
    why coverage preservation is load-bearing.
-6. `docs/arch/promotion-pipeline.md` — mathscape → axiom-forge handoff;
+7. `docs/arch/promotion-pipeline.md` — mathscape → axiom-forge handoff;
    gates 4–7; migration reports.
-7. `docs/arch/minimal-model-ladder.md` — "whatever is simplest to get
+8. `docs/arch/minimal-model-ladder.md` — "whatever is simplest to get
    to the next step"; levels 0–7.
-8. `docs/arch/realization-plan.md` — the phased implementation plan
+9. `docs/arch/realization-plan.md` — the phased implementation plan
    (A through L).
 
 The sections below (Core Thesis, Compression as Tractability, etc.)
