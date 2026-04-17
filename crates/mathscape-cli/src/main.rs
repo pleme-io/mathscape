@@ -224,6 +224,12 @@ fn promote_demo(output_path: Option<&str>) {
         receipt.axiom_identity.proposal_hash,
     );
     println!(
+        "  typescape_coord: {}/{} ({})",
+        receipt.axiom_identity.typescape_coord.module_path,
+        receipt.axiom_identity.typescape_coord.ast_domain,
+        receipt.axiom_identity.typescape_coord.leaf_hash,
+    );
+    println!(
         "  frozen_vector.b3sum_hex: {}",
         receipt.frozen_vector.b3sum_hex
     );
