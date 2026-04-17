@@ -1,6 +1,7 @@
 //! Core types: Point, Number, Fn, Term enum, hash-consing, evaluation,
 //! substitution, s-expression parser/printer.
 
+pub mod epoch;
 pub mod eval;
 pub mod hash;
 pub mod parse;
@@ -9,6 +10,10 @@ pub mod term;
 pub mod test_helpers;
 pub mod value;
 
+pub use epoch::{
+    AcceptanceCertificate, Artifact, Candidate, Emitter, Epoch, EpochTrace, Generator,
+    InMemoryRegistry, ProofStatus, Prover, Registry, Rejection, Verdict,
+};
 pub use hash::TermRef;
 pub use term::{StoredTerm, SymbolId, Term};
 pub use value::Value;
