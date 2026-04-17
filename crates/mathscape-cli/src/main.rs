@@ -12,6 +12,7 @@ use mathscape_core::{
     event::Event,
     promotion_gate::{PromotionGate, ThresholdGate},
     term::Term,
+    trap::{Trap, TrapDetector},
     value::Value,
 };
 use mathscape_reward::{compute_reward, StatisticalProver};
@@ -46,6 +47,15 @@ enum Commands {
         #[arg(long)]
         output: Option<String>,
     },
+    /// Run epochs until the TrapDetector emits its first trap, then
+    /// print the trap's registry root + timing. The trap is a
+    /// fixed point of the mathscape machine — a registry root stable
+    /// across the detector's observation window.
+    TrapsFind {
+        /// Maximum epochs to run before giving up.
+        #[arg(default_value = "30")]
+        max_epochs: usize,
+    },
 }
 
 fn main() {
@@ -70,8 +80,39 @@ fn main() {
     match cli.command {
         Some(Commands::Run { epochs }) => run_epochs(&config, epochs),
         Some(Commands::PromoteDemo { output }) => promote_demo(output.as_deref()),
+        Some(Commands::TrapsFind { max_epochs }) => traps_find(&config, max_epochs),
         None => repl(&config),
     }
+}
+
+/// Run epochs until the first trap is detected or max_epochs is
+/// reached. Prints the trap's registry root, entry epoch, stability
+/// window.
+fn traps_find(config: &Config, max_epochs: usize) {
+    let mut rng = rand::thread_rng();
+    let mut pop = config.to_population();
+    pop.initialize(&mut rng);
+    let mut epoch = build_epoch(config);
+    let mut control = ControlState::new(RealizationPolicy::default());
+
+    println!("▶ Running up to {max_epochs} epochs looking for the first trap ...\n");
+    for epoch_num in 1..=max_epochs {
+        let _summary = run_epoch(config, &mut pop, &mut epoch, &mut control, &mut rng);
+        if let Some(trap) = control.trap_history.first() {
+            println!("✓ Trap found after epoch {epoch_num}");
+            println!("  registry_root:    {}", trap.registry_root);
+            println!("  epoch_entered:    {}", trap.epoch_id_entered);
+            println!("  stability_window: {}", control.traps.window);
+            println!("  policy_hash:      {}", trap.policy_hash);
+            println!("  trap content_hash: {}", trap.content_hash);
+            println!("  |L| at trap:       {}", epoch.registry.len());
+            return;
+        }
+    }
+    println!("✗ No trap found in {max_epochs} epochs.");
+    println!("  Current registry root: {}", epoch.registry.root());
+    println!("  Library size:          {}", epoch.registry.len());
+    println!("  Hint: raise max_epochs, or the registry is still evolving.");
 }
 
 /// Operator-visible end-to-end promotion demo.
@@ -265,11 +306,14 @@ struct EpochSummary {
 }
 
 /// Control-plane state that persists across epochs. Consolidated so
-/// the CLI can print regime + ΔDL trajectory without threading
-/// through multiple args.
+/// the CLI can print regime + ΔDL trajectory + trap emissions without
+/// threading multiple args through run_epoch.
 struct ControlState {
     allocator: Allocator,
     detector: RegimeDetector,
+    traps: TrapDetector,
+    /// Traps the detector has emitted so far, in order.
+    trap_history: Vec<Trap>,
 }
 
 impl ControlState {
@@ -278,6 +322,8 @@ impl ControlState {
         Self {
             allocator: Allocator::new(policy, estimator),
             detector: RegimeDetector::new(10),
+            traps: TrapDetector::new(3),
+            trap_history: Vec::new(),
         }
     }
 }
@@ -306,6 +352,12 @@ fn run_epoch(
     // Feed the trace back into the estimator + detector.
     control.allocator.estimator.update(&trace.events);
     let regime = control.detector.observe(&trace);
+
+    // Trap detection: observe the post-epoch registry root. If the
+    // detector emits a Trap, stash it.
+    if let Some(trap) = control.traps.observe(epoch.registry.root(), epoch.epoch_id) {
+        control.trap_history.push(trap);
+    }
 
     // Population feedback: re-compute an aggregate reward view over the
     // post-epoch library so fitness signal stays comparable.
@@ -350,10 +402,10 @@ fn run_epochs(config: &Config, n_epochs: usize) {
         config.population.target_size
     );
     println!(
-        "{:>6} {:>10} {:>9} {:>8} {:>6} {:>8} {:>5} {:>5}",
-        "Epoch", "Action", "Regime", "CR", "DL", "Novelty", "|L|", "Acc"
+        "{:>6} {:>10} {:>9} {:>8} {:>6} {:>8} {:>5} {:>5} {:>5}",
+        "Epoch", "Action", "Regime", "CR", "DL", "Novelty", "|L|", "Acc", "Traps"
     );
-    println!("{}", "-".repeat(70));
+    println!("{}", "-".repeat(76));
 
     for epoch_num in 1..=n_epochs {
         let summary = run_epoch(config, &mut pop, &mut epoch, &mut control, &mut rng);
@@ -367,7 +419,7 @@ fn run_epochs(config: &Config, n_epochs: usize) {
         let regime_str = format!("{:?}", summary.regime);
 
         println!(
-            "{:>6} {:>10} {:>9} {:>8.4} {:>6} {:>8.4} {:>5} {:>5}",
+            "{:>6} {:>10} {:>9} {:>8.4} {:>6} {:>8.4} {:>5} {:>5} {:>5}",
             epoch_num,
             action_str,
             regime_str,
@@ -376,6 +428,7 @@ fn run_epochs(config: &Config, n_epochs: usize) {
             summary.novelty_total,
             epoch.registry.len(),
             summary.trace.accepted,
+            control.trap_history.len(),
         );
     }
 
