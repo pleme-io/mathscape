@@ -320,13 +320,27 @@ pub trait Registry {
     }
 }
 
-/// The unified epoch. Owns nothing; composes four roles.
+/// The unified epoch. Owns nothing but bookkeeping state; composes
+/// four roles via its trait-parameterized fields.
+///
+/// The `status_since` map tracks when each artifact reached its
+/// current status. Used by the survival-based advancement logic in
+/// `run_reinforce` — rules stable at their current status for W
+/// epochs advance by one step (Conjectured → Verified → Exported
+/// → Axiomatized). This is empirical advancement, not proof-based;
+/// real gates V/X/A (e-graph, Lean) land later.
+///
+/// `advance_window` is the W — default 3 epochs, tunable.
 pub struct Epoch<G, P, E, R> {
     pub generator: G,
     pub prover: P,
     pub emitter: E,
     pub registry: R,
     pub epoch_id: u64,
+    /// Per-artifact: epoch at which current status was observed.
+    pub status_since: std::collections::HashMap<TermRef, u64>,
+    /// How many epochs of stable status before a rule advances.
+    pub advance_window: u64,
 }
 
 impl<G, P, E, R> Epoch<G, P, E, R>
@@ -343,6 +357,8 @@ where
             emitter,
             registry,
             epoch_id: 0,
+            status_since: std::collections::HashMap::new(),
+            advance_window: 3,
         }
     }
 
@@ -358,16 +374,26 @@ where
     /// canonical production loop; the CLI and service should call
     /// this rather than picking the action manually.
     ///
-    /// Pressure-aware override: `Allocator::choose` is EWMA-driven,
-    /// which means when no reinforce pass has ever run (historical
-    /// mean = 0) the plateau check triggers and Discover is picked
-    /// unconditionally. In that specific case, if reduction pressure
-    /// is positive and the library is non-empty, we override to
-    /// Reinforce so the estimator gets the data it needs to make
-    /// informed choices in subsequent epochs. This was discovered
-    /// via the stress test in tests/stress_loop.rs — see
-    /// docs/arch/collapse-and-surprise.md for the follow-up on
-    /// making the Allocator pressure-aware natively.
+    /// Pressure-aware override + advancement-aware override:
+    /// `Allocator::choose` is EWMA-driven, which means when no
+    /// reinforce pass has ever run (historical mean = 0) the
+    /// plateau check triggers and Discover is picked unconditionally.
+    ///
+    /// Two override conditions let Reinforce fire when
+    /// consequential:
+    ///
+    /// 1. **Pressure-aware**: library non-empty AND reduction
+    ///    pressure > 0 → Reinforce to fire collapses
+    /// 2. **Advancement-aware**: library non-empty AND at least one
+    ///    artifact has an advanceable status (below Axiomatized)
+    ///    that has been stable for the advance window → Reinforce
+    ///    to fire status advances
+    ///
+    /// Both overrides only apply while the reinforce-mean EWMA is
+    /// below the plateau threshold (i.e., the allocator has no
+    /// historical signal yet). Once reinforce has produced ΔDL a
+    /// few times, the EWMA saturates and the overrides stop firing;
+    /// the allocator's normal expected-ΔDL logic takes over.
     pub fn step_auto(
         &mut self,
         corpus: &[Term],
@@ -376,10 +402,35 @@ where
         use crate::control::EpochAction;
         let library_size = self.registry.len();
         let pressure = crate::reduction::reduction_pressure(&self.registry);
-        let action = if library_size > 0
-            && pressure > 0.0
-            && allocator.estimator.reinforce_mean < allocator.policy.epsilon_plateau
-        {
+        let reinforce_cold =
+            allocator.estimator.reinforce_mean < allocator.policy.epsilon_plateau;
+
+        // Is there at least one active artifact whose current
+        // status is advanceable AND has been stable for the window?
+        // For unadvanced artifacts we fall back to the artifact's
+        // sealing epoch (its initial insertion time) so the window
+        // starts from when the rule entered the library, not from
+        // when step_auto first noticed it.
+        let current_epoch = self.epoch_id;
+        let window = self.advance_window;
+        let advancement_due = library_size > 0
+            && self.registry.all().iter().any(|a| {
+                let status = self
+                    .registry
+                    .status_of(a.content_hash)
+                    .unwrap_or_else(|| a.certificate.status.clone());
+                if status.next_structural().is_none() {
+                    return false;
+                }
+                let since = self
+                    .status_since
+                    .get(&a.content_hash)
+                    .copied()
+                    .unwrap_or(a.epoch_id);
+                current_epoch.saturating_sub(since) >= window
+            });
+
+        let action = if library_size > 0 && reinforce_cold && (pressure > 0.0 || advancement_due) {
             EpochAction::Reinforce
         } else {
             allocator.choose(corpus.len(), library_size)
@@ -519,6 +570,76 @@ where
                 subsumer,
                 delta_dl,
             });
+        }
+
+        // Empirical status advancement. For each active artifact
+        // whose status is below Axiomatized and has been at its
+        // current status for >= advance_window epochs, advance by
+        // one step. This is the "survival" path — not proof-based
+        // verification (real gates V/X/A need e-graph + Lean), but
+        // sufficient to let the reduction meter reach Reduced on
+        // stable libraries. Emits Event::StatusAdvance per move.
+        let current_epoch = self.epoch_id;
+        let window = self.advance_window;
+
+        // Collect advances first (don't mutate during iteration).
+        struct Advance {
+            artifact: TermRef,
+            from: ProofStatus,
+            to: ProofStatus,
+        }
+        let mut advances: Vec<Advance> = Vec::new();
+
+        for artifact in self.registry.all() {
+            let hash = artifact.content_hash;
+            let status = self
+                .registry
+                .status_of(hash)
+                .unwrap_or_else(|| artifact.certificate.status.clone());
+
+            // Skip if already Subsumed / Demoted / Primitive /
+            // Promoted — no further structural advance applies.
+            let Some(next) = status.next_structural() else {
+                continue;
+            };
+
+            // Age is measured from status_since (set after any
+            // advance) or falls back to artifact.epoch_id (when the
+            // rule was sealed into the library). This lets the
+            // window start ticking the moment a rule enters the
+            // library, not only when step_auto first observes it.
+            let since = self
+                .status_since
+                .get(&hash)
+                .copied()
+                .unwrap_or(artifact.epoch_id);
+
+            if current_epoch.saturating_sub(since) < window {
+                continue;
+            }
+
+            advances.push(Advance {
+                artifact: hash,
+                from: status,
+                to: next,
+            });
+        }
+
+        for adv in advances {
+            self.registry.mark_status(adv.artifact, adv.to.clone());
+            // Reset the status_since clock for the new status.
+            self.status_since.insert(adv.artifact, current_epoch);
+            trace.events.push(Event::StatusAdvance(crate::event::StatusAdvance {
+                artifact: adv.artifact,
+                from: adv.from,
+                to: adv.to,
+                // Empirical advance carries no external evidence hash;
+                // use the artifact's own hash as self-reference.
+                evidence_hash: adv.artifact,
+                // Conservative: each advance releases 1 bit of
+                // uncertainty about the rule's structural validity.
+                delta_dl: 1.0,
+            }));
         }
 
         self.epoch_id += 1;

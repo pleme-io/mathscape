@@ -129,6 +129,27 @@ pub enum ProofStatus {
 }
 
 impl ProofStatus {
+    /// The next status in the structural-advancement chain, or
+    /// `None` if this status cannot advance further via the
+    /// advancement pass. Used by the survival-based advancement
+    /// logic in the reinforcement pass.
+    ///
+    /// Proposed → Conjectured → Verified → Exported → Axiomatized
+    /// are the advance positions. Beyond Axiomatized (Promoted,
+    /// Primitive) advancement is caller-driven (via axiom-forge
+    /// bridge + migrate_library), not through the passive survival
+    /// mechanism.
+    #[must_use]
+    pub fn next_structural(&self) -> Option<ProofStatus> {
+        match self {
+            ProofStatus::Proposed => Some(ProofStatus::Conjectured),
+            ProofStatus::Conjectured => Some(ProofStatus::Verified),
+            ProofStatus::Verified => Some(ProofStatus::Exported),
+            ProofStatus::Exported => Some(ProofStatus::Axiomatized),
+            _ => None,
+        }
+    }
+
     /// Numeric rank used to enforce monotone advance. Subsumed / Demoted
     /// share a terminal rank.
     #[must_use]
