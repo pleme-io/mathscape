@@ -11,6 +11,7 @@ pub mod hash;
 pub mod lifecycle;
 pub mod migration;
 pub mod parse;
+pub mod orchestrator;
 pub mod promotion;
 pub mod promotion_gate;
 pub mod reduction;
@@ -37,6 +38,10 @@ pub use trap::{Trap, TrapDetector, TrapExitReason};
 pub use migration::migrate_library;
 pub use promotion::{CorpusId, MigrationReport, PromotionSignal};
 pub use promotion_gate::{ArtifactHistory, PromotionGate, ThresholdGate};
+pub use orchestrator::{
+    run_until_reduced, LayerEpochSnapshot, LayerTrajectory, MultiLayerReport,
+    MultiLayerRunner, PromotionHook, PromotionOutcome,
+};
 pub use reduction::{
     check_maximally_reduced, check_reduction, detect_subsumption_pairs,
     reduction_pressure, ReductionBarrier, ReductionPolicy, ReductionSummary,
