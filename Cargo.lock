@@ -1934,6 +1934,7 @@ name = "mathscape-cli"
 version = "0.1.0"
 dependencies = [
  "clap",
+ "mathscape-axiom-bridge",
  "mathscape-compress",
  "mathscape-config",
  "mathscape-core",

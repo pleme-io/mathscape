@@ -1,9 +1,17 @@
 use clap::{Parser, Subcommand};
-use mathscape_compress::CompressionGenerator;
+use mathscape_axiom_bridge::{run_promotion, BridgeConfig};
+use mathscape_compress::{extract::ExtractConfig, CompressionGenerator};
 use mathscape_config::Config;
 use mathscape_core::{
-    epoch::{Epoch, EpochTrace, InMemoryRegistry, Registry, RuleEmitter},
+    corpus::{CorpusLog, CorpusSnapshot},
+    epoch::{
+        AcceptanceCertificate, Artifact, Epoch, EpochTrace, Generator, InMemoryRegistry,
+        Registry, RuleEmitter,
+    },
     event::Event,
+    promotion_gate::{PromotionGate, ThresholdGate},
+    term::Term,
+    value::Value,
 };
 use mathscape_reward::{compute_reward, StatisticalProver};
 use std::io::{self, Write};
@@ -28,6 +36,15 @@ enum Commands {
         #[arg(default_value = "10")]
         epochs: usize,
     },
+    /// Run a self-contained promotion demo: build a patterned corpus,
+    /// extract rules via CompressionGenerator, fabricate cross-corpus
+    /// evidence in CorpusLog, fire ThresholdGate, invoke axiom-forge,
+    /// and print the Rust source mathscape discovered.
+    PromoteDemo {
+        /// Path to write the emitted Rust source (defaults to stdout).
+        #[arg(long)]
+        output: Option<String>,
+    },
 }
 
 fn main() {
@@ -51,8 +68,168 @@ fn main() {
 
     match cli.command {
         Some(Commands::Run { epochs }) => run_epochs(&config, epochs),
+        Some(Commands::PromoteDemo { output }) => promote_demo(output.as_deref()),
         None => repl(&config),
     }
+}
+
+/// Operator-visible end-to-end promotion demo.
+///
+/// Uses a small hand-crafted corpus with a clear pattern, runs the
+/// real CompressionGenerator to extract a candidate rule, fabricates
+/// the cross-corpus evidence that a multi-epoch run would accumulate
+/// naturally, fires the PromotionGate + bridge, and prints (or
+/// writes) the Rust source axiom-forge emitted.
+fn promote_demo(output_path: Option<&str>) {
+    fn var(id: u32) -> Term {
+        Term::Var(id)
+    }
+    fn nat(n: u64) -> Term {
+        Term::Number(Value::Nat(n))
+    }
+    fn apply(f: Term, args: Vec<Term>) -> Term {
+        Term::Apply(Box::new(f), args)
+    }
+
+    let corpus = vec![
+        apply(var(2), vec![nat(3), nat(0)]),
+        apply(var(2), vec![nat(5), nat(0)]),
+        apply(var(2), vec![nat(7), nat(0)]),
+        apply(var(2), vec![nat(11), nat(0)]),
+        apply(var(2), vec![nat(13), nat(0)]),
+    ];
+    let corpus_a = CorpusSnapshot::new("arith", corpus.clone(), 0);
+    let corpus_b = CorpusSnapshot::new("combinators", corpus.clone(), 1);
+
+    println!("═══ mathscape promote-demo ═══\n");
+    println!("Corpus A ({}): {} terms", corpus_a.id, corpus_a.terms.len());
+    println!("Corpus B ({}): {} terms", corpus_b.id, corpus_b.terms.len());
+
+    let mut g = CompressionGenerator::new(
+        ExtractConfig {
+            min_shared_size: 2,
+            min_matches: 2,
+            max_new_rules: 1,
+        },
+        1,
+    );
+    let candidates = g.propose(0, &corpus, &[]);
+    let Some(candidate) = candidates.into_iter().next() else {
+        eprintln!("error: generator produced no candidates for this corpus");
+        std::process::exit(1);
+    };
+    println!(
+        "\n▶ CompressionGenerator proposed: {} :: {} => {}",
+        candidate.rule.name, candidate.rule.lhs, candidate.rule.rhs
+    );
+
+    let artifact = Artifact::seal(
+        candidate.rule.clone(),
+        0,
+        AcceptanceCertificate::trivial_conjecture(1.0),
+        vec![],
+    );
+    println!(
+        "▶ Sealed as Artifact with content_hash: {}",
+        artifact.content_hash
+    );
+
+    // Accumulate cross-corpus evidence via CorpusLog — what a multi-
+    // epoch run would produce naturally.
+    let mut log = CorpusLog::new();
+    log.scan_corpus(
+        &corpus_a,
+        [(artifact.content_hash, artifact.rule.lhs.clone())],
+        0,
+    );
+    log.scan_corpus(
+        &corpus_b,
+        [(artifact.content_hash, artifact.rule.lhs.clone())],
+        1,
+    );
+    let history = log.history_for(artifact.content_hash, 2, 100);
+    println!(
+        "▶ CorpusLog evidence: corpus_matches={}, epochs_alive={}, usage_in_window={}",
+        history.corpus_matches.len(),
+        history.epochs_alive,
+        history.usage_in_window,
+    );
+
+    let gate = ThresholdGate::new(0, 2);
+    let signal = match gate.evaluate(&artifact, &[artifact.clone()], &history, 2) {
+        Some(s) => s,
+        None => {
+            eprintln!("error: PromotionGate did not fire. Check thresholds + history.");
+            std::process::exit(1);
+        }
+    };
+    println!("▶ PromotionGate fired: {}", signal.rationale);
+    println!("  signal content_hash: {}", signal.content_hash());
+
+    let receipt = match run_promotion(&signal, &artifact, &BridgeConfig::default()) {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("error: bridge rejected the promotion: {e}");
+            std::process::exit(1);
+        }
+    };
+    println!(
+        "\n✓ axiom-forge accepted the proposal (gate 6)",
+    );
+    println!("  axiom_identity: {}::{} ({})",
+        receipt.axiom_identity.target,
+        receipt.axiom_identity.name,
+        receipt.axiom_identity.proposal_hash,
+    );
+    println!(
+        "  frozen_vector.b3sum_hex: {}",
+        receipt.frozen_vector.b3sum_hex
+    );
+
+    let emitted_source = format!(
+        "// Mathscape-discovered primitive\n\
+         // axiom_identity: {target}::{name}\n\
+         // proposal_hash:  {ph}\n\
+         // canonical_text: {ct}\n\
+         // b3sum:          {b3}\n\
+         //\n\
+         // Declaration:\n\
+         {decl}\n\
+         \n\
+         // Documentation:\n\
+         {doc}\n\
+         \n\
+         // to_sexpr arm:\n\
+         {to_arm}\n\
+         \n\
+         // from_sexpr arm:\n\
+         {from_arm}\n",
+        target = receipt.axiom_identity.target,
+        name = receipt.axiom_identity.name,
+        ph = receipt.axiom_identity.proposal_hash,
+        ct = receipt.frozen_vector.canonical_text,
+        b3 = receipt.frozen_vector.b3sum_hex,
+        decl = receipt.emission.declaration,
+        doc = receipt.emission.doc_block,
+        to_arm = receipt.emission.to_sexpr_arm,
+        from_arm = receipt.emission.from_sexpr_arm,
+    );
+
+    match output_path {
+        Some(path) => {
+            if let Err(e) = std::fs::write(path, &emitted_source) {
+                eprintln!("error: failed to write {path}: {e}");
+                std::process::exit(1);
+            }
+            println!("\n✓ Emitted Rust source written to {path}");
+        }
+        None => {
+            println!("\n───── emitted Rust source ─────");
+            print!("{emitted_source}");
+            println!("──────────────────────────────");
+        }
+    }
+    println!("\n═══ promote-demo complete — gate 7 (rustc) left to the caller ═══");
 }
 
 /// Concrete type of the v0 mathscape epoch — fixed quad of

@@ -171,10 +171,22 @@ fn free_vars(term: &Term) -> Vec<u32> {
 /// under it to keep the bridge deterministic.
 const MAX_BRIDGED_FIELDS: usize = 8;
 
-/// Infer a `FieldSpec` per free variable in the rule's lhs. v0
-/// always assigns `FieldTy::String` — richer inference (scanning the
-/// rhs for the variable's usage shape) is a later upgrade.
-fn fields_from_rule(rule_lhs: &Term) -> Option<Vec<FieldSpec>> {
+/// Infer a `FieldSpec` per free variable in the rule's lhs by
+/// scanning the rhs for the variable's usage shape. Rules:
+///
+/// - variable appears in the rhs inside a `Number` context → `U64`
+///   (mathscape natural numbers map to `u64` in the emitted Rust)
+/// - variable appears at the top level of the rhs without wrappers
+///   → `String` (default — it could be anything carried through)
+/// - variable is used inside a `Symbol` or `Apply` head position
+///   → `String` (same default; could be refined later to `SelfRef`)
+/// - variable does not appear in the rhs at all → `String` (bridge
+///   cannot infer anything about it)
+///
+/// This is still a coarse inference — Phase G+ upgrades it to full
+/// type tracking via takumi / typescape. v1 is enough to produce
+/// non-String fields where the pattern is obvious.
+fn fields_from_rule(rule_lhs: &Term, rule_rhs: &Term) -> Option<Vec<FieldSpec>> {
     let vars = free_vars(rule_lhs);
     if vars.len() > MAX_BRIDGED_FIELDS {
         return None;
@@ -182,13 +194,51 @@ fn fields_from_rule(rule_lhs: &Term) -> Option<Vec<FieldSpec>> {
     Some(
         vars.into_iter()
             .enumerate()
-            .map(|(i, _v)| FieldSpec {
+            .map(|(i, v)| FieldSpec {
                 name: format!("arg{i}"),
-                ty: FieldTy::String,
+                ty: infer_field_ty(v, rule_rhs),
                 doc: format!("mathscape free variable slot {i}"),
             })
             .collect(),
     )
+}
+
+/// Infer a single variable's FieldTy from its usage in a term.
+fn infer_field_ty(var_id: u32, term: &Term) -> FieldTy {
+    // First look for numeric usage — if the var appears as an
+    // argument to an Apply whose head is BUILTIN_ADD/SUCC/MUL, it is
+    // numeric.
+    if appears_in_numeric_position(var_id, term) {
+        return FieldTy::U64;
+    }
+    // Otherwise fall back to String. Future upgrades: detect Vec/
+    // Option contexts.
+    FieldTy::String
+}
+
+/// Heuristic: the variable appears somewhere in the term as a
+/// direct argument to a known numeric builtin (BUILTIN_SUCC=1,
+/// BUILTIN_ADD=2, BUILTIN_MUL=3 from mathscape-core::eval).
+fn appears_in_numeric_position(var_id: u32, term: &Term) -> bool {
+    const NUMERIC_BUILTINS: [u32; 3] = [1, 2, 3];
+    match term {
+        Term::Apply(f, args) => {
+            let head_is_numeric = matches!(f.as_ref(), Term::Var(id) if NUMERIC_BUILTINS.contains(id));
+            if head_is_numeric
+                && args
+                    .iter()
+                    .any(|a| matches!(a, Term::Var(id) if *id == var_id))
+            {
+                return true;
+            }
+            // Recurse.
+            appears_in_numeric_position(var_id, f)
+                || args.iter().any(|a| appears_in_numeric_position(var_id, a))
+        }
+        Term::Fn(_, body) => appears_in_numeric_position(var_id, body),
+        Term::Symbol(_, args) => args.iter().any(|a| appears_in_numeric_position(var_id, a)),
+        _ => false,
+    }
 }
 
 /// Run the bridge end-to-end: build the proposal, run axiom-forge's
@@ -204,7 +254,7 @@ pub fn run_promotion(
     config: &BridgeConfig,
 ) -> Result<PromotionReceipt, PromotionFailure> {
     // Pre-check: bridge's arity cap.
-    let fields = fields_from_rule(&artifact.rule.lhs).ok_or_else(|| {
+    let fields = fields_from_rule(&artifact.rule.lhs, &artifact.rule.rhs).ok_or_else(|| {
         PromotionFailure::VerifyFailed(vec![Violation::new(
             axiom_forge::verify::ProofObligation::FieldCountBounded,
             format!(
@@ -325,6 +375,37 @@ mod tests {
         assert_eq!(receipt.proposal.fields[0].name, "arg0");
         assert_eq!(receipt.proposal.fields[0].ty, FieldTy::String);
         assert!(receipt.emission.declaration.contains("arg0"));
+    }
+
+    #[test]
+    fn bridge_infers_u64_for_numeric_position_vars() {
+        use mathscape_core::test_helpers::{apply, var};
+        // Rule: (Symbol(1, [?100])) => add(?100, 1)
+        // ?100 appears as an argument to BUILTIN_ADD (id=2) in the rhs
+        // → should be inferred as U64.
+        let rule = RewriteRule {
+            name: "numeric-slot".into(),
+            lhs: Term::Apply(Box::new(Term::Symbol(1, vec![])), vec![var(100)]),
+            rhs: apply(
+                var(2),
+                vec![var(100), Term::Number(mathscape_core::value::Value::Nat(1))],
+            ),
+        };
+        let artifact = Artifact::seal(
+            rule,
+            0,
+            AcceptanceCertificate::trivial_conjecture(1.0),
+            vec![],
+        );
+        let signal = signal_for(&artifact);
+        let receipt = run_promotion(&signal, &artifact, &BridgeConfig::default())
+            .expect("numeric-position rule should pass gates 6");
+        assert_eq!(receipt.proposal.fields.len(), 1);
+        assert_eq!(
+            receipt.proposal.fields[0].ty,
+            FieldTy::U64,
+            "var in numeric-builtin argument position should be inferred as U64"
+        );
     }
 
     #[test]
