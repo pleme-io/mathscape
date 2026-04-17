@@ -97,18 +97,27 @@ impl PromotionGate for ThresholdGate {
     }
 }
 
-/// Heuristic structural subsumption: `candidate` subsumes `other`
-/// when either:
-/// 1. `other.rhs` appears as a subterm of `candidate.rhs` (the new
-///    rule's expansion references the old), OR
-/// 2. `candidate.lhs` matches a subterm of `other.rhs` (the new
-///    rule's pattern fits inside the old's expansion, suggesting the
-///    old could be rewritten using it).
+/// Pattern-match-based subsumption. `candidate` subsumes `other`
+/// iff `candidate.lhs` is at least as general as `other.lhs` — that
+/// is, every term matched by `other.lhs` is also matched by
+/// `candidate.lhs`. This is classical unification-based subsumption
+/// applied via mathscape-core's `pattern_match`.
 ///
-/// This is cheap and approximate. A real promotion gate would run
-/// e-graph saturation to prove subsumption. v0 uses this to enable
-/// end-to-end flow; Phase F/G upgrades replace it.
+/// A full e-graph equality saturation would detect further
+/// subsumptions (e.g., rules that are equivalent after applying the
+/// library); this function catches direct generalization only. The
+/// upgrade to e-graph saturation is a later phase — see
+/// `docs/arch/realization-plan.md` Phase G+.
 fn subsumes_structurally(candidate: &RewriteRule, other: &RewriteRule) -> bool {
+    pattern_match(&candidate.lhs, &other.lhs).is_some()
+}
+
+// Retained but unused — kept for potential future heuristic fallbacks
+// once e-graph support lands and the pattern-match check is combined
+// with a saturation-based check. They exercise structural containment
+// over the registry DAG which is independently useful.
+#[allow(dead_code)]
+fn _subsumes_via_rhs_reference(candidate: &RewriteRule, other: &RewriteRule) -> bool {
     contains_subterm(&candidate.rhs, &other.rhs)
         || subterm_matches_pattern(&other.rhs, &candidate.lhs)
 }
@@ -198,27 +207,66 @@ mod tests {
     }
 
     #[test]
+    fn subsumes_when_candidate_lhs_is_more_general() {
+        // candidate: add(?x, 0) => ?x
+        // other:     add(42, 0) => 42
+        // pattern-match(add(?x, 0), add(42, 0)) = Some({x: 42})
+        // → candidate subsumes other
+        let candidate = RewriteRule {
+            name: "id".into(),
+            lhs: apply(var(2), vec![var(100), nat(0)]),
+            rhs: var(100),
+        };
+        let other = RewriteRule {
+            name: "42".into(),
+            lhs: apply(var(2), vec![nat(42), nat(0)]),
+            rhs: nat(42),
+        };
+        assert!(subsumes_structurally(&candidate, &other));
+        // But not the reverse: add(42,0) doesn't pattern-match
+        // add(?x,0) at the lhs level (reverse check), and the fallback
+        // structural heuristic also doesn't fire here.
+        // (This may or may not report subsumption in the fallback
+        // path depending on structure — we only assert the
+        // positive-direction case.)
+    }
+
+    #[test]
+    fn does_not_subsume_when_structures_differ() {
+        // mul doesn't subsume add.
+        let candidate = RewriteRule {
+            name: "mul-id".into(),
+            lhs: apply(var(3), vec![var(100), nat(1)]),
+            rhs: var(100),
+        };
+        let other = RewriteRule {
+            name: "add-id".into(),
+            lhs: apply(var(2), vec![var(100), nat(0)]),
+            rhs: var(100),
+        };
+        assert!(!subsumes_structurally(&candidate, &other));
+    }
+
+    #[test]
     fn threshold_gate_accepts_when_both_thresholds_cleared() {
-        // Candidate's rhs contains N(1); other's rhs is N(1) — so
-        // candidate structurally "references" other. K=1 clears.
+        // Real subsumption: candidate.lhs `add(?x, 0)` is more
+        // general than other.lhs `add(42, 0)` — pattern-match works,
+        // so candidate subsumes other. K=1 clears with one subsumed.
         let gate = ThresholdGate::new(1, 2);
         let other = art(
             2,
             RewriteRule {
-                name: "o".into(),
-                lhs: Term::Symbol(2, vec![]),
-                rhs: Term::Number(crate::value::Value::Nat(1)),
+                name: "add-42".into(),
+                lhs: apply(var(2), vec![nat(42), nat(0)]),
+                rhs: nat(42),
             },
         );
         let candidate = art(
             1,
             RewriteRule {
-                name: "c".into(),
-                lhs: Term::Symbol(1, vec![]),
-                rhs: apply(var(2), vec![
-                    Term::Number(crate::value::Value::Nat(1)),
-                    Term::Number(crate::value::Value::Nat(2)),
-                ]),
+                name: "add-identity".into(),
+                lhs: apply(var(2), vec![var(100), nat(0)]),
+                rhs: var(100),
             },
         );
         let hist = ArtifactHistory {
