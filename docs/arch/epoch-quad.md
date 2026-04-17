@@ -1,5 +1,14 @@
 # Epoch — the generate/prove/emit/register quad
 
+> **Canonical architectural picture**: `machine-synthesis.md`. This
+> document is the original quad framing; the synthesis doc refined it
+> into five architectural objects (Registry, EventPipeline,
+> RewardEstimator, Allocator, Epoch) with events as the single
+> primitive. This document is preserved because the quad shape still
+> holds for the *Discovery pass* (Generator → Prover → Emitter →
+> Registry). Reinforcement and Promotion passes are documented in the
+> synthesis doc.
+
 The epoch loop is the unit of progress. Every epoch produces zero or
 more **Artifacts** that enter the **Registry** monotonically. Each
 Artifact carries a BLAKE3 content hash of its canonical form and a

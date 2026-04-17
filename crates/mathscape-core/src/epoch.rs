@@ -14,13 +14,16 @@ use crate::term::{SymbolId, Term};
 use crate::hash::TermRef;
 use serde::{Deserialize, Serialize};
 
-/// A candidate entering the pipeline. Carries its provenance so audits
-/// can trace which generator produced it.
+/// A candidate rewrite rule entering the pipeline. The rule may have
+/// been produced by anti-unification, enumeration, evolution, or RL —
+/// the pipeline treats all sources uniformly.
+///
+/// `origin` is a free-form tag (e.g. `"compress/antiunify"`,
+/// `"evolve/mutate"`, `"rl/sample"`) that audits can use to attribute
+/// artifacts back to the generator that produced them.
 #[derive(Debug, Clone)]
 pub struct Candidate {
-    pub term: Term,
-    /// Free-form origin tag — e.g. `"evolve/mutate"`, `"evolve/crossover"`,
-    /// `"rl/sample"`, `"enum/bfs"`. Consumers decide granularity.
+    pub rule: RewriteRule,
     pub origin: String,
 }
 
@@ -158,8 +161,18 @@ pub struct EpochTrace {
 }
 
 /// Propose candidates from a population / search strategy.
+///
+/// The generator sees the corpus (input evidence) and the current
+/// library (to avoid re-proposing what's already accepted). The
+/// returned list is a batch of candidates to be considered one-by-one
+/// by the prover in the same epoch.
 pub trait Generator {
-    fn propose(&mut self, epoch_id: u64) -> Vec<Candidate>;
+    fn propose(
+        &mut self,
+        epoch_id: u64,
+        corpus: &[Term],
+        library: &[Artifact],
+    ) -> Vec<Candidate>;
 }
 
 /// Decide whether a candidate is worth emitting.
@@ -224,7 +237,9 @@ where
 
     /// Run one epoch. Returns an audit trace.
     pub fn step(&mut self, corpus: &[Term]) -> EpochTrace {
-        let proposals = self.generator.propose(self.epoch_id);
+        let proposals = self
+            .generator
+            .propose(self.epoch_id, corpus, self.registry.all());
         let mut trace = EpochTrace {
             epoch_id: self.epoch_id,
             proposals: proposals.len(),
@@ -287,7 +302,12 @@ mod tests {
         first: Vec<Candidate>,
     }
     impl Generator for FixedGen {
-        fn propose(&mut self, epoch_id: u64) -> Vec<Candidate> {
+        fn propose(
+            &mut self,
+            epoch_id: u64,
+            _corpus: &[Term],
+            _library: &[Artifact],
+        ) -> Vec<Candidate> {
             if epoch_id == 0 {
                 std::mem::take(&mut self.first)
             } else {
@@ -323,20 +343,11 @@ mod tests {
         }
     }
 
-    /// Emitter that uses the candidate as-is for `rhs` and builds an
-    /// `lhs` `Symbol(next_id, [])`. Good enough to exercise the hash
-    /// + parent chain.
-    struct SymbolEmitter {
-        next_id: std::cell::Cell<SymbolId>,
-    }
-    impl SymbolEmitter {
-        fn new() -> Self {
-            Self {
-                next_id: std::cell::Cell::new(1),
-            }
-        }
-    }
-    impl Emitter for SymbolEmitter {
+    /// Emitter that wraps the candidate's rule with hash + parent
+    /// hashes. The canonical mathscape emitter; real adapters add
+    /// domain-specific validation.
+    struct RuleEmitter;
+    impl Emitter for RuleEmitter {
         fn emit(
             &self,
             candidate: &Candidate,
@@ -344,13 +355,7 @@ mod tests {
             epoch_id: u64,
             library: &[Artifact],
         ) -> Option<Artifact> {
-            let id = self.next_id.get();
-            self.next_id.set(id + 1);
-            let rule = RewriteRule {
-                name: format!("S_{id:03}"),
-                lhs: Term::Symbol(id, vec![]),
-                rhs: candidate.term.clone(),
-            };
+            let rule = candidate.rule.clone();
             let content_hash = Artifact::canonical_hash(&rule, epoch_id, cert);
             let parent_hashes = Artifact::parents_from_rhs(&rule, library);
             Some(Artifact {
@@ -363,9 +368,17 @@ mod tests {
         }
     }
 
-    fn sample_cand(origin: &str) -> Candidate {
+    fn dummy_rule(id: SymbolId, rhs: Term) -> RewriteRule {
+        RewriteRule {
+            name: format!("S_{id:03}"),
+            lhs: Term::Symbol(id, vec![]),
+            rhs,
+        }
+    }
+
+    fn sample_cand(id: SymbolId, origin: &str) -> Candidate {
         Candidate {
-            term: apply(var(2), vec![nat(1), nat(1)]),
+            rule: dummy_rule(id, apply(var(2), vec![nat(1), nat(1)])),
             origin: origin.into(),
         }
     }
@@ -375,7 +388,7 @@ mod tests {
         let mut epoch = Epoch::new(
             FixedGen { first: vec![] },
             AlwaysAccept,
-            SymbolEmitter::new(),
+            RuleEmitter,
             InMemoryRegistry::new(),
         );
         let trace = epoch.step(&[]);
@@ -388,10 +401,10 @@ mod tests {
     fn accepting_prover_lands_artifact() {
         let mut epoch = Epoch::new(
             FixedGen {
-                first: vec![sample_cand("test")],
+                first: vec![sample_cand(1, "test")],
             },
             AlwaysAccept,
-            SymbolEmitter::new(),
+            RuleEmitter,
             InMemoryRegistry::new(),
         );
         let trace = epoch.step(&[]);
@@ -405,10 +418,10 @@ mod tests {
     fn rejecting_prover_drops_candidate() {
         let mut epoch = Epoch::new(
             FixedGen {
-                first: vec![sample_cand("test")],
+                first: vec![sample_cand(1, "test")],
             },
             AlwaysReject,
-            SymbolEmitter::new(),
+            RuleEmitter,
             InMemoryRegistry::new(),
         );
         let trace = epoch.step(&[]);
@@ -467,9 +480,8 @@ mod tests {
         // First epoch mints S_001 with no parents.
         // Second epoch mints S_002 whose rhs references S_001.
         let mut registry = InMemoryRegistry::new();
-        let emitter = SymbolEmitter::new();
+        let emitter = RuleEmitter;
 
-        // First: rhs is 1
         let c1 = AcceptanceCertificate {
             score: 1.0,
             compression_ratio: 0.5,
@@ -481,7 +493,7 @@ mod tests {
         let first = emitter
             .emit(
                 &Candidate {
-                    term: Term::Number(Value::Nat(1)),
+                    rule: dummy_rule(1, Term::Number(Value::Nat(1))),
                     origin: "t".into(),
                 },
                 &c1,
@@ -497,7 +509,7 @@ mod tests {
         let second = emitter
             .emit(
                 &Candidate {
-                    term: Term::Symbol(1, vec![]),
+                    rule: dummy_rule(2, Term::Symbol(1, vec![])),
                     origin: "t".into(),
                 },
                 &c1,
@@ -513,7 +525,7 @@ mod tests {
         let mut epoch = Epoch::new(
             FixedGen { first: vec![] },
             AlwaysAccept,
-            SymbolEmitter::new(),
+            RuleEmitter,
             InMemoryRegistry::new(),
         );
         assert_eq!(epoch.epoch_id, 0);

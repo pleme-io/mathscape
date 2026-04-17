@@ -3,6 +3,43 @@
 Evolutionary symbolic compression engine that discovers mathematical
 abstractions by rewarding compression and novelty over expression trees.
 
+## Forced Realization Frame — read this first
+
+Mathscape is a **forced realization machine**: a control system that
+pushes proposals through a ten-gate lattice (discovery + reinforcement
++ promotion), driven by five forces measured in a single currency
+(ΔDL), emitting a typed event stream whose aggregate score selects the
+next action. Every Rust primitive that exists was reached by this
+machine under some policy. Every primitive that does not exist is
+*unreached, not unreachable*. The operator controls ε/K/N/M; the
+machine produces the trajectory.
+
+**Canonical architecture docs** (read in this order):
+
+1. `docs/arch/machine-synthesis.md` — **the canonical picture**. Five
+   architectural objects, ten gates, five forces, three regimes,
+   type-level invariants. If you only read one, read this.
+2. `docs/arch/forced-realization.md` — why the machine must exist;
+   the control-system framing.
+3. `docs/arch/axiomatization-pressure.md` — reinforcement is the
+   default loop; discovery fires only on plateau.
+4. `docs/arch/reward-calculus.md` — ΔDL as the single currency; the
+   allocator decides reinforce vs discover on expected ΔDL / cost.
+5. `docs/arch/condensation-reward.md` — MDL objective per proposal;
+   why coverage preservation is load-bearing.
+6. `docs/arch/promotion-pipeline.md` — mathscape → axiom-forge handoff;
+   gates 4–7; migration reports.
+7. `docs/arch/minimal-model-ladder.md` — "whatever is simplest to get
+   to the next step"; levels 0–7.
+8. `docs/arch/realization-plan.md` — the phased implementation plan
+   (A through L).
+
+The sections below (Core Thesis, Compression as Tractability, etc.)
+are preserved because they explain the *philosophy* the machine
+implements. Where they and the arch docs disagree, the arch docs win
+— in particular, regime names are canonical as Reductive / Explosive /
+Promotive.
+
 ## Core Thesis
 
 Mathematical understanding is compression. When humans discover that
