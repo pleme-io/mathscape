@@ -13,3 +13,7 @@ test-helpers = []
 blake3.workspace = true
 serde.workspace = true
 bincode.workspace = true
+
+[dev-dependencies]
+mathscape-compress.workspace = true
+mathscape-reward.workspace = true

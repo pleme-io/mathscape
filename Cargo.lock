@@ -1970,6 +1970,8 @@ version = "0.1.0"
 dependencies = [
  "bincode",
  "blake3",
+ "mathscape-compress",
+ "mathscape-reward",
  "serde",
 ]
 

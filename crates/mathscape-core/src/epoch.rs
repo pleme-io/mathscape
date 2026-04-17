@@ -280,6 +280,24 @@ pub trait Registry {
         self.len() == 0
     }
 
+    /// The content-addressed "Merkle root" of the registry. Ordered
+    /// over the sorted list of artifact content hashes so insertion
+    /// order does not affect the root. Empty registry → zero hash.
+    ///
+    /// Two runs of the machine under identical policy + corpus must
+    /// produce equal roots (replayability, `docs/arch/knowability-
+    /// criterion.md`).
+    fn root(&self) -> TermRef {
+        let mut hashes: Vec<TermRef> = self.all().iter().map(|a| a.content_hash).collect();
+        hashes.sort_by_key(|h| *h.as_bytes());
+        let bytes: Vec<u8> = hashes.iter().flat_map(|h| *h.as_bytes()).collect();
+        if bytes.is_empty() {
+            TermRef([0; 32])
+        } else {
+            TermRef::from_bytes(&bytes)
+        }
+    }
+
     /// Update the active-status overlay for an artifact. Default impl
     /// is a no-op so simple storage backends need no overlay. Persistent
     /// backends override to store the overlay alongside artifacts.
