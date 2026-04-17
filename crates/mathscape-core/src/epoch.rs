@@ -353,6 +353,42 @@ where
         self.step_with_action(corpus, crate::control::EpochAction::Discover)
     }
 
+    /// Run one epoch driven by the allocator: `allocator.choose` →
+    /// dispatch → `estimator.update` from the trace. This is the
+    /// canonical production loop; the CLI and service should call
+    /// this rather than picking the action manually.
+    ///
+    /// Pressure-aware override: `Allocator::choose` is EWMA-driven,
+    /// which means when no reinforce pass has ever run (historical
+    /// mean = 0) the plateau check triggers and Discover is picked
+    /// unconditionally. In that specific case, if reduction pressure
+    /// is positive and the library is non-empty, we override to
+    /// Reinforce so the estimator gets the data it needs to make
+    /// informed choices in subsequent epochs. This was discovered
+    /// via the stress test in tests/stress_loop.rs — see
+    /// docs/arch/collapse-and-surprise.md for the follow-up on
+    /// making the Allocator pressure-aware natively.
+    pub fn step_auto(
+        &mut self,
+        corpus: &[Term],
+        allocator: &mut crate::control::Allocator,
+    ) -> EpochTrace {
+        use crate::control::EpochAction;
+        let library_size = self.registry.len();
+        let pressure = crate::reduction::reduction_pressure(&self.registry);
+        let action = if library_size > 0
+            && pressure > 0.0
+            && allocator.estimator.reinforce_mean < allocator.policy.epsilon_plateau
+        {
+            EpochAction::Reinforce
+        } else {
+            allocator.choose(corpus.len(), library_size)
+        };
+        let trace = self.step_with_action(corpus, action);
+        allocator.estimator.update(&trace.events);
+        trace
+    }
+
     /// Run one epoch with an explicit action. Reinforce / Discover
     /// emit events in their respective categories; Promote and
     /// Migrate are no-ops at this layer — those actions are executed
