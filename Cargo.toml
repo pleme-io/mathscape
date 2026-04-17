@@ -18,7 +18,6 @@ members = [
     "crates/mathscape-entity",
     "crates/mathscape-api",
     "crates/mathscape-axiom-bridge",
-    "crates/primitive-forge",
 ]
 
 [workspace.package]
