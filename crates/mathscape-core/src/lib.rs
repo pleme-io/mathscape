@@ -14,6 +14,7 @@ pub mod parse;
 pub mod promotion;
 pub mod promotion_gate;
 pub mod term;
+pub mod trap;
 #[cfg(any(test, feature = "test-helpers"))]
 pub mod test_helpers;
 pub mod value;
@@ -30,7 +31,8 @@ pub use epoch::{
 };
 pub use event::{Event, EventCategory, StatusAdvance};
 pub use hash::TermRef;
-pub use lifecycle::{AxiomIdentity, DemotionReason, ProofStatus};
+pub use lifecycle::{AxiomIdentity, DemotionReason, ProofStatus, TypescapeCoord};
+pub use trap::{Trap, TrapDetector, TrapExitReason};
 pub use migration::migrate_library;
 pub use promotion::{CorpusId, MigrationReport, PromotionSignal};
 pub use promotion_gate::{ArtifactHistory, PromotionGate, ThresholdGate};

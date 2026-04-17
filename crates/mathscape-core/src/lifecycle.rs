@@ -33,6 +33,38 @@
 use crate::hash::TermRef;
 use serde::{Deserialize, Serialize};
 
+/// A coordinate in the platform typescape. See
+/// `docs/arch/typescape-binding.md`. Mathscape-minted primitives land
+/// in arch-synthesizer's typescape Merkle tree; this struct names
+/// the leaf's position.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct TypescapeCoord {
+    /// Module path in the typescape — e.g. `"mathscape/core/term"`.
+    pub module_path: String,
+    /// Which AST domain (of arch-synthesizer's 19 catalogued domains)
+    /// this primitive belongs to — e.g. `"axiom-enum"`.
+    pub ast_domain: String,
+    /// BLAKE3 hash of the typescape leaf post-insertion. Computed by
+    /// arch-synthesizer when the leaf is committed; pre-commit
+    /// coordinates carry a zero hash.
+    pub leaf_hash: TermRef,
+}
+
+impl TypescapeCoord {
+    /// Build a pre-commit coordinate (zero leaf_hash). arch-synthesizer
+    /// populates the hash on commit. v0 deterministic default for a
+    /// target enum variant.
+    #[must_use]
+    pub fn precommit(target: &str, _name: &str) -> Self {
+        let module_path = target.replace("::", "/").replace("_", "-");
+        Self {
+            module_path,
+            ast_domain: "axiom-enum".into(),
+            leaf_hash: TermRef([0; 32]),
+        }
+    }
+}
+
 /// Identity of a primitive that has been promoted through axiom-forge
 /// and accepted by rustc. Links a mathscape Artifact to the Rust enum
 /// variant axiom-forge emitted.
@@ -46,6 +78,10 @@ pub struct AxiomIdentity {
     /// The chain back to the originating PromotionSignal is
     /// reconstructable from the registry.
     pub proposal_hash: TermRef,
+    /// Where this primitive lives in the platform typescape. Populated
+    /// pre-commit (leaf_hash = 0) by the bridge; arch-synthesizer
+    /// fills in the post-commit hash when the leaf is registered.
+    pub typescape_coord: TypescapeCoord,
 }
 
 /// Why a rule left the active lifecycle.
@@ -152,6 +188,7 @@ mod tests {
                 target: "t::T".into(),
                 name: "X".into(),
                 proposal_hash: fake_hash(0),
+                typescape_coord: TypescapeCoord::precommit("t::T", "X"),
             }),
         ];
         for w in chain.windows(2) {
@@ -202,6 +239,10 @@ mod tests {
             target: "mathscape_core::term::Term".into(),
             name: "IdentityElement".into(),
             proposal_hash: fake_hash(0xab),
+            typescape_coord: TypescapeCoord::precommit(
+                "mathscape_core::term::Term",
+                "IdentityElement",
+            ),
         });
         let bytes = bincode::serialize(&original).unwrap();
         let decoded: ProofStatus = bincode::deserialize(&bytes).unwrap();

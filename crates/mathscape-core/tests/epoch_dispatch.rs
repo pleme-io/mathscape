@@ -87,6 +87,7 @@ fn migrate_action_is_noop_at_epoch_layer() {
         target: "t::T".into(),
         name: "X".into(),
         proposal_hash: mathscape_core::hash::TermRef([0; 32]),
+        typescape_coord: mathscape_core::lifecycle::TypescapeCoord::precommit("t::T", "X"),
     };
     let trace =
         e.step_with_action(&fixed_corpus(), EpochAction::Migrate(identity.clone()));

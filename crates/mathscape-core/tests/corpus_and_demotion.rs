@@ -199,6 +199,10 @@ fn promoted_but_retired_primitive_falls_to_retired_primitive_status() {
         target: "mathscape_core::term::Term".into(),
         name: "RetiredX".into(),
         proposal_hash: TermRef([0xbb; 32]),
+        typescape_coord: mathscape_core::lifecycle::TypescapeCoord::precommit(
+            "mathscape_core::term::Term",
+            "RetiredX",
+        ),
     };
     reg.mark_status(hash, ProofStatus::Primitive(identity.clone()));
 

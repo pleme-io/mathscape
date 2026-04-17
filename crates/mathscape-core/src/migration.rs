@@ -76,6 +76,10 @@ mod tests {
             target: "mathscape_core::term::Term".into(),
             name: "Promoted".into(),
             proposal_hash: TermRef([0xaa; 32]),
+            typescape_coord: crate::lifecycle::TypescapeCoord::precommit(
+                "mathscape_core::term::Term",
+                "Promoted",
+            ),
         }
     }
 

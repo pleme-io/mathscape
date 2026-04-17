@@ -281,6 +281,10 @@ pub fn run_promotion(
         // `proposal_hash` from axiom-forge's Certificate is a
         // `ContentHash([u8; 32])`. Convert to mathscape's TermRef.
         proposal_hash: TermRef(certificate.proposal_hash.0),
+        typescape_coord: mathscape_core::lifecycle::TypescapeCoord::precommit(
+            &proposal.target,
+            &proposal.name,
+        ),
     };
 
     Ok(PromotionReceipt {

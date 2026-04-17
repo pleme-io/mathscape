@@ -187,6 +187,7 @@ mod tests {
             target: "t::T".into(),
             name: "X".into(),
             proposal_hash: TermRef([0; 32]),
+            typescape_coord: crate::lifecycle::TypescapeCoord::precommit("t::T", "X"),
         };
         let out = gate
             .evaluate(

@@ -130,6 +130,10 @@ mod tests {
             target: "mathscape_core::term::Term".into(),
             name: "IdentityElement".into(),
             proposal_hash: fake_hash(0xff),
+            typescape_coord: crate::lifecycle::TypescapeCoord::precommit(
+                "mathscape_core::term::Term",
+                "IdentityElement",
+            ),
         };
         let r1 = MigrationReport::seal(
             primitive.clone(),
@@ -152,6 +156,7 @@ mod tests {
             target: "t::T".into(),
             name: "X".into(),
             proposal_hash: fake_hash(0),
+            typescape_coord: crate::lifecycle::TypescapeCoord::precommit("t::T", "X"),
         };
         let r1 = MigrationReport::seal(primitive.clone(), vec![fake_hash(1)], vec![], 0);
         let r2 = MigrationReport::seal(primitive, vec![fake_hash(2)], vec![], 0);
