@@ -264,11 +264,28 @@ pub fn reduction_pressure(registry: &dyn Registry) -> f64 {
 }
 
 /// Enumerate subsumer→subsumed pairs the reinforcement pass can
-/// act on. Canonical ordering: for each unordered pair {a, b} where
-/// both subsume each other, the subsumer with the smaller
-/// content_hash is chosen, keeping the emission deterministic.
+/// act on.
 ///
-/// Used by `Epoch::run_reinforce` to fire collapse events.
+/// Deterministic canonical rules:
+///
+/// 1. **Mutual subsumption (equivalence)**: when `A.lhs` and `B.lhs`
+///    pattern-match each other both ways, the pair represents an
+///    equivalence class, not a strict subsumption. We emit exactly
+///    one direction — canonical subsumer = the one with the smaller
+///    content hash. The other becomes `Subsumed(smaller)`. This
+///    keeps one representative active and prevents the "both marked
+///    subsumed, neither promotable" degenerate observed in the
+///    mathscape flex.
+///
+/// 2. **Strict subsumption**: when only `A.lhs` matches `B.lhs`, A
+///    is strictly more general. Emit (A, B) unconditionally.
+///
+/// 3. **Dedup by subsumed hash**: once B has been reported as
+///    subsumed, it won't be reported again (no matter which A could
+///    subsume it). The first subsumer wins.
+///
+/// 4. **Stable ordering**: output sorted by (subsumer, subsumed)
+///    bytes so the sequence is fully deterministic.
 #[must_use]
 pub fn detect_subsumption_pairs(
     registry: &dyn Registry,
@@ -281,20 +298,25 @@ pub fn detect_subsumption_pairs(
             if ai == bi {
                 continue;
             }
-            // a subsumes b: a.lhs pattern-matches b.lhs.
-            if pattern_match(&a_art.rule.lhs, &b_art.rule.lhs).is_some() {
-                // Ensure the same unordered pair isn't emitted
-                // twice. Canonicalize by sorting — the subsumed
-                // entry is claimed; further discoveries of the
-                // same subsumed are skipped.
-                if claimed.insert(*bi.as_bytes()) {
-                    out.push((*ai, *bi));
+            // A subsumes B: A.lhs pattern-matches B.lhs.
+            let a_subsumes_b = pattern_match(&a_art.rule.lhs, &b_art.rule.lhs).is_some();
+            if !a_subsumes_b {
+                continue;
+            }
+            // Check for mutual subsumption (equivalence class).
+            let b_subsumes_a = pattern_match(&b_art.rule.lhs, &a_art.rule.lhs).is_some();
+            if b_subsumes_a {
+                // Keep only the canonical direction: the lower-hash
+                // representative becomes the subsumer.
+                if ai.as_bytes() > bi.as_bytes() {
+                    continue;
                 }
+            }
+            if claimed.insert(*bi.as_bytes()) {
+                out.push((*ai, *bi));
             }
         }
     }
-    // Sort by (subsumer, subsumed) bytes for fully deterministic
-    // emission order across runs.
     out.sort_by(|x, y| {
         x.0.as_bytes()
             .cmp(y.0.as_bytes())
