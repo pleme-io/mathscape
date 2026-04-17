@@ -1925,6 +1925,7 @@ name = "mathscape-axiom-bridge"
 version = "0.1.0"
 dependencies = [
  "axiom-forge",
+ "mathscape-compress",
  "mathscape-core",
 ]
 

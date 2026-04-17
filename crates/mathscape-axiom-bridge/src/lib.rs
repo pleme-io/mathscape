@@ -11,7 +11,7 @@
 
 use axiom_forge::{
     emit::{emit_rust, EmissionError, EmissionOutput},
-    proposal::{AxiomKind, AxiomProposal},
+    proposal::{AxiomKind, AxiomProposal, FieldSpec, FieldTy},
     vector::FrozenVector,
     verify::{verify, Certificate, VerifyConfig, Violation},
 };
@@ -140,9 +140,8 @@ pub fn signal_to_proposal(
     proposal
 }
 
-/// Count free variables in a term — used to gate complex rules out of
-/// v0 bridging.
-fn count_free_vars(term: &Term) -> usize {
+/// Collect the free-variable ids in a term, in deterministic order.
+fn free_vars(term: &Term) -> Vec<u32> {
     fn walk(t: &Term, seen: &mut std::collections::BTreeSet<u32>) {
         match t {
             Term::Var(id) => {
@@ -165,29 +164,59 @@ fn count_free_vars(term: &Term) -> usize {
     }
     let mut seen = std::collections::BTreeSet::new();
     walk(term, &mut seen);
-    seen.len()
+    seen.into_iter().collect()
+}
+
+/// Hard cap on field count — axiom-forge's `MAX_FIELDS` is 8; stay
+/// under it to keep the bridge deterministic.
+const MAX_BRIDGED_FIELDS: usize = 8;
+
+/// Infer a `FieldSpec` per free variable in the rule's lhs. v0
+/// always assigns `FieldTy::String` — richer inference (scanning the
+/// rhs for the variable's usage shape) is a later upgrade.
+fn fields_from_rule(rule_lhs: &Term) -> Option<Vec<FieldSpec>> {
+    let vars = free_vars(rule_lhs);
+    if vars.len() > MAX_BRIDGED_FIELDS {
+        return None;
+    }
+    Some(
+        vars.into_iter()
+            .enumerate()
+            .map(|(i, _v)| FieldSpec {
+                name: format!("arg{i}"),
+                ty: FieldTy::String,
+                doc: format!("mathscape free variable slot {i}"),
+            })
+            .collect(),
+    )
 }
 
 /// Run the bridge end-to-end: build the proposal, run axiom-forge's
 /// gate 6, and on success emit Rust source + frozen vector.
 ///
-/// v0 restricts to rules whose `lhs` has zero free variables (pure
-/// nullary symbols). Phase upgrade lifts this constraint once field-
-/// type inference lands.
+/// Free variables in `artifact.rule.lhs` become `FieldTy::String`
+/// fields on the generated enum variant. Rules with more than
+/// `MAX_BRIDGED_FIELDS` free variables are rejected (axiom-forge's
+/// own cap).
 pub fn run_promotion(
     signal: &PromotionSignal,
     artifact: &Artifact,
     config: &BridgeConfig,
 ) -> Result<PromotionReceipt, PromotionFailure> {
-    // v0 pre-check: reject rules with free-var lhs.
-    if count_free_vars(&artifact.rule.lhs) > 0 {
-        return Err(PromotionFailure::VerifyFailed(vec![Violation::new(
-            axiom_forge::verify::ProofObligation::FieldsWellFormed,
-            "v0 bridge: non-nullary rules not yet supported".to_string(),
-        )]));
-    }
+    // Pre-check: bridge's arity cap.
+    let fields = fields_from_rule(&artifact.rule.lhs).ok_or_else(|| {
+        PromotionFailure::VerifyFailed(vec![Violation::new(
+            axiom_forge::verify::ProofObligation::FieldCountBounded,
+            format!(
+                "bridge: rule has more than {MAX_BRIDGED_FIELDS} free vars; arity cap exceeded"
+            ),
+        )])
+    })?;
 
-    let proposal = signal_to_proposal(signal, artifact, config);
+    let mut proposal = signal_to_proposal(signal, artifact, config);
+    for f in fields {
+        proposal = proposal.with_field(f);
+    }
 
     let certificate = verify(&proposal, &config.verify_config)
         .map_err(PromotionFailure::VerifyFailed)?;
@@ -275,11 +304,39 @@ mod tests {
     }
 
     #[test]
-    fn v0_bridge_rejects_rules_with_free_vars() {
+    fn bridge_emits_string_fields_for_rules_with_free_vars() {
         use mathscape_core::test_helpers::var;
         let rule = RewriteRule {
-            name: "complex".into(),
-            lhs: var(42),
+            name: "with-slot".into(),
+            // lhs has one free variable — becomes arg0: String.
+            lhs: Term::Apply(Box::new(Term::Symbol(1, vec![])), vec![var(42)]),
+            rhs: var(42),
+        };
+        let artifact = Artifact::seal(
+            rule,
+            0,
+            AcceptanceCertificate::trivial_conjecture(1.0),
+            vec![],
+        );
+        let signal = signal_for(&artifact);
+        let receipt = run_promotion(&signal, &artifact, &BridgeConfig::default())
+            .expect("bridge must accept single-slot rules");
+        assert_eq!(receipt.proposal.fields.len(), 1);
+        assert_eq!(receipt.proposal.fields[0].name, "arg0");
+        assert_eq!(receipt.proposal.fields[0].ty, FieldTy::String);
+        assert!(receipt.emission.declaration.contains("arg0"));
+    }
+
+    #[test]
+    fn bridge_rejects_rules_over_arity_cap() {
+        use mathscape_core::test_helpers::var;
+        // 9 free vars > MAX_BRIDGED_FIELDS (8) → rejected.
+        let rule = RewriteRule {
+            name: "too-many".into(),
+            lhs: Term::Apply(
+                Box::new(Term::Symbol(1, vec![])),
+                (0..9).map(var).collect(),
+            ),
             rhs: Term::Point(0),
         };
         let artifact = Artifact::seal(

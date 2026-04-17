@@ -12,3 +12,4 @@ axiom-forge = { git = "https://github.com/pleme-io/axiom-forge" }
 
 [dev-dependencies]
 mathscape-core = { workspace = true, features = ["test-helpers"] }
+mathscape-compress.workspace = true
