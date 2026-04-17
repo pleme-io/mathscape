@@ -141,7 +141,6 @@ fn term_to_lean(t: &Term, params: &[String]) -> String {
             }
         }
         Term::Number(Value::Nat(n)) => format!("({n} : Nat)"),
-        Term::Number(_) => "_".into(),
         Term::Point(p) => format!("(Point.mk {p})"),
         Term::Apply(f, args) => match f.as_ref() {
             Term::Var(2) if args.len() == 2 => format!(
