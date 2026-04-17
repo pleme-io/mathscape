@@ -19,7 +19,7 @@ pub use control::{
 };
 pub use epoch::{
     AcceptanceCertificate, Artifact, Candidate, Emitter, Epoch, EpochTrace, Generator,
-    InMemoryRegistry, Prover, Registry, Rejection, Verdict,
+    InMemoryRegistry, Prover, Registry, Rejection, RuleEmitter, Verdict,
 };
 pub use event::{Event, EventCategory, StatusAdvance};
 pub use hash::TermRef;

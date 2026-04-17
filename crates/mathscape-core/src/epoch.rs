@@ -364,6 +364,28 @@ where
     }
 }
 
+/// Canonical [`Emitter`] — wraps the candidate's rule with
+/// `content_hash` via [`Artifact::seal`] and `parent_hashes` derived
+/// from symbol references in `rule.rhs`. Domain-specific emitters
+/// can compose on top by adding validation; this impl suffices for
+/// any Generator that already produces complete `RewriteRule`s.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct RuleEmitter;
+
+impl Emitter for RuleEmitter {
+    fn emit(
+        &self,
+        candidate: &Candidate,
+        cert: &AcceptanceCertificate,
+        epoch_id: u64,
+        library: &[Artifact],
+    ) -> Option<Artifact> {
+        let rule = candidate.rule.clone();
+        let parent_hashes = Artifact::parents_from_rhs(&rule, library);
+        Some(Artifact::seal(rule, epoch_id, cert.clone(), parent_hashes))
+    }
+}
+
 /// In-memory [`Registry`] — Vec-backed, good for tests and the current
 /// in-memory REPL. Persistent backends live in `mathscape-store`.
 #[derive(Debug, Default, Clone)]
@@ -443,31 +465,6 @@ mod tests {
                 threshold: 1.0,
                 actual: 0.0,
             }])
-        }
-    }
-
-    /// Emitter that wraps the candidate's rule with hash + parent
-    /// hashes. The canonical mathscape emitter; real adapters add
-    /// domain-specific validation.
-    struct RuleEmitter;
-    impl Emitter for RuleEmitter {
-        fn emit(
-            &self,
-            candidate: &Candidate,
-            cert: &AcceptanceCertificate,
-            epoch_id: u64,
-            library: &[Artifact],
-        ) -> Option<Artifact> {
-            let rule = candidate.rule.clone();
-            let content_hash = Artifact::canonical_hash(&rule, epoch_id, cert);
-            let parent_hashes = Artifact::parents_from_rhs(&rule, library);
-            Some(Artifact {
-                rule,
-                epoch_id,
-                certificate: cert.clone(),
-                content_hash,
-                parent_hashes,
-            })
         }
     }
 

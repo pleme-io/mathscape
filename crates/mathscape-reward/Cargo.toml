@@ -13,3 +13,4 @@ mathscape-compress.workspace = true
 
 [dev-dependencies]
 mathscape-core = { workspace = true, features = ["test-helpers"] }
+mathscape-compress.workspace = true

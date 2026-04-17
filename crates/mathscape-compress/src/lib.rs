@@ -3,5 +3,8 @@
 //! E-graph integration (egg) is a future phase — this module starts with
 //! direct anti-unification for pattern discovery.
 
+pub mod adapter;
 pub mod antiunify;
 pub mod extract;
+
+pub use adapter::CompressionGenerator;
