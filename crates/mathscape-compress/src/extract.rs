@@ -64,10 +64,31 @@ pub fn extract_rules(
     // and filter by minimum matches
     let mut rules: Vec<RewriteRule> = Vec::new();
 
-    // Sort by shared size descending (prefer larger patterns)
+    // Sort by shared size descending (prefer larger patterns).
     candidates.sort_by(|a, b| b.0.shared_size.cmp(&a.0.shared_size));
 
-    for (result, _t1, _t2) in candidates.iter().take(config.max_new_rules) {
+    // Dedup by pattern-equivalence BEFORE applying max_new_rules.
+    // Anti-unifying multiple pairs of a single-pattern family (e.g.,
+    // all add-add pairs) produces many candidates with the same
+    // pattern. Without dedup here, duplicate-pattern candidates fill
+    // up the max_new_rules budget and crowd out patterns from other
+    // families (observed: mixed corpus yielding only add patterns
+    // because all 5 top slots were add-duplicates).
+    //
+    // Two patterns are equivalent iff each pattern-matches the
+    // other.
+    let mut unique_candidates: Vec<_> = Vec::new();
+    for cand in candidates {
+        let already_seen = unique_candidates.iter().any(|u: &(AntiUnifyResult, Term, Term)| {
+            mathscape_core::eval::pattern_match(&u.0.pattern, &cand.0.pattern).is_some()
+                && mathscape_core::eval::pattern_match(&cand.0.pattern, &u.0.pattern).is_some()
+        });
+        if !already_seen {
+            unique_candidates.push(cand);
+        }
+    }
+
+    for (result, _t1, _t2) in unique_candidates.iter().take(config.max_new_rules) {
         // Count how many corpus members this pattern matches
         let match_count = corpus
             .iter()

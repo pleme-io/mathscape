@@ -209,7 +209,7 @@ fn run_flex(label: &str, corpus: Vec<Term>, max_layers: u32, max_epochs_per_laye
         );
     }
 
-    println!("\n▶ Library at trajectory end");
+    println!("\n▶ Library at trajectory end ({} artifacts total)", runner.epoch.registry.all().len());
     for (i, a) in runner.epoch.registry.all().iter().enumerate() {
         let status = runner.epoch.registry.status_of(a.content_hash).unwrap();
         let status_str = match status {
