@@ -38,7 +38,9 @@ pub use migration::migrate_library;
 pub use promotion::{CorpusId, MigrationReport, PromotionSignal};
 pub use promotion_gate::{ArtifactHistory, PromotionGate, ThresholdGate};
 pub use reduction::{
-    check_maximally_reduced, ReductionBarrier, ReductionSummary, ReductionVerdict,
+    check_maximally_reduced, check_reduction, detect_subsumption_pairs,
+    reduction_pressure, ReductionBarrier, ReductionPolicy, ReductionSummary,
+    ReductionVerdict,
 };
 pub use term::{StoredTerm, SymbolId, Term};
 pub use value::Value;

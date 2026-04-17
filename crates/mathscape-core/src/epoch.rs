@@ -440,21 +440,51 @@ where
         trace
     }
 
-    /// Run a reinforcement pass: iterate library artifacts and push
-    /// status forward where possible. v0 is a scaffold — it iterates
-    /// and emits no events, so the allocator's plateau detection
-    /// naturally fires and switches to Discover. Real reinforcement
-    /// (e-graph verification → Conjectured→Verified advance, Lean
-    /// export → Verified→Exported, etc.) lands as `mathscape-proof`
-    /// matures.
+    /// Run a reinforcement pass: fire collapse events where
+    /// pressure permits. Currently implements the subsumption path:
+    /// detect (subsumer, subsumed) pairs, mark the subsumed
+    /// artifact's status as `Subsumed(subsumer)` in the registry
+    /// overlay, and emit an `Event::Subsumption` per collapse with
+    /// `delta_dl` proportional to the absorbed rule's size.
+    ///
+    /// The e-graph-based status-advance path (Conjectured→Verified,
+    /// Verified→Exported) lands as `mathscape-proof` matures. Until
+    /// then, subsumption is the dominant reinforcement event —
+    /// which in the phase-transition model is the primary collapse
+    /// event anyway (see docs/arch/collapse-and-surprise.md).
     fn run_reinforce(&mut self) -> EpochTrace {
-        let trace = EpochTrace {
+        use crate::event::Event;
+        use crate::lifecycle::ProofStatus;
+        let mut trace = EpochTrace {
             epoch_id: self.epoch_id,
             action: Some(crate::control::EpochAction::Reinforce),
             ..Default::default()
         };
-        // Scan artifacts (no-op work for v0).
-        let _count = self.registry.all().len();
+
+        // Pre-compute subsumed rule sizes before we start mutating
+        // the registry, so status marks don't affect later lookups.
+        let pairs = crate::reduction::detect_subsumption_pairs(&self.registry);
+        let subsumed_sizes: Vec<(TermRef, TermRef, f64)> = pairs
+            .into_iter()
+            .filter_map(|(subsumer, subsumed)| {
+                let artifact = self.registry.find(subsumed)?;
+                // ΔDL ≈ size of the absorbed rule (both lhs and rhs),
+                // in "term nodes" as a proxy for bits. Real MDL would
+                // weight by symbol entropy; v0 uses node count.
+                let size = (artifact.rule.lhs.size() + artifact.rule.rhs.size()) as f64;
+                Some((subsumer, subsumed, size))
+            })
+            .collect();
+
+        for (subsumer, subsumed, delta_dl) in subsumed_sizes {
+            self.registry.mark_status(subsumed, ProofStatus::Subsumed(subsumer));
+            trace.events.push(Event::Subsumption {
+                absorbed: subsumed,
+                subsumer,
+                delta_dl,
+            });
+        }
+
         self.epoch_id += 1;
         trace
     }

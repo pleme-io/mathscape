@@ -237,6 +237,72 @@ pub fn check_maximally_reduced(registry: &dyn Registry) -> ReductionVerdict {
     check_reduction(registry, &ReductionPolicy::layer_0_default())
 }
 
+/// Reduction pressure — the leading indicator described in
+/// `docs/arch/collapse-and-surprise.md`.
+///
+/// Defined as the count of unresolved subsumable pairs per active
+/// artifact. When it rises above a policy-specific threshold, a
+/// collapse event is scheduled: the reinforcement pass will start
+/// firing Subsumption events that release the pressure.
+///
+/// Zero pressure means the library is either empty or maximally
+/// reduced under its current policy — no collapse is imminent.
+#[must_use]
+pub fn reduction_pressure(registry: &dyn Registry) -> f64 {
+    let verdict = check_maximally_reduced(registry);
+    let active = active_artifacts_with_status(registry).len().max(1) as f64;
+    match verdict {
+        ReductionVerdict::Reduced => 0.0,
+        ReductionVerdict::Barriers(bs) => {
+            let pairs = bs
+                .iter()
+                .filter(|b| matches!(b, ReductionBarrier::SubsumablePair { .. }))
+                .count();
+            pairs as f64 / active
+        }
+    }
+}
+
+/// Enumerate subsumer→subsumed pairs the reinforcement pass can
+/// act on. Canonical ordering: for each unordered pair {a, b} where
+/// both subsume each other, the subsumer with the smaller
+/// content_hash is chosen, keeping the emission deterministic.
+///
+/// Used by `Epoch::run_reinforce` to fire collapse events.
+#[must_use]
+pub fn detect_subsumption_pairs(
+    registry: &dyn Registry,
+) -> Vec<(TermRef, TermRef)> {
+    let active = active_artifacts_with_status(registry);
+    let mut claimed: HashSet<[u8; 32]> = HashSet::new();
+    let mut out: Vec<(TermRef, TermRef)> = Vec::new();
+    for (ai, _, a_art) in &active {
+        for (bi, _, b_art) in &active {
+            if ai == bi {
+                continue;
+            }
+            // a subsumes b: a.lhs pattern-matches b.lhs.
+            if pattern_match(&a_art.rule.lhs, &b_art.rule.lhs).is_some() {
+                // Ensure the same unordered pair isn't emitted
+                // twice. Canonicalize by sorting — the subsumed
+                // entry is claimed; further discoveries of the
+                // same subsumed are skipped.
+                if claimed.insert(*bi.as_bytes()) {
+                    out.push((*ai, *bi));
+                }
+            }
+        }
+    }
+    // Sort by (subsumer, subsumed) bytes for fully deterministic
+    // emission order across runs.
+    out.sort_by(|x, y| {
+        x.0.as_bytes()
+            .cmp(y.0.as_bytes())
+            .then_with(|| x.1.as_bytes().cmp(y.1.as_bytes()))
+    });
+    out
+}
+
 /// Convenience summary: a single struct with counts and a verdict
 /// suitable for CLI display or MCP serialization.
 #[derive(Debug, Clone, Serialize, Deserialize)]
