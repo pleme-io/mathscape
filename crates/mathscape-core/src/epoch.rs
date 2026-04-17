@@ -10,8 +10,9 @@
 //! See `docs/arch/epoch-quad.md` for the design narrative.
 
 use crate::eval::RewriteRule;
-use crate::term::{SymbolId, Term};
 use crate::hash::TermRef;
+use crate::lifecycle::ProofStatus;
+use crate::term::{SymbolId, Term};
 use serde::{Deserialize, Serialize};
 
 /// A candidate rewrite rule entering the pipeline. The rule may have
@@ -21,7 +22,7 @@ use serde::{Deserialize, Serialize};
 /// `origin` is a free-form tag (e.g. `"compress/antiunify"`,
 /// `"evolve/mutate"`, `"rl/sample"`) that audits can use to attribute
 /// artifacts back to the generator that produced them.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Candidate {
     pub rule: RewriteRule,
     pub origin: String,
@@ -34,36 +35,56 @@ pub enum Verdict {
     Reject(Vec<Rejection>),
 }
 
-/// How thoroughly a proposal has been verified.
-///
-/// - `Conjectured`: observed empirically (reward thresholds met), not
-///   yet mechanically verified.
-/// - `Verified`: equivalence confirmed via e-graph saturation; lhs and
-///   rhs are in the same equivalence class.
-/// - `Exported`: a proof certificate has been emitted to an external
-///   proof assistant (Lean 4) and accepted there.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum ProofStatus {
-    Conjectured,
-    Verified,
-    Exported,
-}
-
-/// Evidence that a candidate passed the prover.
+/// Evidence that a candidate passed the prover. The three reward axes
+/// (`compression_ratio`, `condensation_ratio`, `coverage_delta`) are
+/// kept separately so the regime detector and promotion gate can read
+/// each axis independently — see `docs/arch/condensation-reward.md`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AcceptanceCertificate {
+    /// Scalar composite score under the prover's active weighting.
     pub score: f64,
+    /// Corpus compression: `1 - DL(C|L_new) / DL(C|L_old)` ∈ [0, 1].
     pub compression_ratio: f64,
+    /// Library shrinkage: `(|L_old| - |L_new|) / |L_old|` ∈ [0, 1].
+    pub condensation_ratio: f64,
+    /// Coverage preservation: `matches_new - matches_old`. Must be ≥ 0
+    /// for the prover to accept (hard constraint — see MDL doc).
+    pub coverage_delta: i64,
+    /// Statistical novelty (generality × irreducibility).
     pub novelty: f64,
+    /// Recursive-compression score when the library is treated as
+    /// corpus-for-itself.
     pub meta_compression: f64,
+    /// The single-currency reward value (bits saved under MDL).
+    pub delta_dl: f64,
+    /// Position in the lifecycle lattice. See `lifecycle::ProofStatus`.
     pub status: ProofStatus,
     /// Present when `status >= Verified` — hash of the equivalence-class
     /// representative produced by the e-graph.
     pub equivalence_hash: Option<TermRef>,
 }
 
+impl AcceptanceCertificate {
+    /// A minimal certificate used by tests and stub provers. Real
+    /// provers compute the axes from corpus + library snapshots.
+    #[must_use]
+    pub fn trivial_conjecture(score: f64) -> Self {
+        Self {
+            score,
+            compression_ratio: 0.0,
+            condensation_ratio: 0.0,
+            coverage_delta: 0,
+            novelty: 0.0,
+            meta_compression: 0.0,
+            delta_dl: score,
+            status: ProofStatus::Conjectured,
+            equivalence_hash: None,
+        }
+    }
+}
+
 /// Why a candidate was rejected — enough context for diagnostics.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Rejection {
     pub reason: String,
     pub threshold: f64,
@@ -88,6 +109,27 @@ pub struct Artifact {
 }
 
 impl Artifact {
+    /// The canonical constructor. Computes `content_hash` from
+    /// `(rule, epoch_id, certificate)` — the hash invariant cannot be
+    /// bypassed short of mutating fields post-construction. Prefer
+    /// this over building `Artifact` directly.
+    #[must_use]
+    pub fn seal(
+        rule: RewriteRule,
+        epoch_id: u64,
+        certificate: AcceptanceCertificate,
+        parent_hashes: Vec<TermRef>,
+    ) -> Self {
+        let content_hash = Self::canonical_hash(&rule, epoch_id, &certificate);
+        Self {
+            rule,
+            epoch_id,
+            certificate,
+            content_hash,
+            parent_hashes,
+        }
+    }
+
     /// Canonical content hash — same inputs produce the same bytes
     /// produce the same hash.
     pub fn canonical_hash(
@@ -150,7 +192,9 @@ fn rule_symbol_id(rule: &RewriteRule) -> Option<SymbolId> {
     }
 }
 
-/// Audit record of one epoch.
+/// Audit record of one epoch. Carries the event stream + summary
+/// counters + the action that ran + the regime the machine believes
+/// it is in. See `docs/arch/machine-synthesizer.md`.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct EpochTrace {
     pub epoch_id: u64,
@@ -158,6 +202,31 @@ pub struct EpochTrace {
     pub accepted: usize,
     pub rejected: usize,
     pub artifact_hashes: Vec<TermRef>,
+    /// The full event sequence in the order they occurred this epoch.
+    /// `V(epoch) = Σ event.delta_dl()`.
+    pub events: Vec<crate::event::Event>,
+    /// Which of Reinforce / Discover / Promote / Migrate this epoch ran.
+    pub action: Option<crate::control::EpochAction>,
+    /// Regime the allocator believed was active entering this epoch.
+    pub regime: Option<crate::control::Regime>,
+}
+
+impl EpochTrace {
+    /// Total ΔDL across all events — the unified epoch score.
+    #[must_use]
+    pub fn total_delta_dl(&self) -> f64 {
+        self.events.iter().map(crate::event::Event::delta_dl).sum()
+    }
+
+    /// ΔDL contributed by events in a specific category.
+    #[must_use]
+    pub fn delta_dl_by(&self, category: crate::event::EventCategory) -> f64 {
+        self.events
+            .iter()
+            .filter(|e| e.category() == category)
+            .map(crate::event::Event::delta_dl)
+            .sum()
+    }
 }
 
 /// Propose candidates from a population / search strategy.
@@ -235,31 +304,58 @@ where
         }
     }
 
-    /// Run one epoch. Returns an audit trace.
+    /// Run one discovery epoch. Returns an audit trace populated with
+    /// `Event::Proposal` / `Event::Accept` / `Event::Reject` entries.
+    ///
+    /// This is the v0 dispatch — only the Discovery pass is
+    /// implemented. Reinforce / Promote / Migrate dispatch lands in
+    /// later phases of `docs/arch/realization-plan.md`.
     pub fn step(&mut self, corpus: &[Term]) -> EpochTrace {
+        use crate::event::Event;
         let proposals = self
             .generator
             .propose(self.epoch_id, corpus, self.registry.all());
         let mut trace = EpochTrace {
             epoch_id: self.epoch_id,
             proposals: proposals.len(),
+            action: Some(crate::control::EpochAction::Discover),
             ..Default::default()
         };
 
         for cand in &proposals {
+            trace.events.push(Event::Proposal {
+                candidate: cand.clone(),
+                delta_dl: 0.0,
+            });
             let verdict = self.prover.prove(cand, corpus, self.registry.all());
             match verdict {
                 Verdict::Accept(cert) => {
                     let library = self.registry.all();
                     if let Some(artifact) = self.emitter.emit(cand, &cert, self.epoch_id, library) {
+                        let delta_dl = cert.delta_dl;
                         trace.artifact_hashes.push(artifact.content_hash);
+                        trace.events.push(Event::Accept {
+                            artifact: artifact.clone(),
+                            delta_dl,
+                        });
                         self.registry.insert(artifact);
                         trace.accepted += 1;
                     } else {
                         trace.rejected += 1;
                     }
                 }
-                Verdict::Reject(_) => trace.rejected += 1,
+                Verdict::Reject(reasons) => {
+                    let candidate_hash = Artifact::canonical_hash(
+                        &cand.rule,
+                        self.epoch_id,
+                        &AcceptanceCertificate::trivial_conjecture(0.0),
+                    );
+                    trace.events.push(Event::Reject {
+                        candidate_hash,
+                        reasons,
+                    });
+                    trace.rejected += 1;
+                }
             }
         }
 
@@ -320,14 +416,21 @@ mod tests {
     struct AlwaysAccept;
     impl Prover for AlwaysAccept {
         fn prove(&self, _c: &Candidate, _corpus: &[Term], _lib: &[Artifact]) -> Verdict {
-            Verdict::Accept(AcceptanceCertificate {
-                score: 1.0,
-                compression_ratio: 0.5,
-                novelty: 0.5,
-                meta_compression: 0.0,
-                status: ProofStatus::Conjectured,
-                equivalence_hash: None,
-            })
+            Verdict::Accept(sample_cert(1.0))
+        }
+    }
+
+    fn sample_cert(score: f64) -> AcceptanceCertificate {
+        AcceptanceCertificate {
+            score,
+            compression_ratio: 0.5,
+            condensation_ratio: 0.0,
+            coverage_delta: 0,
+            novelty: 0.5,
+            meta_compression: 0.0,
+            delta_dl: score,
+            status: ProofStatus::Conjectured,
+            equivalence_hash: None,
         }
     }
 
@@ -436,14 +539,7 @@ mod tests {
             lhs: Term::Symbol(1, vec![]),
             rhs: apply(var(2), vec![nat(1), nat(1)]),
         };
-        let cert = AcceptanceCertificate {
-            score: 1.0,
-            compression_ratio: 0.5,
-            novelty: 0.5,
-            meta_compression: 0.0,
-            status: ProofStatus::Conjectured,
-            equivalence_hash: None,
-        };
+        let cert = sample_cert(1.0);
         let h1 = Artifact::canonical_hash(&rule, 0, &cert);
         let h2 = Artifact::canonical_hash(&rule, 0, &cert);
         assert_eq!(h1, h2);
@@ -451,14 +547,7 @@ mod tests {
 
     #[test]
     fn distinct_artifacts_distinct_hashes() {
-        let cert = AcceptanceCertificate {
-            score: 1.0,
-            compression_ratio: 0.5,
-            novelty: 0.5,
-            meta_compression: 0.0,
-            status: ProofStatus::Conjectured,
-            equivalence_hash: None,
-        };
+        let cert = sample_cert(1.0);
         let r1 = RewriteRule {
             name: "S_001".into(),
             lhs: Term::Symbol(1, vec![]),
@@ -482,14 +571,7 @@ mod tests {
         let mut registry = InMemoryRegistry::new();
         let emitter = RuleEmitter;
 
-        let c1 = AcceptanceCertificate {
-            score: 1.0,
-            compression_ratio: 0.5,
-            novelty: 0.5,
-            meta_compression: 0.0,
-            status: ProofStatus::Conjectured,
-            equivalence_hash: None,
-        };
+        let c1 = sample_cert(1.0);
         let first = emitter
             .emit(
                 &Candidate {
@@ -538,26 +620,13 @@ mod tests {
     #[test]
     fn in_memory_registry_append_only() {
         let mut reg = InMemoryRegistry::new();
-        let cert = AcceptanceCertificate {
-            score: 1.0,
-            compression_ratio: 0.5,
-            novelty: 0.5,
-            meta_compression: 0.0,
-            status: ProofStatus::Conjectured,
-            equivalence_hash: None,
-        };
+        let cert = sample_cert(1.0);
         let rule = RewriteRule {
             name: "S_001".into(),
             lhs: Term::Symbol(1, vec![]),
             rhs: Term::Number(Value::Nat(1)),
         };
-        let a = Artifact {
-            content_hash: Artifact::canonical_hash(&rule, 0, &cert),
-            rule,
-            epoch_id: 0,
-            certificate: cert,
-            parent_hashes: vec![],
-        };
+        let a = Artifact::seal(rule, 0, cert, vec![]);
         reg.insert(a.clone());
         reg.insert(a);
         assert_eq!(reg.len(), 2);
