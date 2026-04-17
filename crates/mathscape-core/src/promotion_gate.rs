@@ -14,7 +14,7 @@ use crate::{
 use std::collections::BTreeSet;
 
 /// Per-artifact history needed to evaluate gates 4 and 5.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct ArtifactHistory {
     /// Distinct corpora in which the artifact's pattern has matched
     /// at least once.

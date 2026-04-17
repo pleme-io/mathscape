@@ -2,6 +2,8 @@
 //! substitution, s-expression parser/printer.
 
 pub mod control;
+pub mod corpus;
+pub mod demotion;
 pub mod epoch;
 pub mod eval;
 pub mod event;
@@ -20,6 +22,8 @@ pub use control::{
     Allocator, EpochAction, Regime, RegimeDetector, RegimeWeights, RealizationPolicy,
     RewardEstimator,
 };
+pub use corpus::{CorpusLog, CorpusSnapshot};
+pub use demotion::{demote_artifact, DemotionCandidate, DemotionGate, UsageFloorGate};
 pub use epoch::{
     AcceptanceCertificate, Artifact, Candidate, Emitter, Epoch, EpochTrace, Generator,
     InMemoryRegistry, Prover, Registry, Rejection, RuleEmitter, Verdict,
