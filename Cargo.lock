@@ -2024,6 +2024,8 @@ dependencies = [
 name = "mathscape-mcp"
 version = "0.1.0"
 dependencies = [
+ "mathscape-axiom-bridge",
+ "mathscape-compress",
  "mathscape-config",
  "mathscape-core",
  "mathscape-discovery",
@@ -2594,6 +2596,10 @@ dependencies = [
  "proc-macro2",
  "syn 2.0.117",
 ]
+
+[[package]]
+name = "primitive-forge"
+version = "0.1.0"
 
 [[package]]
 name = "proc-macro-crate"

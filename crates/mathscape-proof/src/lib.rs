@@ -1,5 +1,9 @@
 //! Proof construction, verification, composition, and Lean 4 export.
 
+pub mod lean_export;
+
+pub use lean_export::{export_rule_as_lean, LeanExportOptions};
+
 use mathscape_core::eval::RewriteRule;
 use mathscape_core::term::Term;
 use serde::{Deserialize, Serialize};

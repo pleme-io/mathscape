@@ -18,16 +18,28 @@
 //!   - set_reward_weights — adjust alpha/beta/gamma live
 //!   - set_population   — adjust population size/depth/tournament_k
 
+use mathscape_axiom_bridge::{run_promotion, BridgeConfig};
+use mathscape_compress::{extract::ExtractConfig, CompressionGenerator};
 use mathscape_config::DynamicConfig;
-use mathscape_core::eval::RewriteRule;
+use mathscape_core::{
+    control::{Allocator, RealizationPolicy, RegimeDetector, RewardEstimator},
+    corpus::{CorpusLog, CorpusSnapshot},
+    epoch::{Epoch, InMemoryRegistry, Registry, RuleEmitter},
+    eval::RewriteRule,
+    promotion_gate::{PromotionGate, ThresholdGate},
+    term::Term,
+    trap::{Trap, TrapDetector},
+    value::Value,
+};
 use mathscape_discovery::catalog;
 use mathscape_discovery::matcher;
 use mathscape_discovery::representation;
 use mathscape_discovery::scanner::{self, SymbolRecord};
+use mathscape_reward::{reward::RewardConfig, StatisticalProver};
 use rmcp::model::{ServerCapabilities, ServerInfo};
 use rmcp::{ServerHandler, ServiceExt, schemars, tool};
 use serde::{Deserialize, Serialize};
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex, RwLock};
 
 /// Shared engine state accessible from MCP tool handlers.
 #[derive(Clone, Default)]
@@ -37,6 +49,142 @@ struct EngineSnapshot {
     population_size: usize,
     avg_fitness: f64,
     diversity: f64,
+    action: Option<String>,
+    regime: Option<String>,
+    trap_count: usize,
+    last_registry_root: Option<String>,
+}
+
+/// A real running engine behind the MCP server. Agents drive the
+/// pace by calling the `step` tool. No async background task; all
+/// state transitions are synchronous under a single Mutex.
+struct MathscapeEngine {
+    epoch: Epoch<CompressionGenerator, StatisticalProver, RuleEmitter, InMemoryRegistry>,
+    allocator: Allocator,
+    regime_detector: RegimeDetector,
+    trap_detector: TrapDetector,
+    trap_history: Vec<Trap>,
+    /// Built-in demonstration corpus. Agents can swap this via tools
+    /// in a future revision; v0 uses a fixed patterned corpus.
+    corpus_a: CorpusSnapshot,
+    corpus_b: CorpusSnapshot,
+    corpus_log: CorpusLog,
+    /// Which corpus to feed this epoch. Toggles each call to step so
+    /// cross-corpus evidence accumulates naturally.
+    next_corpus_is_a: bool,
+}
+
+impl MathscapeEngine {
+    fn new() -> Self {
+        fn apply(f: Term, args: Vec<Term>) -> Term {
+            Term::Apply(Box::new(f), args)
+        }
+        fn nat(n: u64) -> Term {
+            Term::Number(Value::Nat(n))
+        }
+        fn var(id: u32) -> Term {
+            Term::Var(id)
+        }
+        let arith_terms = vec![
+            apply(var(2), vec![nat(3), nat(0)]),
+            apply(var(2), vec![nat(5), nat(0)]),
+            apply(var(2), vec![nat(7), nat(0)]),
+            apply(var(2), vec![nat(11), nat(0)]),
+        ];
+        let comb_terms = vec![
+            apply(var(2), vec![nat(2), nat(0)]),
+            apply(var(2), vec![nat(13), nat(0)]),
+            apply(var(2), vec![nat(17), nat(0)]),
+            apply(var(2), vec![nat(19), nat(0)]),
+        ];
+        let corpus_a = CorpusSnapshot::new("arith", arith_terms, 0);
+        let corpus_b = CorpusSnapshot::new("combinators", comb_terms, 0);
+        let epoch = Epoch::new(
+            CompressionGenerator::new(
+                ExtractConfig {
+                    min_shared_size: 2,
+                    min_matches: 2,
+                    max_new_rules: 2,
+                },
+                1,
+            ),
+            StatisticalProver::new(RewardConfig::default(), 0.0),
+            RuleEmitter,
+            InMemoryRegistry::new(),
+        );
+        let policy = RealizationPolicy::default();
+        Self {
+            epoch,
+            allocator: Allocator::new(policy, RewardEstimator::new(0.3)),
+            regime_detector: RegimeDetector::new(10),
+            trap_detector: TrapDetector::new(3),
+            trap_history: Vec::new(),
+            corpus_a,
+            corpus_b,
+            corpus_log: CorpusLog::new(),
+            next_corpus_is_a: true,
+        }
+    }
+
+    /// Run one epoch, update the CorpusLog with the current corpus
+    /// matches, and observe traps. Returns the EpochTrace details.
+    fn step(&mut self) -> StepResult {
+        let corpus = if self.next_corpus_is_a {
+            &self.corpus_a
+        } else {
+            &self.corpus_b
+        };
+        let action = self
+            .allocator
+            .choose(corpus.terms.len(), self.epoch.registry.len());
+        let trace = self
+            .epoch
+            .step_with_action(corpus.terms(), action.clone());
+        // Scan the current corpus against every live artifact so
+        // cross-corpus evidence accumulates.
+        let scan_input: Vec<_> = self
+            .epoch
+            .registry
+            .all()
+            .iter()
+            .map(|a| (a.content_hash, a.rule.lhs.clone()))
+            .collect();
+        self.corpus_log.scan_corpus(corpus, scan_input, self.epoch.epoch_id);
+        self.allocator.estimator.update(&trace.events);
+        let regime = self.regime_detector.observe(&trace);
+        if let Some(trap) = self
+            .trap_detector
+            .observe(self.epoch.registry.root(), self.epoch.epoch_id)
+        {
+            self.trap_history.push(trap);
+        }
+        self.next_corpus_is_a = !self.next_corpus_is_a;
+        StepResult {
+            epoch_id: self.epoch.epoch_id,
+            action: format!("{:?}", action),
+            regime: format!("{:?}", regime),
+            accepted: trace.accepted,
+            rejected: trace.rejected,
+            library_size: self.epoch.registry.len(),
+            registry_root: format!("{}", self.epoch.registry.root()),
+            trap_count: self.trap_history.len(),
+        }
+    }
+
+    fn library_rules(&self) -> Vec<RewriteRule> {
+        self.epoch.registry.all().iter().map(|a| a.rule.clone()).collect()
+    }
+}
+
+struct StepResult {
+    epoch_id: u64,
+    action: String,
+    regime: String,
+    accepted: usize,
+    rejected: usize,
+    library_size: usize,
+    registry_root: String,
+    trap_count: usize,
 }
 
 /// The MCP server handler.
@@ -44,6 +192,7 @@ struct EngineSnapshot {
 struct MathscapeMcp {
     state: Arc<RwLock<EngineSnapshot>>,
     config: DynamicConfig,
+    engine: Arc<Mutex<MathscapeEngine>>,
 }
 
 impl MathscapeMcp {
@@ -52,7 +201,24 @@ impl MathscapeMcp {
         MathscapeMcp {
             state: Arc::new(RwLock::new(EngineSnapshot::default())),
             config: DynamicConfig::new(config),
+            engine: Arc::new(Mutex::new(MathscapeEngine::new())),
         }
+    }
+
+    /// Mirror the engine's current state into the shared snapshot so
+    /// the read-only observation tools return live data.
+    fn sync_snapshot(&self, step: &StepResult) {
+        let library = {
+            let e = self.engine.lock().unwrap();
+            e.library_rules()
+        };
+        let mut snap = self.state.write().unwrap();
+        snap.epoch = step.epoch_id;
+        snap.library = library;
+        snap.action = Some(step.action.clone());
+        snap.regime = Some(step.regime.clone());
+        snap.trap_count = step.trap_count;
+        snap.last_registry_root = Some(step.registry_root.clone());
     }
 }
 
@@ -108,6 +274,12 @@ struct ExprToTreeRequest {
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 struct EmptyRequest {}
+
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+struct PromoteRequest {
+    #[schemars(description = "Index of the rule in the library (0-based)")]
+    rule_index: usize,
+}
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 struct SetMaxEpochRequest {
@@ -170,6 +342,10 @@ impl MathscapeMcp {
             "population_size": s.population_size,
             "avg_fitness": s.avg_fitness,
             "diversity": s.diversity,
+            "last_action": s.action,
+            "last_regime": s.regime,
+            "trap_count": s.trap_count,
+            "last_registry_root": s.last_registry_root,
             "reward_weights": {
                 "alpha": config.reward.alpha,
                 "beta": config.reward.beta,
@@ -177,6 +353,94 @@ impl MathscapeMcp {
             },
         }))
         .unwrap()
+    }
+
+    #[tool(description = "Run one mathscape epoch and return a summary (action, regime, accepted, library_size, trap_count). The engine runs agent-paced — each call to step advances the machine by one epoch.")]
+    fn step(&self) -> String {
+        let step_result = {
+            let mut engine = self.engine.lock().unwrap();
+            engine.step()
+        };
+        self.sync_snapshot(&step_result);
+        serde_json::to_string_pretty(&serde_json::json!({
+            "epoch_id": step_result.epoch_id,
+            "action": step_result.action,
+            "regime": step_result.regime,
+            "accepted": step_result.accepted,
+            "rejected": step_result.rejected,
+            "library_size": step_result.library_size,
+            "registry_root": step_result.registry_root,
+            "trap_count": step_result.trap_count,
+        })).unwrap()
+    }
+
+    #[tool(description = "List all traps (fixed-point registry roots) emitted so far. Each trap is a content-addressed snapshot of a stable registry state.")]
+    fn list_traps(&self) -> String {
+        let engine = self.engine.lock().unwrap();
+        let traps: Vec<_> = engine.trap_history.iter().map(|t| serde_json::json!({
+            "registry_root": format!("{}", t.registry_root),
+            "content_hash": format!("{}", t.content_hash),
+            "epoch_entered": t.epoch_id_entered,
+            "epoch_left": t.epoch_id_left,
+            "is_active": t.is_active(),
+        })).collect();
+        serde_json::to_string_pretty(&traps).unwrap()
+    }
+
+    #[tool(description = "Attempt to promote a library rule by index into a Rust primitive via axiom-forge. Fabricates cross-corpus evidence for demonstration. Returns the emitted Rust source + axiom identity + frozen vector hash, or an error if the bridge rejects.")]
+    fn promote(&self, #[tool(aggr)] req: PromoteRequest) -> String {
+        let (artifact, signal) = {
+            let engine = self.engine.lock().unwrap();
+            let all = engine.epoch.registry.all();
+            let Some(artifact) = all.get(req.rule_index).cloned() else {
+                return serde_json::json!({
+                    "error": format!("rule_index {} out of range (library size {})", req.rule_index, all.len())
+                }).to_string();
+            };
+            let history = engine.corpus_log.history_for(
+                artifact.content_hash,
+                engine.epoch.epoch_id,
+                100,
+            );
+            // Gate 4 relaxed (k=0) for demo; gate 5 enforced via n=2.
+            let gate = ThresholdGate::new(0, 1);
+            let Some(signal) = gate.evaluate(&artifact, all, &history, engine.epoch.epoch_id) else {
+                return serde_json::json!({
+                    "error": "PromotionGate did not fire; need more cross-corpus evidence. Call step more times.",
+                    "history": {
+                        "corpus_matches": history.corpus_matches.len(),
+                        "epochs_alive": history.epochs_alive,
+                    }
+                }).to_string();
+            };
+            (artifact, signal)
+        };
+        match run_promotion(&signal, &artifact, &BridgeConfig::default()) {
+            Ok(receipt) => serde_json::to_string_pretty(&serde_json::json!({
+                "axiom_identity": {
+                    "target": receipt.axiom_identity.target,
+                    "name": receipt.axiom_identity.name,
+                    "proposal_hash": format!("{}", receipt.axiom_identity.proposal_hash),
+                    "typescape_coord": {
+                        "module_path": receipt.axiom_identity.typescape_coord.module_path,
+                        "ast_domain": receipt.axiom_identity.typescape_coord.ast_domain,
+                    },
+                },
+                "frozen_vector": {
+                    "canonical_text": receipt.frozen_vector.canonical_text,
+                    "b3sum_hex": receipt.frozen_vector.b3sum_hex,
+                },
+                "emitted_rust": {
+                    "declaration": receipt.emission.declaration,
+                    "doc_block": receipt.emission.doc_block,
+                    "to_sexpr_arm": receipt.emission.to_sexpr_arm,
+                    "from_sexpr_arm": receipt.emission.from_sexpr_arm,
+                },
+            })).unwrap(),
+            Err(e) => serde_json::json!({
+                "error": format!("bridge rejected: {e}"),
+            }).to_string(),
+        }
     }
 
     #[tool(description = "List all discovered rewrite rules in the library")]
