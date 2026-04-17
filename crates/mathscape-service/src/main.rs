@@ -27,6 +27,14 @@ struct EngineState {
 struct AppState {
     engine: RwLock<EngineState>,
     config: DynamicConfig,
+    /// Optional PersistentRegistry — when `MATHSCAPE_PERSISTENT_PATH`
+    /// is set at startup, this holds a redb-backed Registry enabling
+    /// knowability-criterion-2 across process restarts. The existing
+    /// in-memory `engine.library` is unchanged; this field is a
+    /// parallel observation surface until the engine_loop migration
+    /// to Epoch::step lands. See typescape-binding.md and
+    /// persistent_registry.rs in mathscape-store.
+    persistent: Option<tokio::sync::Mutex<mathscape_store::PersistentRegistry>>,
 }
 
 type SharedState = Arc<AppState>;
@@ -275,6 +283,33 @@ async fn rest_resume(State(state): State<SharedState>) -> Json<ControlResponse> 
     })
 }
 
+/// GET /api/registry-root — return the Merkle root of the
+/// PersistentRegistry (when enabled via MATHSCAPE_PERSISTENT_PATH).
+///
+/// This endpoint demonstrates knowability criterion 2 across
+/// process lifetimes: the root is byte-stable across restarts, so
+/// clients can observe that shutting down the service + restarting
+/// produces the same root value (provided no new artifacts were
+/// inserted). Returns `{"root": null}` when persistence is disabled.
+async fn rest_registry_root(State(state): State<SharedState>) -> Json<serde_json::Value> {
+    use mathscape_core::epoch::Registry;
+    match &state.persistent {
+        Some(reg_mutex) => {
+            let reg = reg_mutex.lock().await;
+            Json(serde_json::json!({
+                "enabled": true,
+                "root": format!("{}", reg.root()),
+                "library_size": reg.len(),
+            }))
+        }
+        None => Json(serde_json::json!({
+            "enabled": false,
+            "root": null,
+            "library_size": 0,
+        })),
+    }
+}
+
 #[derive(Deserialize)]
 struct PaginationParams {
     limit: Option<i32>,
@@ -503,6 +538,21 @@ async fn main() {
 
     let dyn_config = DynamicConfig::new(config.clone());
 
+    // Optional persistent registry — enabled when
+    // MATHSCAPE_PERSISTENT_PATH is set.
+    let persistent = std::env::var("MATHSCAPE_PERSISTENT_PATH").ok().and_then(|path| {
+        match mathscape_store::PersistentRegistry::open(&path) {
+            Ok(reg) => {
+                tracing::info!(persistent_path = %path, "PersistentRegistry opened");
+                Some(tokio::sync::Mutex::new(reg))
+            }
+            Err(e) => {
+                tracing::warn!(persistent_path = %path, error = %e, "PersistentRegistry open failed; continuing without persistence");
+                None
+            }
+        }
+    });
+
     let state: SharedState = Arc::new(AppState {
         engine: RwLock::new(EngineState {
             epoch: 0,
@@ -512,6 +562,7 @@ async fn main() {
             epoch_history: Vec::new(),
         }),
         config: dyn_config,
+        persistent,
     });
 
     // Initialize population
@@ -545,6 +596,7 @@ async fn main() {
         .route("/api/config", get(rest_config).put(rest_update_config))
         .route("/api/engine/pause", post(rest_pause))
         .route("/api/engine/resume", post(rest_resume))
+        .route("/api/registry-root", get(rest_registry_root))
         .route("/graphql", get(graphql_playground).post(graphql_handler))
         .with_state(state.clone())
         .layer(Extension(gql_schema))
