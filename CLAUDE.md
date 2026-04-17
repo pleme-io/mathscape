@@ -16,27 +16,45 @@ machine produces the trajectory.
 
 **Canonical architecture docs** (read in this order):
 
+### Foundation
 1. `docs/arch/rust-lisp-duality.md` — **the foundation**. Why the
    architecture is what it is: Rust solidifies ground rules; Lisp
-   runs the epochs that propose them; axiom-forge is the rivet. Read
-   first; everything else is a consequence.
+   runs the epochs that propose them; axiom-forge is the rivet.
+
+### The machine
 2. `docs/arch/machine-synthesis.md` — **the canonical picture**. Five
    architectural objects, ten gates, five forces, three regimes,
    type-level invariants.
-3. `docs/arch/forced-realization.md` — why the machine must exist;
-   the control-system framing.
+3. `docs/arch/forced-realization.md` — the control-system framing.
 4. `docs/arch/axiomatization-pressure.md` — reinforcement is the
    default loop; discovery fires only on plateau.
-5. `docs/arch/reward-calculus.md` — ΔDL as the single currency; the
-   allocator decides reinforce vs discover on expected ΔDL / cost.
-6. `docs/arch/condensation-reward.md` — MDL objective per proposal;
-   why coverage preservation is load-bearing.
-7. `docs/arch/promotion-pipeline.md` — mathscape → axiom-forge handoff;
-   gates 4–7; migration reports.
-8. `docs/arch/minimal-model-ladder.md` — "whatever is simplest to get
-   to the next step"; levels 0–7.
-9. `docs/arch/realization-plan.md` — the phased implementation plan
-   (A through L).
+5. `docs/arch/reward-calculus.md` — ΔDL as the single currency.
+6. `docs/arch/condensation-reward.md` — MDL objective per proposal.
+
+### The loop
+7. `docs/arch/promotion-pipeline.md` — mathscape → axiom-forge
+   handoff; gates 4–7; migration reports.
+8. `docs/arch/demotion-pipeline.md` — symmetric path; library and
+   primitive demotion; why calcification is prevented.
+9. `docs/arch/typescape-binding.md` — how promoted primitives join
+   arch-synthesizer's typescape as attested leaves.
+10. `docs/arch/corpus-dynamics.md` — ΔDL when the corpus grows,
+    drifts, or rotates.
+
+### Scope and completion
+11. `docs/arch/fixed-point-convergence.md` — mathscape as a
+    convergence controller; traps as first-class artifacts; how it
+    composes with the rest of the platform.
+12. `docs/arch/knowability-criterion.md` — when the machine is "done"
+    beyond Phase I; the full v1 success bar.
+13. `docs/arch/domain-ml-forge.md` — cross-domain test with tensor
+    UOps; the pattern fits.
+14. `docs/arch/domain-iac-forge.md` — cross-domain test with IaC;
+    compliance-lattice as an added domain gate.
+15. `docs/arch/minimal-model-ladder.md` — "whatever is simplest to get
+    to the next step"; levels 0–7.
+16. `docs/arch/realization-plan.md` — the phased implementation plan
+    (A through L).
 
 The sections below (Core Thesis, Compression as Tractability, etc.)
 are preserved because they explain the *philosophy* the machine
