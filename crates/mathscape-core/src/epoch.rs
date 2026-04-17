@@ -266,15 +266,39 @@ pub trait Emitter {
     ) -> Option<Artifact>;
 }
 
-/// Append-only knowledge store.
+/// Append-only knowledge store. Artifacts are never removed; the
+/// current status of an artifact is tracked via an overlay map that
+/// implementers can choose to persist independently.
 pub trait Registry {
     fn insert(&mut self, artifact: Artifact);
     fn all(&self) -> &[Artifact];
+
     fn len(&self) -> usize {
         self.all().len()
     }
     fn is_empty(&self) -> bool {
         self.len() == 0
+    }
+
+    /// Update the active-status overlay for an artifact. Default impl
+    /// is a no-op so simple storage backends need no overlay. Persistent
+    /// backends override to store the overlay alongside artifacts.
+    fn mark_status(&mut self, _artifact_hash: TermRef, _status: ProofStatus) {}
+
+    /// Current status for an artifact, taking the overlay into
+    /// account. Default impl falls back to the artifact's embedded
+    /// `certificate.status`.
+    fn status_of(&self, artifact_hash: TermRef) -> Option<ProofStatus> {
+        self.all()
+            .iter()
+            .find(|a| a.content_hash == artifact_hash)
+            .map(|a| a.certificate.status.clone())
+    }
+
+    /// Find an artifact by content hash. Default is a linear scan;
+    /// backends with indexing can override.
+    fn find(&self, artifact_hash: TermRef) -> Option<&Artifact> {
+        self.all().iter().find(|a| a.content_hash == artifact_hash)
     }
 }
 
@@ -391,6 +415,7 @@ impl Emitter for RuleEmitter {
 #[derive(Debug, Default, Clone)]
 pub struct InMemoryRegistry {
     entries: Vec<Artifact>,
+    status_overlay: std::collections::HashMap<TermRef, ProofStatus>,
 }
 
 impl InMemoryRegistry {
@@ -405,6 +430,19 @@ impl Registry for InMemoryRegistry {
     }
     fn all(&self) -> &[Artifact] {
         &self.entries
+    }
+    fn mark_status(&mut self, artifact_hash: TermRef, status: ProofStatus) {
+        self.status_overlay.insert(artifact_hash, status);
+    }
+    fn status_of(&self, artifact_hash: TermRef) -> Option<ProofStatus> {
+        // Overlay wins; fall back to embedded certificate status.
+        if let Some(s) = self.status_overlay.get(&artifact_hash) {
+            return Some(s.clone());
+        }
+        self.entries
+            .iter()
+            .find(|a| a.content_hash == artifact_hash)
+            .map(|a| a.certificate.status.clone())
     }
 }
 

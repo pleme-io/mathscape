@@ -7,6 +7,7 @@ pub mod eval;
 pub mod event;
 pub mod hash;
 pub mod lifecycle;
+pub mod migration;
 pub mod parse;
 pub mod promotion;
 pub mod promotion_gate;
@@ -26,6 +27,7 @@ pub use epoch::{
 pub use event::{Event, EventCategory, StatusAdvance};
 pub use hash::TermRef;
 pub use lifecycle::{AxiomIdentity, DemotionReason, ProofStatus};
+pub use migration::migrate_library;
 pub use promotion::{CorpusId, MigrationReport, PromotionSignal};
 pub use promotion_gate::{ArtifactHistory, PromotionGate, ThresholdGate};
 pub use term::{StoredTerm, SymbolId, Term};
