@@ -45,6 +45,10 @@ machine produces the trajectory.
 11. `docs/arch/fixed-point-convergence.md` — mathscape as a
     convergence controller; traps as first-class artifacts; how it
     composes with the rest of the platform.
+11a. `docs/arch/in-memory-convergence-layering.md` — the recursion:
+    mathscape is convergence computing applied to its own substrate.
+    Substrate-extending vs static convergence; in-memory runtime via
+    substrate-forge; arch-synthesizer as canonical renderer.
 12. `docs/arch/knowability-criterion.md` — when the machine is "done"
     beyond Phase I; the full v1 success bar.
 13. `docs/arch/domain-ml-forge.md` — cross-domain test with tensor
