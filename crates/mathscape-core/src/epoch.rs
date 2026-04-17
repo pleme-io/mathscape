@@ -346,13 +346,48 @@ where
         }
     }
 
-    /// Run one discovery epoch. Returns an audit trace populated with
-    /// `Event::Proposal` / `Event::Accept` / `Event::Reject` entries.
-    ///
-    /// This is the v0 dispatch — only the Discovery pass is
-    /// implemented. Reinforce / Promote / Migrate dispatch lands in
-    /// later phases of `docs/arch/realization-plan.md`.
+    /// Run one discovery epoch. Equivalent to
+    /// `step_with_action(corpus, EpochAction::Discover)`. Kept as the
+    /// default API for backward compatibility and the REPL.
     pub fn step(&mut self, corpus: &[Term]) -> EpochTrace {
+        self.step_with_action(corpus, crate::control::EpochAction::Discover)
+    }
+
+    /// Run one epoch with an explicit action. Reinforce / Discover
+    /// emit events in their respective categories; Promote and
+    /// Migrate are no-ops at this layer — those actions are executed
+    /// by the orchestrator (CLI, service) after reading the trace's
+    /// action field, because they require crate-external work
+    /// (axiom-forge bridge invocation, library migration with
+    /// MigrationReport persistence).
+    pub fn step_with_action(
+        &mut self,
+        corpus: &[Term],
+        action: crate::control::EpochAction,
+    ) -> EpochTrace {
+        use crate::control::EpochAction;
+        match action {
+            EpochAction::Discover => self.run_discover(corpus),
+            EpochAction::Reinforce => self.run_reinforce(),
+            // Promote/Migrate carry no in-epoch work; the
+            // orchestrator handles them with out-of-crate deps.
+            // Emit a trace that records the intent so the reward
+            // estimator still updates correctly.
+            EpochAction::Promote(_) | EpochAction::Migrate(_) => {
+                let trace = EpochTrace {
+                    epoch_id: self.epoch_id,
+                    action: Some(action),
+                    ..Default::default()
+                };
+                self.epoch_id += 1;
+                trace
+            }
+        }
+    }
+
+    /// Run a discovery pass: generate candidates, prove each one,
+    /// emit artifacts for accepts. Emits Discovery-category events.
+    fn run_discover(&mut self, corpus: &[Term]) -> EpochTrace {
         use crate::event::Event;
         let proposals = self
             .generator
@@ -401,6 +436,25 @@ where
             }
         }
 
+        self.epoch_id += 1;
+        trace
+    }
+
+    /// Run a reinforcement pass: iterate library artifacts and push
+    /// status forward where possible. v0 is a scaffold — it iterates
+    /// and emits no events, so the allocator's plateau detection
+    /// naturally fires and switches to Discover. Real reinforcement
+    /// (e-graph verification → Conjectured→Verified advance, Lean
+    /// export → Verified→Exported, etc.) lands as `mathscape-proof`
+    /// matures.
+    fn run_reinforce(&mut self) -> EpochTrace {
+        let trace = EpochTrace {
+            epoch_id: self.epoch_id,
+            action: Some(crate::control::EpochAction::Reinforce),
+            ..Default::default()
+        };
+        // Scan artifacts (no-op work for v0).
+        let _count = self.registry.all().len();
         self.epoch_id += 1;
         trace
     }
