@@ -13,6 +13,7 @@ pub mod migration;
 pub mod parse;
 pub mod promotion;
 pub mod promotion_gate;
+pub mod reduction;
 pub mod term;
 pub mod trap;
 #[cfg(any(test, feature = "test-helpers"))]
@@ -36,5 +37,8 @@ pub use trap::{Trap, TrapDetector, TrapExitReason};
 pub use migration::migrate_library;
 pub use promotion::{CorpusId, MigrationReport, PromotionSignal};
 pub use promotion_gate::{ArtifactHistory, PromotionGate, ThresholdGate};
+pub use reduction::{
+    check_maximally_reduced, ReductionBarrier, ReductionSummary, ReductionVerdict,
+};
 pub use term::{StoredTerm, SymbolId, Term};
 pub use value::Value;
