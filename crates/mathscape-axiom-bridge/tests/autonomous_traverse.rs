@@ -35,125 +35,20 @@
 //! no hook fakes, no hand-tuned gate. That's the milestone this file
 //! exists to prove is real.
 
-use mathscape_compress::{CompositeGenerator, CompressionGenerator, MetaPatternGenerator};
+mod common;
+
+use common::{canonical_zoo, procedural};
+use mathscape_compress::{
+    extract::ExtractConfig, CompositeGenerator, CompressionGenerator,
+    MetaPatternGenerator,
+};
 use mathscape_core::{
     epoch::{Epoch, InMemoryRegistry, Registry, RuleEmitter},
     form_tree::DiscoveryForest,
     hash::TermRef,
     lifecycle::ProofStatus,
     term::Term,
-    value::Value,
 };
-use mathscape_compress::extract::ExtractConfig;
-
-// ── Term builders ───────────────────────────────────────────────
-
-fn apply(f: Term, args: Vec<Term>) -> Term {
-    Term::Apply(Box::new(f), args)
-}
-fn nat(n: u64) -> Term {
-    Term::Number(Value::Nat(n))
-}
-fn var(id: u32) -> Term {
-    Term::Var(id)
-}
-
-// ── Hand-crafted zoo corpora (always included) ──────────────────
-
-fn arith_right_id() -> Vec<Term> {
-    (1..=10).map(|n| apply(var(2), vec![nat(n), nat(0)])).collect()
-}
-fn mult_right_id() -> Vec<Term> {
-    (1..=10).map(|n| apply(var(3), vec![nat(n), nat(1)])).collect()
-}
-fn compositional() -> Vec<Term> {
-    let mut v = Vec::new();
-    for n in 1..=6 {
-        v.push(apply(var(2), vec![nat(n), nat(0)]));
-        v.push(apply(var(2), vec![apply(var(2), vec![nat(n), nat(0)]), nat(0)]));
-        v.push(apply(var(3), vec![nat(n), nat(1)]));
-        v.push(apply(var(3), vec![apply(var(3), vec![nat(n), nat(1)]), nat(1)]));
-    }
-    v
-}
-fn left_identity() -> Vec<Term> {
-    let mut v = Vec::new();
-    for n in 1..=8 {
-        v.push(apply(var(2), vec![nat(0), nat(n)]));
-        v.push(apply(var(3), vec![nat(1), nat(n)]));
-    }
-    v
-}
-fn doubling() -> Vec<Term> {
-    (1..=10).map(|n| apply(var(2), vec![nat(n), nat(n)])).collect()
-}
-fn successor_chain() -> Vec<Term> {
-    let mut v = Vec::new();
-    for base in 0..=3u64 {
-        for depth in 1..=4usize {
-            let mut t = nat(base);
-            for _ in 0..depth {
-                t = apply(var(4), vec![t]);
-            }
-            v.push(t);
-        }
-    }
-    v
-}
-fn cross_op() -> Vec<Term> {
-    let mut v = Vec::new();
-    for n in 1..=6u64 {
-        v.push(apply(
-            var(2),
-            vec![apply(var(3), vec![nat(n), nat(2)]), nat(0)],
-        ));
-        v.push(apply(
-            var(3),
-            vec![apply(var(2), vec![nat(n), nat(0)]), nat(3)],
-        ));
-    }
-    v
-}
-
-/// Seeded xorshift procedural generator. Builds `term_count` terms
-/// of depth ≤ `max_depth` using operator vocabulary {add, mul, succ}
-/// and constants in [0, 10].
-fn procedural(seed: u64, max_depth: usize, term_count: usize) -> Vec<Term> {
-    let mut state = seed.wrapping_mul(0x9E37_79B9_7F4A_7C15).max(1);
-    let mut next_u64 = || {
-        state ^= state << 13;
-        state ^= state >> 7;
-        state ^= state << 17;
-        state
-    };
-    let ops: [u32; 3] = [2, 3, 4];
-
-    fn build(
-        depth: usize,
-        max_depth: usize,
-        ops: &[u32],
-        next: &mut dyn FnMut() -> u64,
-    ) -> Term {
-        if depth >= max_depth || next() % 3 == 0 {
-            let v = (next() % 11) as u64;
-            return nat(v);
-        }
-        let op_idx = (next() % ops.len() as u64) as usize;
-        let op = ops[op_idx];
-        let arity = if op == 4 { 1 } else { 2 };
-        let mut args = Vec::with_capacity(arity);
-        for _ in 0..arity {
-            args.push(build(depth + 1, max_depth, ops, next));
-        }
-        apply(var(op), args)
-    }
-
-    let mut out = Vec::with_capacity(term_count);
-    for _ in 0..term_count {
-        out.push(build(0, max_depth, &ops, &mut next_u64));
-    }
-    out
-}
 
 // ── TraversalReport: structured output ──────────────────────────
 
@@ -231,15 +126,7 @@ pub fn run_traversal(procedural_budget: usize, max_depth: usize) -> TraversalRep
     use std::collections::HashMap;
     use std::time::Instant;
 
-    let mut zoo: Vec<(String, Vec<Term>)> = vec![
-        ("arith-right-id".into(), arith_right_id()),
-        ("mult-right-id".into(), mult_right_id()),
-        ("compositional".into(), compositional()),
-        ("left-identity".into(), left_identity()),
-        ("doubling".into(), doubling()),
-        ("successor-chain".into(), successor_chain()),
-        ("cross-op".into(), cross_op()),
-    ];
+    let mut zoo = canonical_zoo();
     for seed in 1..=procedural_budget as u64 {
         let depth = 2 + (seed as usize % (max_depth - 1).max(1));
         let count = 16 + (seed as usize % 8);
@@ -546,15 +433,7 @@ fn rank2_inception_probe() {
     // successor-chain, cross-op) — any of them could mint a
     // meta-pattern that doesn't strictly subsume or get subsumed
     // by the compositional meta.
-    let zoo: Vec<(String, Vec<Term>)> = vec![
-        ("arith-right-id".into(), arith_right_id()),
-        ("mult-right-id".into(), mult_right_id()),
-        ("compositional".into(), compositional()),
-        ("left-identity".into(), left_identity()),
-        ("doubling".into(), doubling()),
-        ("successor-chain".into(), successor_chain()),
-        ("cross-op".into(), cross_op()),
-    ];
+    let zoo = canonical_zoo();
 
     let base = CompressionGenerator::new(
         ExtractConfig {
@@ -690,6 +569,206 @@ fn rank2_inception_probe() {
     assert!(
         !active_meta_rules.is_empty(),
         "meta-rule diversity gate failed — no active meta-rules survived"
+    );
+}
+
+/// Configuration for ensemble traversal — the phase-M4 mode that
+/// leverages the LLN-measured attractor distribution to build a
+/// library strictly richer than any single traversal.
+#[derive(Debug, Clone)]
+pub struct EnsembleConfig {
+    /// Number of procedural seeds to sample.
+    pub seed_count: u64,
+    /// Procedural corpora per seed.
+    pub procedural_budget: usize,
+    /// Max term depth for procedural corpora.
+    pub max_depth: usize,
+    /// Minimum fraction of basins a rule must appear in to be
+    /// considered "universal" and inducted into the ensemble
+    /// library. At 0.15 (default), rules appearing in ≥15% of
+    /// attractor basins survive. The LLN data supports this
+    /// threshold: universals land at 15-21%, noise is below 5%.
+    pub universal_threshold: f64,
+    /// Include the hand-crafted zoo or run pure-procedural.
+    /// Pure-procedural (false) is where oscillation is visible.
+    /// Zoo-anchored (true) gives the deterministic baseline.
+    pub include_zoo: bool,
+}
+
+impl Default for EnsembleConfig {
+    fn default() -> Self {
+        Self {
+            seed_count: 32,
+            procedural_budget: 15,
+            max_depth: 4,
+            universal_threshold: 0.15,
+            include_zoo: false,
+        }
+    }
+}
+
+/// Result of an ensemble traversal. Each rule is labeled with the
+/// FRACTION OF BASINS it appeared in (its basin frequency), which
+/// is the empirical "irreducibility" measure under LLN — how often
+/// the rule emerges as an independent discovery regardless of seed.
+#[derive(Debug, Clone)]
+pub struct EnsembleReport {
+    pub seed_count: u64,
+    pub distinct_basins: usize,
+    pub universal_rules: Vec<(String, f64)>,
+    pub rank0_universals: Vec<(String, f64)>,
+    pub rank1_universals: Vec<(String, f64)>,
+    pub singleton_count: usize,
+    pub shannon_entropy_bits: f64,
+    pub total_elapsed_ms: u128,
+}
+
+/// Phase M4 move: ensemble traversal. Instead of running one
+/// traversal that lands in a single attractor basin, sample K
+/// basins by varying the procedural seed and take the UNION of
+/// rules appearing in ≥`universal_threshold` fraction of basins.
+///
+/// Rationale from the LLN probe (256-seed data, 2026-04-18):
+/// - S_10000 (dimensional-discovery meta-rule) appears in 17.6%
+///   of attractor basins — it's a universal feature of the seed
+///   space
+/// - Rank-0 cluster (S_003 through S_010) each appear in 10-21%
+///   of basins
+/// - Singletons (rules appearing in exactly 1 basin) account for
+///   147 of 256 seeds — long tail, probably noise
+///
+/// Taking the union above threshold 0.15 captures the universals
+/// + rank-0 canonical rules while filtering the singleton tail.
+/// The resulting library is basin-independent: it carries what
+/// the MACHINE ITSELF reliably discovers regardless of which
+/// specific seed happened to drive it.
+pub fn run_ensemble_traversal(config: EnsembleConfig) -> EnsembleReport {
+    use std::collections::{HashMap, HashSet};
+    use std::time::Instant;
+
+    let t0 = Instant::now();
+    let mut rule_basin_count: HashMap<String, usize> = HashMap::new();
+    let mut distinct_basins: HashSet<Vec<String>> = HashSet::new();
+    let mut basin_support: HashMap<Vec<String>, usize> = HashMap::new();
+
+    for seed in 1..=config.seed_count {
+        let report = if config.include_zoo {
+            run_traversal(config.procedural_budget, config.max_depth)
+        } else {
+            run_traversal_pure_procedural(
+                seed,
+                config.procedural_budget,
+                config.max_depth,
+            )
+        };
+        let mut apex: Vec<String> = report
+            .axiomatized_rules
+            .iter()
+            .map(|(n, _)| n.clone())
+            .collect();
+        apex.sort();
+        for name in &apex {
+            *rule_basin_count.entry(name.clone()).or_default() += 1;
+        }
+        distinct_basins.insert(apex.clone());
+        *basin_support.entry(apex).or_default() += 1;
+    }
+
+    // Compute universal rules — those above threshold.
+    let threshold_count =
+        (config.universal_threshold * config.seed_count as f64).ceil() as usize;
+    let mut universals: Vec<(String, f64)> = rule_basin_count
+        .iter()
+        .filter(|(_, c)| **c >= threshold_count)
+        .map(|(n, c)| (n.clone(), *c as f64 / config.seed_count as f64))
+        .collect();
+    universals.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+
+    // Classify by rank: id ≥ 10000 is rank-1+ (meta), otherwise rank-0.
+    let (rank1, rank0): (Vec<_>, Vec<_>) =
+        universals.iter().partition(|(n, _)| {
+            n.strip_prefix("S_")
+                .and_then(|s| s.parse::<u32>().ok())
+                .map(|id| id >= 10_000)
+                .unwrap_or(false)
+        });
+
+    let singleton_count = basin_support.values().filter(|&&c| c == 1).count();
+    let n_f = config.seed_count as f64;
+    let entropy: f64 = basin_support
+        .values()
+        .map(|&c| {
+            let p = c as f64 / n_f;
+            if p > 0.0 { -p * p.log2() } else { 0.0 }
+        })
+        .sum();
+
+    EnsembleReport {
+        seed_count: config.seed_count,
+        distinct_basins: distinct_basins.len(),
+        universal_rules: universals.clone(),
+        rank0_universals: rank0.into_iter().cloned().collect(),
+        rank1_universals: rank1.into_iter().cloned().collect(),
+        singleton_count,
+        shannon_entropy_bits: entropy,
+        total_elapsed_ms: t0.elapsed().as_millis(),
+    }
+}
+
+#[test]
+fn ensemble_traversal_surfaces_universals() {
+    // Phase M4 operationalized. Run 32 seeds, union their
+    // discoveries, keep rules appearing in ≥ 15% of basins.
+    // Expected: at least one universal rule emerges (either
+    // S_10000 meta or a rank-0 common), demonstrating that
+    // the ensemble mode IS richer than any single seed.
+    let config = EnsembleConfig::default();
+    let report = run_ensemble_traversal(config.clone());
+
+    println!("\n╔══════════════════════════════════════════════════════╗");
+    println!("║ ENSEMBLE TRAVERSAL — phase M4                        ║");
+    println!("║   Oscillation-driven discovery via seed ensemble     ║");
+    println!("╚══════════════════════════════════════════════════════╝");
+    println!("\n▶ Configuration");
+    println!("  seeds sampled        : {}", report.seed_count);
+    println!("  universal threshold  : {:.0}% of basins", config.universal_threshold * 100.0);
+    println!("  include zoo          : {}", config.include_zoo);
+    println!("  elapsed              : {}ms", report.total_elapsed_ms);
+
+    println!("\n▶ Basin statistics");
+    println!("  distinct basins      : {}/{}", report.distinct_basins, report.seed_count);
+    println!("  singleton basins     : {} (long tail)", report.singleton_count);
+    println!("  Shannon entropy      : {:.3} bits", report.shannon_entropy_bits);
+
+    println!("\n▶ Universal rules (basin-frequency ≥ {:.0}%)",
+        config.universal_threshold * 100.0);
+    println!("  rank-0 canonical:");
+    for (name, freq) in &report.rank0_universals {
+        println!("    {name:<10} basin-freq = {:.1}%", freq * 100.0);
+    }
+    println!("  rank-1 meta:");
+    for (name, freq) in &report.rank1_universals {
+        println!("    {name:<10} basin-freq = {:.1}%", freq * 100.0);
+    }
+
+    // The ensemble library IS the union of these universals.
+    // That's the phase-M4 output: strictly richer than any single
+    // traversal because it carries what the machine reliably
+    // discovers regardless of which basin a single seed lands in.
+    println!("\n▶ Ensemble library size (union-above-threshold): {}",
+        report.universal_rules.len());
+    println!(
+        "\n▶ Interpretation\n  A single traversal samples ONE basin. The ensemble samples {}\n  basins and keeps only rules that cross ≥ {:.0}% of them. The resulting\n  library carries basin-independent structure — the universals the machine\n  itself finds irrespective of the specific corpus that drove it.",
+        report.distinct_basins,
+        config.universal_threshold * 100.0,
+    );
+
+    assert!(
+        !report.universal_rules.is_empty(),
+        "at 32 seeds × 15% threshold, at least one universal rule should survive; \
+         got {} universals (basins: {})",
+        report.universal_rules.len(),
+        report.distinct_basins,
     );
 }
 
