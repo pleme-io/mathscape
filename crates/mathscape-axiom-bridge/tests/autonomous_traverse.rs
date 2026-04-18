@@ -772,6 +772,393 @@ fn ensemble_traversal_surfaces_universals() {
     );
 }
 
+/// Anonymize a term's symbol ids — replaces each `Term::Symbol(id, _)`
+/// and `Term::Var(id)` with a normalized canonical id based on first-
+/// appearance order. Returns a "structural fingerprint" of the term:
+/// two terms that differ only in which fresh ids got minted produce
+/// the same fingerprint.
+///
+/// Used by phase M2 to classify basins by their LHS/RHS STRUCTURE
+/// rather than nominal rule names. Fresh symbol ids vary across
+/// runs (S_004 in one traversal, S_008 in another can encode the
+/// same pattern); nominal count over-counts genuine basin diversity.
+fn anonymize_term(t: &Term) -> Term {
+    fn walk(
+        t: &Term,
+        var_map: &mut std::collections::HashMap<u32, u32>,
+        symbol_map: &mut std::collections::HashMap<u32, u32>,
+    ) -> Term {
+        match t {
+            Term::Point(p) => Term::Point(p.clone()),
+            Term::Number(n) => Term::Number(n.clone()),
+            Term::Var(v) => {
+                // Concrete ops (Var id < 100) are preserved as-is —
+                // they're vocabulary, not fresh symbols.
+                if *v < 100 {
+                    Term::Var(*v)
+                } else {
+                    let next = var_map.len() as u32;
+                    let id = *var_map.entry(*v).or_insert(next + 100);
+                    Term::Var(id)
+                }
+            }
+            Term::Fn(params, body) => {
+                let b = walk(body, var_map, symbol_map);
+                Term::Fn(params.clone(), Box::new(b))
+            }
+            Term::Apply(f, args) => {
+                let f2 = walk(f, var_map, symbol_map);
+                let args2 = args.iter().map(|a| walk(a, var_map, symbol_map)).collect();
+                Term::Apply(Box::new(f2), args2)
+            }
+            Term::Symbol(id, args) => {
+                let next = symbol_map.len() as u32;
+                let canonical = *symbol_map.entry(*id).or_insert(next);
+                let args2 = args.iter().map(|a| walk(a, var_map, symbol_map)).collect();
+                Term::Symbol(canonical, args2)
+            }
+        }
+    }
+    let mut var_map = std::collections::HashMap::new();
+    let mut symbol_map = std::collections::HashMap::new();
+    walk(t, &mut var_map, &mut symbol_map)
+}
+
+/// Build a canonical structural fingerprint of an apex rule set:
+/// each rule's (anonymized-lhs, anonymized-rhs) pair, sorted.
+/// Two basins with equal fingerprints are STRUCTURALLY
+/// indistinguishable — they encode the same discoveries under
+/// different nominal ids.
+fn structural_fingerprint(rules: &[mathscape_core::eval::RewriteRule]) -> Vec<(String, String)> {
+    let mut sigs: Vec<(String, String)> = rules
+        .iter()
+        .map(|r| {
+            let lhs_anon = anonymize_term(&r.lhs);
+            let rhs_anon = anonymize_term(&r.rhs);
+            (format!("{lhs_anon}"), format!("{rhs_anon}"))
+        })
+        .collect();
+    sigs.sort();
+    sigs
+}
+
+#[test]
+#[ignore = "phase M2: structural basin classification — 1024 seeds, ~15s, --ignored"]
+fn oscillation_structural_basin_classification() {
+    // Phase M2: reclassify basins by STRUCTURAL fingerprint (lhs/rhs
+    // anonymized — fresh symbol ids normalized to canonical order).
+    // Two runs whose libraries differ only in which specific S_NNN
+    // name got assigned to equivalent patterns should share a basin.
+    //
+    // Expected: structural basin count << nominal basin count at
+    // 1024 seeds. If we saw 529 nominal basins in M1, structural
+    // basins are likely a small fraction — that's the TRUE
+    // attractor count, the finite object the user predicted.
+    use std::collections::HashMap;
+    use std::time::Instant;
+
+    const N_SEEDS: u64 = 1024;
+    const BUDGET: usize = 15;
+    const DEPTH: usize = 4;
+
+    let t0 = Instant::now();
+    let mut nominal_basins: std::collections::HashSet<Vec<String>> =
+        std::collections::HashSet::new();
+    let mut structural_basins: HashMap<Vec<(String, String)>, usize> = HashMap::new();
+
+    for seed in 1..=N_SEEDS {
+        let report = run_traversal_pure_procedural_with_library(seed, BUDGET, DEPTH);
+        let mut nominal: Vec<String> = report
+            .axiomatized_rule_names
+            .iter()
+            .cloned()
+            .collect();
+        nominal.sort();
+        nominal_basins.insert(nominal);
+
+        let fingerprint = structural_fingerprint(&report.axiomatized_rules_full);
+        *structural_basins.entry(fingerprint).or_default() += 1;
+    }
+    let elapsed = t0.elapsed().as_millis();
+
+    let nominal_count = nominal_basins.len();
+    let structural_count = structural_basins.len();
+    let compression_ratio =
+        1.0 - (structural_count as f64 / nominal_count as f64);
+
+    println!("\n╔══════════════════════════════════════════════════════╗");
+    println!("║ PHASE M2 — STRUCTURAL BASIN CLASSIFICATION           ║");
+    println!("║   1024 seeds, anonymize then compare                 ║");
+    println!("╚══════════════════════════════════════════════════════╝");
+    println!("\n▶ Nominal basin count  (by S_NNN names)  : {nominal_count}");
+    println!("▶ Structural basin count (by shape)      : {structural_count}");
+    println!("▶ Compression ratio (nominal→structural) : {:.1}%", compression_ratio * 100.0);
+    println!("▶ Elapsed                                : {elapsed}ms");
+
+    // Top-10 structural basins by seed support.
+    let mut by_support: Vec<(Vec<(String, String)>, usize)> =
+        structural_basins.iter().map(|(k, v)| (k.clone(), *v)).collect();
+    by_support.sort_by(|a, b| b.1.cmp(&a.1));
+    println!("\n▶ Top-10 structural basins (most-seed-supported)");
+    println!("{:>8} {:>10}", "rank", "support");
+    for (i, (_, sup)) in by_support.iter().take(10).enumerate() {
+        println!("{:>8} {:>10} ({:.1}%)", i + 1, sup, *sup as f64 / N_SEEDS as f64 * 100.0);
+    }
+
+    let singletons = structural_basins.values().filter(|&&c| c == 1).count();
+    let structural_entropy: f64 = structural_basins
+        .values()
+        .map(|&c| {
+            let p = c as f64 / N_SEEDS as f64;
+            if p > 0.0 { -p * p.log2() } else { 0.0 }
+        })
+        .sum();
+    println!("\n▶ Structural distribution");
+    println!("  singleton structural basins : {singletons}/{structural_count}");
+    println!("  Shannon entropy             : {structural_entropy:.3} bits");
+    let max_entropy = (structural_count as f64).log2();
+    println!("  normalized entropy          : {:.3}", structural_entropy / max_entropy);
+
+    println!("\n▶ Interpretation");
+    if compression_ratio > 0.7 {
+        println!(
+            "  STRONG STRUCTURAL COLLAPSE — {nominal_count} nominal basins\n  compressed to {structural_count} structural basins (saved {:.0}%).\n  The nominal diversity is mostly fresh-symbol-id noise; the TRUE\n  attractor count at this machinery scale is ≈ {structural_count}.\n  This IS the finite object — the machine's answer for \"how many\n  distinct discoveries are possible.\"",
+            compression_ratio * 100.0
+        );
+    } else if compression_ratio > 0.3 {
+        println!(
+            "  MODERATE COLLAPSE — structural classification reduces basin\n  count from {nominal_count} to {structural_count} ({:.0}% saved). Genuine\n  attractor count is smaller than nominal but nominal variation\n  captures some real diversity too.",
+            compression_ratio * 100.0
+        );
+    } else {
+        println!(
+            "  LOW COLLAPSE — only {:.0}% of nominal basins were structurally\n  equivalent. The discovery space really is close to nominal count.\n  Expect phase K (egg) to be needed to collapse further.",
+            compression_ratio * 100.0
+        );
+    }
+
+    assert!(structural_count > 0);
+    assert!(structural_count <= nominal_count,
+        "structural count must be ≤ nominal count (anonymization can only merge, not split)");
+}
+
+/// Extended traversal report carrying full rule data (LHS+RHS) so
+/// structural fingerprinting can examine the whole rule shape,
+/// not just names.
+struct TraversalReportWithLibrary {
+    axiomatized_rule_names: Vec<String>,
+    axiomatized_rules_full: Vec<mathscape_core::eval::RewriteRule>,
+}
+
+fn run_traversal_pure_procedural_with_library(
+    seed_offset: u64,
+    procedural_budget: usize,
+    max_depth: usize,
+) -> TraversalReportWithLibrary {
+    use std::collections::{HashMap, HashSet};
+
+    let mut zoo: Vec<(String, Vec<Term>)> = Vec::new();
+    for i in 1..=procedural_budget as u64 {
+        let seed = seed_offset.wrapping_add(i);
+        let depth = 2 + (i as usize % (max_depth - 1).max(1));
+        let count = 16 + (i as usize % 8);
+        zoo.push((
+            format!("proc-s{seed}-d{depth}"),
+            procedural(seed, depth, count),
+        ));
+    }
+
+    let base = CompressionGenerator::new(
+        ExtractConfig {
+            min_shared_size: 2,
+            min_matches: 2,
+            max_new_rules: 5,
+        },
+        1,
+    );
+    let meta = MetaPatternGenerator::new(
+        ExtractConfig {
+            min_shared_size: 1,
+            min_matches: 2,
+            max_new_rules: 12,
+        },
+        10_000,
+    );
+    let mut epoch = Epoch::new(
+        CompositeGenerator::new(base, meta),
+        mathscape_reward::StatisticalProver::new(
+            mathscape_reward::reward::RewardConfig::default(),
+            0.0,
+        ),
+        RuleEmitter,
+        InMemoryRegistry::new(),
+    );
+
+    for (_, corpus) in &zoo {
+        for _ in 0..3 {
+            let _ = epoch.step_with_action(
+                corpus,
+                mathscape_core::control::EpochAction::Discover,
+            );
+        }
+        let _ = epoch.step_with_action(
+            corpus,
+            mathscape_core::control::EpochAction::Reinforce,
+        );
+    }
+
+    let mut names = Vec::new();
+    let mut full = Vec::new();
+    for artifact in epoch.registry.all() {
+        let s = epoch
+            .registry
+            .status_of(artifact.content_hash)
+            .unwrap_or_else(|| artifact.certificate.status.clone());
+        if matches!(s, ProofStatus::Axiomatized) {
+            names.push(artifact.rule.name.clone());
+            full.push(artifact.rule.clone());
+        }
+    }
+    let _ = HashSet::<TermRef>::new();
+    let _ = HashMap::<TermRef, TermRef>::new();
+
+    TraversalReportWithLibrary {
+        axiomatized_rule_names: names,
+        axiomatized_rules_full: full,
+    }
+}
+
+#[test]
+#[ignore = "phase M1: basin-space cardinality — 1024-seed stairway sweep, ~15s, --ignored"]
+fn oscillation_basin_space_cardinality() {
+    // Phase M1 question: is the basin space FINITE (discrete,
+    // quantized) or CONTINUOUS (each new seed probably yields a
+    // never-seen-before attractor)?
+    //
+    // Method: measure basin count at 4 seed-set sizes —
+    //   128, 256, 512, 1024 — and watch the growth curve of:
+    //   (a) distinct apex fingerprints
+    //   (b) singleton basins (attractors reached by exactly 1 seed)
+    //
+    // Expected signatures:
+    //
+    //   FINITE/QUANTIZED      basin count plateaus past some seed
+    //                         count. Singletons saturate. Additional
+    //                         seeds land in already-known basins.
+    //                         Strong evidence for a discrete set of
+    //                         attractor "types" at this machinery
+    //                         scale.
+    //
+    //   CONTINUUM             basin count grows ~linearly with seed
+    //                         count. Singletons dominate. Additional
+    //                         seeds routinely uncover new attractors.
+    //                         Either the basin space is truly
+    //                         continuous, or the attractor count is
+    //                         much larger than our sample. Richer
+    //                         machinery (phases I, J, K) is needed
+    //                         to resolve.
+    //
+    //   INTERMEDIATE          basin count grows sub-linearly but
+    //                         hasn't plateaued at 1024. Signals a
+    //                         large-but-finite attractor space —
+    //                         push further to resolve.
+    //
+    // The ratio (basin_count / seed_count) is the key observable.
+    // Decreasing ratio → approaching quantization. Constant ratio
+    // → continuum. Ratio < 0.5 by 1024 seeds → strong quantization.
+    use std::collections::HashSet;
+    use std::time::Instant;
+
+    const BUDGET: usize = 15;
+    const DEPTH: usize = 4;
+    let scales = [128u64, 256, 512, 1024];
+
+    let t_all = Instant::now();
+    let mut stairway: Vec<(u64, usize, usize, usize, f64)> = Vec::new();
+    // (seed_count, basins, singletons, distinct_universals, new_basin_rate_since_last)
+
+    let mut running_basins: HashSet<Vec<String>> = HashSet::new();
+    let mut running_singletons: std::collections::HashMap<Vec<String>, usize> =
+        std::collections::HashMap::new();
+    let mut prev_basin_count = 0usize;
+    let mut prev_seed_count = 0u64;
+
+    for scale in scales {
+        let t = Instant::now();
+        for seed in (prev_seed_count + 1)..=scale {
+            let report = run_traversal_pure_procedural(seed, BUDGET, DEPTH);
+            let mut apex: Vec<String> = report
+                .axiomatized_rules
+                .iter()
+                .map(|(n, _)| n.clone())
+                .collect();
+            apex.sort();
+            running_basins.insert(apex.clone());
+            *running_singletons.entry(apex).or_default() += 1;
+        }
+        let basins = running_basins.len();
+        let singletons = running_singletons.values().filter(|&&c| c == 1).count();
+        let new_basins = basins - prev_basin_count;
+        let seed_delta = scale - prev_seed_count;
+        let new_basin_rate = new_basins as f64 / seed_delta as f64;
+        stairway.push((scale, basins, singletons, new_basins, new_basin_rate));
+        prev_basin_count = basins;
+        prev_seed_count = scale;
+
+        eprintln!(
+            "[m1] scale={scale:>4} basins={basins:>4} singletons={singletons:>4} \
+             new={new_basins:>4} rate={new_basin_rate:.3} elapsed={}ms",
+            t.elapsed().as_millis()
+        );
+    }
+
+    let total_ms = t_all.elapsed().as_millis();
+
+    println!("\n╔══════════════════════════════════════════════════════╗");
+    println!("║ PHASE M1 — BASIN SPACE CARDINALITY                   ║");
+    println!("║   Stairway sweep: 128 → 256 → 512 → 1024 seeds       ║");
+    println!("╚══════════════════════════════════════════════════════╝");
+    println!("\n▶ Growth curve");
+    println!(
+        "{:>10} {:>10} {:>10} {:>10} {:>12}",
+        "seeds", "basins", "singletons", "new", "basin_rate"
+    );
+    println!("{}", "─".repeat(56));
+    for (seeds, basins, singletons, new_basins, rate) in &stairway {
+        println!(
+            "{:>10} {:>10} {:>10} {:>10} {:>12.3}",
+            seeds, basins, singletons, new_basins, rate,
+        );
+    }
+
+    let last = stairway.last().unwrap();
+    let first = stairway.first().unwrap();
+    let basin_ratio = last.1 as f64 / last.0 as f64;
+    let rate_decay = last.4 / first.4;
+    println!("\n▶ Interpretation");
+    println!("  total elapsed           : {total_ms}ms");
+    println!("  basin/seed ratio @ 1024 : {:.3}", basin_ratio);
+    println!("  basin-rate decay        : {:.3}× (1.0 = constant; <1 = quantizing)", rate_decay);
+
+    if basin_ratio < 0.5 && rate_decay < 0.8 {
+        println!(
+            "\n  QUANTIZED — basin count grew sub-linearly and rate decayed.\n  The attractor space is large but FINITE at this machinery scale.\n  Additional seeds increasingly land in already-known basins.\n  Phase M1 answer: DISCRETE (bounded by ~{} basins ±).",
+            last.1
+        );
+    } else if basin_ratio > 0.95 {
+        println!(
+            "\n  CONTINUUM — almost every seed produces a new basin.\n  The attractor space is effectively unbounded at this\n  machinery level; richer capability (subterm AU, e-graph)\n  needed to surface the structure.");
+    } else {
+        println!(
+            "\n  INTERMEDIATE — basin space is large but not clearly\n  quantized. Push further (4096+ seeds) to resolve OR change\n  machinery upstream to sharpen the discrete attractors.");
+    }
+
+    // Soft test — data is the point. Assertion: we produced
+    // non-trivial output.
+    assert!(last.1 > 0, "expected some basins to emerge");
+    assert!(last.1 >= first.1, "basin count must be monotone in seed count");
+}
+
 #[test]
 #[ignore = "load-bearing: 256-seed sweep, ~5-10s, run with --ignored"]
 fn oscillation_law_of_large_numbers() {

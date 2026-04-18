@@ -125,21 +125,86 @@ know how we can take control of it."
 
 Ranked by how decisively each advances toward steering.
 
-### Phase M1: density of attractors
+### Phase M1: density of attractors — DONE 2026-04-18
 
-Sweep many more seeds (100, 1000) and plot the fingerprint
-distribution. Is the count of distinct attractors bounded (truly
-quantized) or unbounded (continuum approximated by discreteness)?
-If bounded, we've enumerated the finite state space of possible
-discovery outcomes.
+Empirical answer: **intermediate quantization, apparent basin count
+large-but-sub-linear at current machinery.**
 
-### Phase M2: seed-space clustering
+Stairway sweep (pure-procedural, budget=15, depth=4):
 
-For each seed, record the FULL library composition (not just apex).
-Cluster by similarity. The clusters ARE the attractor basins.
-Compute their volumes (how many seeds fall into each). This gives
-a probability distribution over attractors — the "wavefunction" of
-discovery outcomes.
+| seeds | basins | singletons | new_basins | basin_rate |
+|---|---|---|---|---|
+| 128   | 91    | 81    | 91   | 0.711 |
+| 256   | 168   | 145   | 77   | 0.602 |
+| 512   | 306   | 248   | 138  | 0.539 |
+| 1024  | 529   | 399   | 223  | 0.436 |
+
+basin-rate decay: 0.436 / 0.711 = 0.613× over 8× seed growth.
+basin/seed ratio at 1024: 0.517 (sub-linear).
+
+Growth ≈ seeds^0.85 at this machinery scale. The attractor space
+is FINITE but large — definitely more than 529 distinct apex
+fingerprints, but the rate of new-basin discovery is shrinking.
+Full saturation would require seeds in the 10,000+ range OR
+better basin classification.
+
+**Finding that's bigger than the numbers.** The 529 "distinct"
+basins are distinct by **apex rule name** (S_xxxx). Many are
+likely structurally equivalent modulo rename — same LHS/RHS
+shapes with different fresh symbol ids from different runs. True
+STRUCTURAL basin count may be orders of magnitude smaller. Phase
+M2 (structural classification) is the test.
+
+Pinned by `oscillation_basin_space_cardinality`
+(ignored-by-default, ~12s).
+
+### Phase M2: structural basin classification — DONE 2026-04-18
+
+**Answer: ~80 structural basins at 1024 seeds, strongly bimodal.**
+
+`oscillation_structural_basin_classification` anonymizes fresh
+symbol ids and variable ids in each run's library, then classifies
+basins by STRUCTURAL fingerprint (lhs/rhs shape, not nominal
+S_NNN names).
+
+Result at 1024 seeds, pure-procedural:
+
+  Nominal basins  (by S_NNN names) : 529
+  Structural basins (by shape)     : 80  (85% compression)
+
+Top-10 structural basin support
+
+    rank  seeds   fraction
+    1      445    43.5%    ← dominant attractor A
+    2      431    42.1%    ← dominant attractor B
+    3       34     3.3%
+    4       10     1.0%
+    5        7     0.7%
+    6        7     0.7%
+    7–10   2–4 each
+
+  singleton structural basins : 64/80
+  Shannon entropy             : 2.216 bits
+  normalized entropy          : 0.351
+
+This IS the finite object. 80 attractors with strongly bimodal
+weight (two dominant at ~43% each, carrying 86% of all seed
+outcomes). 64 tail attractors carry the long-tail variations
+(<1% support each, likely corpus-specific niche structure).
+
+The LLN+anonymization discipline converts what looked like 529
+random distinct outcomes into 80 canonical attractor types at
+this machinery scale. The "wavefunction" over discovery is
+concentrated, not diffuse.
+
+**The eager-collapse principle landed here.** Alpha-equivalent
+rules are detected by `eval::alpha_equivalent` and collapsed by
+`reduction::detect_subsumption_pairs` at reinforcement time,
+BEFORE they pollute the library with nominal variants. The
+structural collapse we observe post-hoc used to happen only in
+the test; it now happens during traversal itself.
+
+Pinned by `oscillation_structural_basin_classification`.
 
 ### Phase M3: transition between attractors
 

@@ -26,7 +26,7 @@
 //! for any given layer's notion of reduction.
 
 use crate::epoch::{Artifact, Registry};
-use crate::eval::{pattern_equivalent, proper_subsumes, subsumes};
+use crate::eval::{alpha_equivalent, pattern_equivalent, proper_subsumes, subsumes};
 use crate::hash::TermRef;
 use crate::lifecycle::ProofStatus;
 use serde::{Deserialize, Serialize};
@@ -295,6 +295,26 @@ pub fn detect_subsumption_pairs(
     for (ai, _, a_art) in &active {
         for (bi, _, b_art) in &active {
             if ai == bi {
+                continue;
+            }
+            // EAGER COLLAPSE — the "two terms that can be one
+            // without breaking anything must immediately be one"
+            // principle. Alpha-equivalent rules (identical LHS+RHS
+            // modulo fresh-id renaming) are literally the same rule
+            // under different nominal ids. Collapse them first, with
+            // the lower-hash representative as canonical.
+            //
+            // This is strictly stronger than pattern_equivalent
+            // (which only compares LHSs): alpha-equivalent rules
+            // match on both LHS and RHS shape, so subsumption is
+            // information-preserving by construction.
+            if alpha_equivalent(&a_art.rule, &b_art.rule) {
+                if ai.as_bytes() > bi.as_bytes() {
+                    continue; // wrong direction — bi is canonical
+                }
+                if claimed.insert(*bi.as_bytes()) {
+                    out.push((*ai, *bi));
+                }
                 continue;
             }
             if !subsumes(&a_art.rule.lhs, &b_art.rule.lhs) {

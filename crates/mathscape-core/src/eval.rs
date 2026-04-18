@@ -180,6 +180,77 @@ pub fn pattern_equivalent(a: &Term, b: &Term) -> bool {
     subsumes(a, b) && subsumes(b, a)
 }
 
+/// Anonymize symbol ids and fresh variable ids in a term so that
+/// terms differing only by nominal id choices map to the same
+/// canonical form. Concrete operators (var id < 100) are preserved
+/// as vocabulary; fresh variables (var id ≥ 100) and Symbol ids
+/// get renumbered in first-appearance order.
+///
+/// Two runs producing rules that encode the same pattern under
+/// different fresh ids (inevitable because rule-id minting advances
+/// per run) will produce IDENTICAL anonymized terms. This is the
+/// foundation of the eager-collapse principle: any two rules that
+/// CAN be one rule SHOULD be one rule.
+pub fn anonymize_term(t: &Term) -> Term {
+    use std::collections::HashMap;
+    fn walk(
+        t: &Term,
+        var_map: &mut HashMap<u32, u32>,
+        symbol_map: &mut HashMap<u32, u32>,
+    ) -> Term {
+        match t {
+            Term::Point(p) => Term::Point(p.clone()),
+            Term::Number(n) => Term::Number(n.clone()),
+            Term::Var(v) => {
+                // Concrete ops (id < 100) are vocabulary — preserve.
+                // Fresh vars (id ≥ 100) get canonical renumbering.
+                if *v < 100 {
+                    Term::Var(*v)
+                } else {
+                    let next = var_map.len() as u32;
+                    let id = *var_map.entry(*v).or_insert(next + 100);
+                    Term::Var(id)
+                }
+            }
+            Term::Fn(params, body) => {
+                let b = walk(body, var_map, symbol_map);
+                Term::Fn(params.clone(), Box::new(b))
+            }
+            Term::Apply(f, args) => {
+                let f2 = walk(f, var_map, symbol_map);
+                let args2 = args.iter().map(|a| walk(a, var_map, symbol_map)).collect();
+                Term::Apply(Box::new(f2), args2)
+            }
+            Term::Symbol(id, args) => {
+                let next = symbol_map.len() as u32;
+                let canonical = *symbol_map.entry(*id).or_insert(next);
+                let args2 = args.iter().map(|a| walk(a, var_map, symbol_map)).collect();
+                Term::Symbol(canonical, args2)
+            }
+        }
+    }
+    let mut var_map = HashMap::new();
+    let mut symbol_map = HashMap::new();
+    walk(t, &mut var_map, &mut symbol_map)
+}
+
+/// *Alpha equivalence* — the eager-collapse predicate. Two rules
+/// are alpha-equivalent iff they have the same anonymized LHS and
+/// the same anonymized RHS. This is the machine's "can be one term
+/// without breaking anything" check: alpha-equivalent rules encode
+/// identical patterns under different fresh-id choices, and the
+/// core algorithm should collapse them on sight.
+///
+/// Stronger than `pattern_equivalent` (which only checks LHSs) and
+/// stricter than `proper_subsumes` (which allows asymmetric
+/// subsumption). When this returns true, the two rules are THE SAME
+/// rule modulo naming.
+#[must_use]
+pub fn alpha_equivalent(r1: &RewriteRule, r2: &RewriteRule) -> bool {
+    anonymize_term(&r1.lhs) == anonymize_term(&r2.lhs)
+        && anonymize_term(&r1.rhs) == anonymize_term(&r2.rhs)
+}
+
 /// *Proper subsumption* — the absolute measure of rule-level
 /// irreducibility that the user flagged as the gate for meta-rule
 /// collapse. A rule `r1` properly subsumes `r2` iff:
