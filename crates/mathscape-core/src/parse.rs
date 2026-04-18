@@ -34,12 +34,22 @@ impl std::fmt::Display for ParseError {
 impl std::error::Error for ParseError {}
 
 /// Well-known builtin names mapped to their variable IDs.
+///
+/// R7 (2026-04-18): Int-domain names added. Resolves to the
+/// builtin registry's ids — keep in sync with `crate::builtin`.
 fn builtin_var(name: &str) -> Option<u32> {
     match name {
+        // Nat domain
         "zero" => Some(0),
         "succ" => Some(1),
         "add" => Some(2),
         "mul" => Some(3),
+        // Int domain (R7)
+        "int_zero" => Some(10),
+        "int_succ" => Some(11),
+        "int_add" => Some(12),
+        "int_mul" => Some(13),
+        "neg" => Some(14),
         _ => None,
     }
 }
@@ -204,9 +214,32 @@ fn parse_atom(s: &str) -> Result<Term, ParseError> {
         return Ok(Term::Var(var_id));
     }
 
-    // Number
+    // Number — Nat by default (positive u64 literal).
     if let Ok(n) = s.parse::<u64>() {
         return Ok(Term::Number(Value::Nat(n)));
+    }
+
+    // R7: Int literal. Two forms:
+    //   -N   → Int(-N)  — leading minus implies Int (Nat has no
+    //                    negatives, so this is unambiguous)
+    //   iN   → Int(N)   — explicit positive Int (mirror of the
+    //                    printer's "Ni" suffix; "i3" instead of
+    //                    "3i" to keep the atom self-delimiting
+    //                    at the start)
+    if s.starts_with('-') || s.starts_with('i') {
+        let (sign, rest) = if let Some(rest) = s.strip_prefix('i') {
+            (1i64, rest)
+        } else {
+            // leading '-': parse the rest as positive i64, negate.
+            let rest = s.strip_prefix('-').unwrap();
+            (-1i64, rest)
+        };
+        if let Ok(n) = rest.parse::<i64>() {
+            // Guard overflow: rest is positive i64, sign is ±1.
+            if let Some(v) = sign.checked_mul(n) {
+                return Ok(Term::Number(Value::Int(v)));
+            }
+        }
     }
 
     Err(ParseError::InvalidSyntax(format!("unknown atom: {s}")))
@@ -286,6 +319,89 @@ mod tests {
     fn parse_symbol() {
         let t = parse("(S5 ?1 ?2)").unwrap();
         assert_eq!(t, Term::Symbol(5, vec![Term::Var(1), Term::Var(2)]));
+    }
+
+    // ── R7: Int parsing gold tests ───────────────────────────────
+
+    #[test]
+    fn parse_negative_number_as_int() {
+        let t = parse("-7").unwrap();
+        assert_eq!(t, Term::Number(Value::Int(-7)));
+    }
+
+    #[test]
+    fn parse_positive_int_with_i_prefix() {
+        let t = parse("i42").unwrap();
+        assert_eq!(t, Term::Number(Value::Int(42)));
+    }
+
+    #[test]
+    fn parse_int_zero_distinguishes_from_nat() {
+        let int_form = parse("-0").unwrap();
+        let nat_form = parse("0").unwrap();
+        // -0 parses as Int(0); plain 0 parses as Nat(0). Same
+        // numeric content, different domains.
+        assert_eq!(int_form, Term::Number(Value::Int(0)));
+        assert_eq!(nat_form, Term::Number(Value::Nat(0)));
+        assert_ne!(int_form, nat_form);
+    }
+
+    #[test]
+    fn parse_int_builtins_by_name() {
+        let t = parse("(int_add i3 i5)").unwrap();
+        assert_eq!(
+            t,
+            Term::Apply(
+                Box::new(Term::Var(12)), // INT_ADD
+                vec![
+                    Term::Number(Value::Int(3)),
+                    Term::Number(Value::Int(5)),
+                ],
+            )
+        );
+    }
+
+    #[test]
+    fn parse_neg_builtin() {
+        let t = parse("(neg -5)").unwrap();
+        assert_eq!(
+            t,
+            Term::Apply(
+                Box::new(Term::Var(14)), // NEG
+                vec![Term::Number(Value::Int(-5))],
+            )
+        );
+    }
+
+    #[test]
+    fn parse_and_canonical_fold_int_expression() {
+        // End-to-end through R7's capability: parse an Int expression,
+        // canonicalize, get the folded Int result. This test proves
+        // the whole kernel pipeline works for the new domain.
+        use crate::term::Term as T;
+        let t = parse("(int_add (int_mul -3 -5) i7)").unwrap();
+        let canon = t.canonical();
+        // -3 * -5 = 15, 15 + 7 = 22
+        assert_eq!(canon, T::Number(Value::Int(22)));
+    }
+
+    #[test]
+    fn parse_and_eval_int_successor_chain() {
+        // (int_succ (int_succ (int_zero))) → Int(2)
+        use crate::eval::eval;
+        let t = parse("(int_succ (int_succ (int_zero)))").unwrap();
+        let v = eval(&t, &[], 100).unwrap();
+        assert_eq!(v, Term::Number(Value::Int(2)));
+    }
+
+    #[test]
+    fn parse_and_eval_neg_composition() {
+        // neg(neg(-5)) = -5 (involution). Evaluated through eval,
+        // not just canonical — verifies both paths see R7 uniformly.
+        use crate::eval::eval;
+        let t = parse("(neg (neg -5))").unwrap();
+        let v = eval(&t, &[], 100).unwrap();
+        assert_eq!(v, Term::Number(Value::Int(-5)));
     }
 
     #[test]
