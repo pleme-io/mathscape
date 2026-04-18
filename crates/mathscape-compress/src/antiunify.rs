@@ -135,6 +135,127 @@ pub fn anti_unify(t1: &Term, t2: &Term) -> AntiUnifyResult {
     }
 }
 
+/// R24 (2026-04-18): paired anti-unification for law discovery.
+///
+/// Given two "before → after" pairs produced by evaluation
+/// (e.g. `(add(5, 0), 5)` and `(add(7, 0), 7)`), compute the
+/// least general generalization OF BOTH SIDES using a SHARED
+/// var_pairs map. The same fresh variable is used wherever the
+/// same corresponding subterm pair appears — across both the
+/// LHS pattern and the RHS pattern.
+///
+/// Result: `(lhs_pattern, rhs_pattern)` — a candidate equational
+/// law. If no generalization exists that respects both sides,
+/// returns `None`.
+///
+/// Example:
+///   Pair 1: add(5, 0) → 5
+///   Pair 2: add(7, 0) → 7
+///   Paired AU: lhs = add(?v200, 0), rhs = ?v200 ⇒ law
+///              `add(?x, 0) = ?x`
+///
+/// This is the primitive the law-generator uses to extract laws
+/// from evaluation traces. Currently in antiunify rather than its
+/// own module because it shares the inner machinery.
+pub fn paired_anti_unify(
+    inputs: (&Term, &Term),
+    outputs: (&Term, &Term),
+) -> Option<(Term, Term)> {
+    // `inputs` = (in_a, in_b) — the two inputs to anti-unify against
+    // each other, producing the LHS pattern.
+    // `outputs` = (out_a, out_b) — the two outputs, producing the
+    // RHS pattern.
+    let (in_a, in_b) = inputs;
+    let (out_a, out_b) = outputs;
+
+    let floor = 200u32;
+    let max_in = max_var_id(in_a)
+        .max(max_var_id(in_b))
+        .max(max_var_id(out_a))
+        .max(max_var_id(out_b));
+    let mut next_var = floor.max(max_in.saturating_add(1));
+    let mut var_pairs: HashMap<(TermKey, TermKey), u32> = HashMap::new();
+    let mut shared_in = 0;
+    let mut var_count_in = 0;
+    let mut shared_out = 0;
+    let mut var_count_out = 0;
+
+    // Both AUs share var_pairs — same (subterm_t1, subterm_t2) pair
+    // assigns the SAME fresh variable, even across LHS/RHS.
+    let lhs_pattern = au_inner(
+        in_a,
+        in_b,
+        &mut next_var,
+        &mut var_pairs,
+        &mut shared_in,
+        &mut var_count_in,
+    );
+    let rhs_pattern = au_inner(
+        out_a,
+        out_b,
+        &mut next_var,
+        &mut var_pairs,
+        &mut shared_out,
+        &mut var_count_out,
+    );
+
+    // Validity check: the law is useful only if LHS has at least
+    // one pattern variable (otherwise it's a concrete equation,
+    // not a law). And RHS patterns must either be concrete or use
+    // vars that the LHS also uses (otherwise RHS has free vars
+    // the law can't bind).
+    if var_count_in == 0 {
+        return None;
+    }
+    let lhs_vars: std::collections::BTreeSet<u32> =
+        collect_pattern_vars(&lhs_pattern);
+    let rhs_vars: std::collections::BTreeSet<u32> =
+        collect_pattern_vars(&rhs_pattern);
+    // Every var in RHS must be bound by LHS (otherwise the law is
+    // underdetermined — the RHS has a free variable the machine
+    // can't fill in).
+    if !rhs_vars.is_subset(&lhs_vars) {
+        return None;
+    }
+    // And LHS ≠ RHS — a vacuous law (LHS = LHS) carries no info.
+    if lhs_pattern == rhs_pattern {
+        return None;
+    }
+
+    Some((lhs_pattern, rhs_pattern))
+}
+
+fn collect_pattern_vars(t: &Term) -> std::collections::BTreeSet<u32> {
+    let mut out = std::collections::BTreeSet::new();
+    collect_pattern_vars_inner(t, &mut out);
+    out
+}
+
+fn collect_pattern_vars_inner(t: &Term, out: &mut std::collections::BTreeSet<u32>) {
+    match t {
+        Term::Var(v) => {
+            // Only pattern vars (>= 100 by anonymize convention);
+            // vocabulary (< 100) isn't a binding.
+            if *v >= 100 {
+                out.insert(*v);
+            }
+        }
+        Term::Apply(head, args) => {
+            collect_pattern_vars_inner(head, out);
+            for a in args {
+                collect_pattern_vars_inner(a, out);
+            }
+        }
+        Term::Fn(_, body) => collect_pattern_vars_inner(body, out),
+        Term::Symbol(_, args) => {
+            for a in args {
+                collect_pattern_vars_inner(a, out);
+            }
+        }
+        _ => {}
+    }
+}
+
 /// Maximum var id appearing anywhere in a term (0 if none).
 fn max_var_id(t: &Term) -> u32 {
     match t {

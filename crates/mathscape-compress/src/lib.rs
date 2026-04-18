@@ -8,7 +8,9 @@ pub mod adapter;
 pub mod antiunify;
 pub mod egraph;
 pub mod extract;
+pub mod law_generator;
 pub mod meta_gen;
 
 pub use adapter::CompressionGenerator;
+pub use law_generator::derive_laws_from_corpus;
 pub use meta_gen::{CompositeGenerator, MetaPatternGenerator};
