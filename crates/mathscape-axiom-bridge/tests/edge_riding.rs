@@ -222,17 +222,122 @@ fn rule_key(r: &RewriteRule) -> String {
     )
 }
 
+/// Phase L2: seed a corpus by instantiating validated theorem
+/// LHSs with random recursive subterms.
+///
+/// The machine uses its OWN validated discoveries to generate the
+/// next layer of corpus. A ledger rule `add(0, ?x) → ?x` has LHS
+/// `add(0, ?x)`. Instantiating `?x` with a random recursive term
+/// produces shapes like `add(0, mul(3, succ(0)))`, `add(0, add(y,
+/// 0))`, etc. These expose compositional structure the anti-
+/// unifier can find patterns in — patterns one layer ABOVE the
+/// theorem whose LHS seeded them.
+///
+/// This is self-bootstrapping at the corpus level, closing the
+/// producer half of the producer-consumer loop the edge-riding
+/// architecture needs.
+fn seeded_corpus_from_ledger(
+    ledger: &[RewriteRule],
+    seed: u64,
+    depth: usize,
+    count: usize,
+    vocab: &[u32],
+    max_value: u64,
+) -> Vec<Term> {
+    let mut state = seed.max(1).wrapping_mul(0x9E37_79B9_7F4A_7C15);
+    let mut out = Vec::with_capacity(count);
+    for _ in 0..count {
+        state = xorshift(state);
+        let rule = &ledger[(state as usize) % ledger.len()];
+        let mut fvars: Vec<u32> = Vec::new();
+        collect_fresh_vars_into(&rule.lhs, &mut fvars);
+        fvars.sort();
+        fvars.dedup();
+        let mut instance = rule.lhs.clone();
+        for fv in fvars {
+            let replacement =
+                build_random_recursive_state(state, depth, vocab, max_value);
+            state = xorshift(state.wrapping_add(0xDEAD_BEEF));
+            instance = instance.substitute(fv, &replacement);
+        }
+        out.push(instance);
+    }
+    out
+}
+
+fn build_random_recursive_state(
+    seed: u64,
+    depth: usize,
+    vocab: &[u32],
+    max_value: u64,
+) -> Term {
+    let mut state = seed;
+    build_random_recursive_inner(&mut state, depth, vocab, max_value)
+}
+
+fn build_random_recursive_inner(
+    state: &mut u64,
+    depth: usize,
+    vocab: &[u32],
+    max_value: u64,
+) -> Term {
+    *state = xorshift(*state);
+    if depth == 0 || *state % 3 == 0 {
+        *state = xorshift(*state);
+        return Term::Number(mathscape_core::value::Value::Nat(
+            *state % max_value.max(1),
+        ));
+    }
+    let op = vocab[(*state as usize) % vocab.len()];
+    let arity: usize = if matches!(op, 1 | 4 | 7) { 1 } else { 2 };
+    let mut args = Vec::with_capacity(arity);
+    for _ in 0..arity {
+        args.push(build_random_recursive_inner(state, depth - 1, vocab, max_value));
+    }
+    Term::Apply(Box::new(Term::Var(op)), args)
+}
+
+fn collect_fresh_vars_into(t: &Term, out: &mut Vec<u32>) {
+    match t {
+        Term::Var(v) if *v >= 100 => out.push(*v),
+        Term::Var(_) => {}
+        Term::Apply(f, args) => {
+            collect_fresh_vars_into(f, out);
+            for a in args {
+                collect_fresh_vars_into(a, out);
+            }
+        }
+        Term::Symbol(_, args) => {
+            for a in args {
+                collect_fresh_vars_into(a, out);
+            }
+        }
+        Term::Fn(_, body) => collect_fresh_vars_into(body, out),
+        _ => {}
+    }
+}
+
+
 /// Run a single probe. Returns (rules, apparatus name).
 ///
-/// Phase L1: if substrate is non-empty, at least half of probes
-/// use the adaptive corpus (substrate-aware generator) instead of
-/// one of the fixed families. This is what keeps the edge
-/// receding — adaptive corpus produces structure at rank N+1
-/// when substrate covers rank N.
+/// ML4 evolution: every knob the machine can mutate is sourced
+/// from `mechanism` (corpus vocab, base depth, max value, extract
+/// config fields) rather than from hardcoded arrays. When the
+/// saturation-response loop mutates `mechanism`, the next probe
+/// pass uses the mutant config — that's how self-mutation
+/// propagates.
+///
+/// Phase L1: when substrate is non-empty, half of probes use the
+/// adaptive corpus (substrate-aware generator).
+/// Phase L2 (when mechanism.corpus_seed_from_theorems): half of
+/// adaptive-corpus probes additionally seed from validated theorem
+/// LHSs, instantiating free vars with recursive subterms.
 fn run_probe(
     iter: u64,
     apparatuses: &[Apparatus],
     substrate: &[RewriteRule],
+    ledger: &[RewriteRule],
+    mechanism: &MechanismConfig,
 ) -> (Vec<(String, RewriteRule)>, String) {
     let mut r = xorshift(iter.wrapping_mul(2654435761));
     let apparatus = &apparatuses[(r as usize) % apparatuses.len()];
@@ -246,30 +351,66 @@ fn run_probe(
     r = xorshift(r);
     let depth = DEPTHS[(r as usize) % DEPTHS.len()];
     r = xorshift(r);
-    let ec = &EXTRACT_CONFIGS[(r as usize) % EXTRACT_CONFIGS.len()];
+    // Extract config sourced from the mechanism config — previously
+    // picked from a hardcoded array. Now mutations to
+    // extract_min_shared_size / extract_min_matches /
+    // extract_max_new_rules take effect in every probe.
+    let ec = ExtractConfig {
+        min_shared_size: mechanism.extract_min_shared_size,
+        min_matches: mechanism.extract_min_matches,
+        max_new_rules: mechanism.extract_max_new_rules,
+    };
     r = xorshift(r);
     let min_score = MIN_SCORES[(r as usize) % MIN_SCORES.len()];
 
     let corpus_instance: Vec<(String, Vec<Term>)> = if use_adaptive {
-        // Generate several adaptive-corpus slabs, each labeled so
-        // they appear to the Epoch as distinct "corpus instances".
-        let vocab: [u32; 5] = [2, 3, 4, 5, 7]; // add, mul, succ, sub, pred
-        let slabs = budget.min(4).max(2);
-        let per_slab = 20;
-        (0..slabs)
-            .map(|i| {
-                let name = format!("adaptive-s{seed}-slab{i}");
-                let terms = adaptive_corpus(
-                    substrate,
-                    seed.wrapping_add(i as u64 * 101),
-                    depth,
-                    per_slab,
-                    &vocab,
-                    10,
-                );
-                (name, terms)
-            })
-            .collect()
+        let use_l2_seed = mechanism.corpus_seed_from_theorems
+            && !ledger.is_empty()
+            && {
+                r = xorshift(r);
+                r % 2 == 0
+            };
+        if use_l2_seed {
+            // Phase L2: seed corpus from validated theorem LHSs.
+            // Take a ledger rule, instantiate its free variables
+            // with random recursive subterms, repeat. The resulting
+            // corpus contains STRUCTURED instances of known
+            // theorem shapes, which the anti-unifier can then use
+            // to surface next-layer patterns.
+            let slabs = budget.min(4).max(2);
+            let per_slab = 20;
+            (0..slabs)
+                .map(|i| {
+                    let name = format!("l2-seeded-s{seed}-slab{i}");
+                    let terms = seeded_corpus_from_ledger(
+                        ledger,
+                        seed.wrapping_add(i as u64 * 101),
+                        mechanism.corpus_base_depth,
+                        per_slab,
+                        &mechanism.corpus_vocab,
+                        mechanism.corpus_max_value,
+                    );
+                    (name, terms)
+                })
+                .collect()
+        } else {
+            let slabs = budget.min(4).max(2);
+            let per_slab = 20;
+            (0..slabs)
+                .map(|i| {
+                    let name = format!("adaptive-s{seed}-slab{i}");
+                    let terms = adaptive_corpus(
+                        substrate,
+                        seed.wrapping_add(i as u64 * 101),
+                        mechanism.corpus_base_depth,
+                        per_slab,
+                        &mechanism.corpus_vocab,
+                        mechanism.corpus_max_value,
+                    );
+                    (name, terms)
+                })
+                .collect()
+        }
     } else {
         CORPORA[corp_index].build(seed, budget, depth)
     };
@@ -277,7 +418,7 @@ fn run_probe(
     let rules = run_probe_fast_with_substrate(
         &apparatus.src,
         &corpus_instance,
-        ec,
+        &ec,
         min_score,
         substrate,
     );
@@ -312,7 +453,13 @@ fn run_sub_campaign(
     (0..n_probes).into_par_iter().chunks(CHUNK).for_each(|chunk| {
         let mut local: HashMap<String, Provenance> = HashMap::new();
         for iter in chunk {
-            let (rules, ap_name) = run_probe(iter as u64, apparatuses, substrate);
+            let (rules, ap_name) = run_probe(
+                iter as u64,
+                apparatuses,
+                substrate,
+                ledger_rules,
+                mechanism,
+            );
             for (key, anon) in rules {
                 let p = local.entry(key).or_default();
                 if p.exemplar.is_none() {
