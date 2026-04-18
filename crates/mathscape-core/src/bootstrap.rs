@@ -484,6 +484,139 @@ mod tests {
         assert_eq!(outcome, back);
     }
 
+    // ── R27 invariant tests ──────────────────────────────────────
+
+    #[test]
+    fn zero_iteration_cycle_produces_empty_outcome() {
+        // Edge case: N=0. Cycle completes without error; outcome
+        // has no iterations, no trajectory steps. Library + policy
+        // pass through unchanged from seeds.
+        let cycle = BootstrapCycle::new(
+            NullCorpusGenerator,
+            FixedLawExtractor { law: dummy_law() },
+            NullModelUpdater,
+            0,
+        );
+        let seed_lib = vec![dummy_law()];
+        let seed_policy = LinearPolicy::tensor_seeking_prior();
+        let outcome = cycle.run(seed_lib.clone(), seed_policy.clone());
+        assert!(outcome.iterations.is_empty());
+        assert!(outcome.trajectory.steps.is_empty());
+        assert_eq!(outcome.final_library, seed_lib);
+        // Null updater means policy unchanged; with seed weights
+        // preserved.
+        assert_eq!(outcome.final_policy.weights, seed_policy.weights);
+    }
+
+    #[test]
+    fn cycle_library_is_monotonically_non_decreasing() {
+        // Across iterations, library size never shrinks. Extracted
+        // laws are only appended, never removed by the cycle
+        // itself.
+        let cycle = BootstrapCycle::new(
+            NullCorpusGenerator,
+            FixedLawExtractor { law: dummy_law() },
+            NullModelUpdater,
+            5,
+        );
+        let outcome = cycle.run(Vec::new(), LinearPolicy::new());
+        for pair in outcome.iterations.windows(2) {
+            let prev = pair[0].features_after.rule_count;
+            let curr = pair[1].features_after.rule_count;
+            assert!(
+                curr >= prev,
+                "library must not shrink: {prev} → {curr}"
+            );
+        }
+    }
+
+    #[test]
+    fn trajectory_step_count_matches_iteration_count() {
+        // For any N iterations, the trajectory records exactly N
+        // steps. Invariant: 1 step per iteration, no more no less.
+        for n in [0, 1, 3, 7] {
+            let cycle = BootstrapCycle::new(
+                NullCorpusGenerator,
+                FixedLawExtractor { law: dummy_law() },
+                NullModelUpdater,
+                n,
+            );
+            let outcome = cycle.run(Vec::new(), LinearPolicy::new());
+            assert_eq!(
+                outcome.trajectory.steps.len(),
+                n,
+                "trajectory step count must equal iteration count N={n}"
+            );
+        }
+    }
+
+    #[test]
+    fn seed_library_passes_through_unchanged_with_null_extractor() {
+        // A cycle whose extractor returns EMPTY for every call
+        // must preserve the seed library exactly.
+        struct EmptyExtractor;
+        impl LawExtractor for EmptyExtractor {
+            fn extract(&self, _c: &[Term], _l: &[RewriteRule]) -> Vec<RewriteRule> {
+                Vec::new()
+            }
+        }
+        let cycle = BootstrapCycle::new(
+            NullCorpusGenerator,
+            EmptyExtractor,
+            NullModelUpdater,
+            5,
+        );
+        let seed = vec![dummy_law()];
+        let outcome = cycle.run(seed.clone(), LinearPolicy::new());
+        assert_eq!(outcome.final_library, seed);
+        // Each iteration recorded `accepted=false`.
+        for step in &outcome.trajectory.steps {
+            assert!(!step.accepted, "empty extractor should mark !accepted");
+        }
+    }
+
+    #[test]
+    fn attestation_covers_policy_changes() {
+        // If the policy ends up different (different updater
+        // trained it), attestation must differ — even if the
+        // library is identical.
+        let cycle_null_updater = BootstrapCycle::new(
+            NullCorpusGenerator,
+            FixedLawExtractor { law: dummy_law() },
+            NullModelUpdater,
+            2,
+        );
+        let cycle_default_updater = BootstrapCycle::new(
+            NullCorpusGenerator,
+            FixedLawExtractor { law: dummy_law() },
+            DefaultModelUpdater::default(),
+            2,
+        );
+        let a = cycle_null_updater.run(Vec::new(), LinearPolicy::new());
+        let b = cycle_default_updater.run(Vec::new(), LinearPolicy::new());
+        assert_eq!(a.final_library, b.final_library);
+        assert_ne!(a.attestation, b.attestation);
+    }
+
+    #[test]
+    fn default_corpus_generator_is_deterministic() {
+        // Two calls with same iter + library → identical corpus.
+        let g = DefaultCorpusGenerator;
+        let lib: Vec<RewriteRule> = Vec::new();
+        assert_eq!(g.generate(0, &lib), g.generate(0, &lib));
+        assert_eq!(g.generate(3, &lib), g.generate(3, &lib));
+    }
+
+    #[test]
+    fn default_corpus_generator_iter_0_differs_from_later() {
+        // The iteration-index dispatch must actually produce
+        // different corpora for different iterations (the default
+        // escalates complexity at iter ≥ 1).
+        let g = DefaultCorpusGenerator;
+        let lib: Vec<RewriteRule> = Vec::new();
+        assert_ne!(g.generate(0, &lib), g.generate(1, &lib));
+    }
+
     #[test]
     fn layer_boundaries_are_independent() {
         // Change the updater independently of the other layers.

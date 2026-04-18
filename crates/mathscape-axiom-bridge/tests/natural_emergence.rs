@@ -35,7 +35,7 @@ use mathscape_core::{
     eval::RewriteRule,
     form_tree::DiscoveryForest,
     lifecycle::ProofStatus,
-    primitives::{classify_primitives, MlPrimitive, PrimitiveCensus},
+    primitives::{collect_primitive_labels, PrimitiveCensus},
     tensor::{self, TensorShape},
 };
 use mathscape_reward::{reward::RewardConfig, StatisticalProver};
@@ -149,36 +149,7 @@ fn run_one(budget: usize, depth: usize) -> EmergenceReport {
 
     // R12 primitive census on ACTIVE rules.
     let primitive_census = mathscape_core::primitives::census(&active_rules_list);
-    let mut primitive_labels: Vec<String> = Vec::new();
-    for rule in &active_rules_list {
-        for p in classify_primitives(rule) {
-            let label = match p {
-                MlPrimitive::LeftIdentity { op, .. } => {
-                    format!("left-identity/{op}")
-                }
-                MlPrimitive::RightIdentity { op, .. } => {
-                    format!("right-identity/{op}")
-                }
-                MlPrimitive::Involution { f } => format!("involution/{f}"),
-                MlPrimitive::Idempotence { f } => format!("idempotence/{f}"),
-                MlPrimitive::LeftDistributive { outer, inner } => {
-                    format!("left-distrib/{outer}-over-{inner}")
-                }
-                MlPrimitive::RightDistributive { outer, inner } => {
-                    format!("right-distrib/{outer}-over-{inner}")
-                }
-                MlPrimitive::Homomorphism { f, op } => {
-                    format!("homomorphism/{f}-preserves-{op}")
-                }
-                MlPrimitive::MetaDistributive => "meta-distributive".into(),
-                MlPrimitive::MetaIdentity => "meta-identity".into(),
-            };
-            if !primitive_labels.contains(&label) {
-                primitive_labels.push(label);
-            }
-        }
-    }
-    primitive_labels.sort();
+    let primitive_labels = collect_primitive_labels(&active_rules_list);
 
     // R8 cross-check tensor shapes.
     let mut tensor_distributive = 0;

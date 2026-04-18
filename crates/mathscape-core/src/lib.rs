@@ -76,7 +76,8 @@ pub use reduction::{
 };
 pub use policy::{rank_states, LinearPolicy, PolicyModel};
 pub use primitives::{
-    census, classify_primitives, IdentityForm, MlPrimitive, PrimitiveCensus,
+    census, classify_primitives, collect_primitive_labels, primitive_label,
+    IdentityForm, MlPrimitive, PrimitiveCensus,
 };
 pub use tensor::{classify, shape_counts, tensor_density, TensorShape};
 pub use term::{StoredTerm, SymbolId, Term};

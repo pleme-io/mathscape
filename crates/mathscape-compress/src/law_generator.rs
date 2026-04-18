@@ -274,4 +274,177 @@ mod tests {
         let laws = derive_laws_from_corpus(&corpus, &[], 100, 2, &mut next_id);
         assert!(laws.is_empty(), "single-instance corpus can't form law pairs");
     }
+
+    // ── R27 invariant tests: every emitted law is well-formed ────
+
+    /// A law is well-formed iff:
+    ///   1. LHS contains at least one pattern variable (id ≥ 100)
+    ///   2. RHS variables are a subset of LHS variables
+    ///   3. LHS ≠ RHS (non-trivial)
+    /// These are the same conditions `paired_anti_unify` enforces
+    /// — this property test verifies the derive_laws_from_corpus
+    /// pipeline never leaks malformed output to its caller.
+    fn is_well_formed_law(rule: &mathscape_core::eval::RewriteRule) -> bool {
+        let lhs_vars = collect_pattern_vars(&rule.lhs);
+        let rhs_vars = collect_pattern_vars(&rule.rhs);
+        !lhs_vars.is_empty()
+            && rhs_vars.is_subset(&lhs_vars)
+            && rule.lhs != rule.rhs
+    }
+
+    fn collect_pattern_vars(
+        t: &Term,
+    ) -> std::collections::BTreeSet<u32> {
+        let mut out = std::collections::BTreeSet::new();
+        collect_inner(t, &mut out);
+        out
+    }
+
+    fn collect_inner(t: &Term, out: &mut std::collections::BTreeSet<u32>) {
+        match t {
+            Term::Var(v) => {
+                if *v >= 100 {
+                    out.insert(*v);
+                }
+            }
+            Term::Apply(head, args) => {
+                collect_inner(head, out);
+                for a in args {
+                    collect_inner(a, out);
+                }
+            }
+            Term::Fn(_, body) => collect_inner(body, out),
+            Term::Symbol(_, args) => {
+                for a in args {
+                    collect_inner(a, out);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    #[test]
+    fn every_emitted_law_is_well_formed_add_corpus() {
+        let corpus: Vec<Term> = (3..=11u64)
+            .step_by(2)
+            .map(|v| apply(var(ADD), vec![nat(0), nat(v)]))
+            .collect();
+        let mut next_id: SymbolId = 0;
+        let laws = derive_laws_from_corpus(&corpus, &[], 100, 2, &mut next_id);
+        assert!(!laws.is_empty());
+        for law in &laws {
+            assert!(
+                is_well_formed_law(law),
+                "emitted malformed law: {law:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn every_emitted_law_is_well_formed_mixed_corpus() {
+        let mut corpus = Vec::new();
+        for v in [3u64, 5, 7, 11, 13, 17] {
+            corpus.push(apply(var(ADD), vec![nat(0), nat(v)]));
+            corpus.push(apply(var(MUL), vec![nat(1), nat(v)]));
+        }
+        let mut next_id: SymbolId = 0;
+        let laws = derive_laws_from_corpus(&corpus, &[], 100, 2, &mut next_id);
+        for law in &laws {
+            assert!(is_well_formed_law(law), "malformed: {law:?}");
+        }
+    }
+
+    #[test]
+    fn derive_laws_is_deterministic() {
+        // Same corpus + same support threshold → identical law
+        // patterns. Name-level differences (symbol ids) are
+        // allowed; structural content must match.
+        let corpus = vec![
+            apply(var(ADD), vec![nat(0), nat(5)]),
+            apply(var(ADD), vec![nat(0), nat(7)]),
+            apply(var(ADD), vec![nat(0), nat(9)]),
+        ];
+        let mut id_a: SymbolId = 0;
+        let mut id_b: SymbolId = 0;
+        let laws_a =
+            derive_laws_from_corpus(&corpus, &[], 100, 2, &mut id_a);
+        let laws_b =
+            derive_laws_from_corpus(&corpus, &[], 100, 2, &mut id_b);
+        assert_eq!(laws_a.len(), laws_b.len());
+        let patterns_a: std::collections::BTreeSet<(Term, Term)> = laws_a
+            .iter()
+            .map(|l| (l.lhs.clone(), l.rhs.clone()))
+            .collect();
+        let patterns_b: std::collections::BTreeSet<(Term, Term)> = laws_b
+            .iter()
+            .map(|l| (l.lhs.clone(), l.rhs.clone()))
+            .collect();
+        assert_eq!(patterns_a, patterns_b);
+    }
+
+    #[test]
+    fn min_support_filter_respected() {
+        // 3 instances → C(3,2) = 3 pairs → max support per law is 3.
+        // With min_support=5, nothing passes.
+        let corpus = vec![
+            apply(var(ADD), vec![nat(0), nat(5)]),
+            apply(var(ADD), vec![nat(0), nat(7)]),
+            apply(var(ADD), vec![nat(0), nat(9)]),
+        ];
+        let mut next_id: SymbolId = 0;
+        let strict =
+            derive_laws_from_corpus(&corpus, &[], 100, 5, &mut next_id);
+        assert!(
+            strict.is_empty(),
+            "min_support=5 with max possible support=3 must yield no laws"
+        );
+
+        // With min_support=1, the law is emitted.
+        let mut next_id2: SymbolId = 0;
+        let lax = derive_laws_from_corpus(&corpus, &[], 100, 1, &mut next_id2);
+        assert!(
+            !lax.is_empty(),
+            "min_support=1 must accept laws with any support"
+        );
+    }
+
+    #[test]
+    fn empty_corpus_yields_no_laws() {
+        let mut next_id: SymbolId = 0;
+        let laws = derive_laws_from_corpus(&[], &[], 100, 2, &mut next_id);
+        assert!(laws.is_empty());
+    }
+
+    #[test]
+    fn laws_ranked_by_support_descending() {
+        // 5 identity-add instances + 2 identity-mul instances.
+        // The add law has more supporting pairs than the mul law.
+        // When both emerge, add should be first.
+        let mut corpus = Vec::new();
+        for v in [3u64, 5, 7, 9, 11] {
+            corpus.push(apply(var(ADD), vec![nat(0), nat(v)]));
+        }
+        for v in [3u64, 5] {
+            corpus.push(apply(var(MUL), vec![nat(1), nat(v)]));
+        }
+        let mut next_id: SymbolId = 0;
+        let laws = derive_laws_from_corpus(&corpus, &[], 100, 1, &mut next_id);
+        // First law emitted should have the most support — the add
+        // identity law with ~C(5,2)=10 pairs vs mul at C(2,2)=1.
+        // (Cross-pairs also contribute but same-head pairs dominate.)
+        assert!(!laws.is_empty());
+        // The first law's LHS should be add-headed (highest support).
+        let first_head = match &laws[0].lhs {
+            Term::Apply(h, _) => match h.as_ref() {
+                Term::Var(id) => Some(*id),
+                _ => None,
+            },
+            _ => None,
+        };
+        assert_eq!(
+            first_head,
+            Some(ADD),
+            "highest-support law should be add-identity (more instances)"
+        );
+    }
 }

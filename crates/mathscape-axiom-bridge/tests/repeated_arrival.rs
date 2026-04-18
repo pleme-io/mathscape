@@ -42,7 +42,7 @@ use mathscape_core::{
     eval::RewriteRule,
     form_tree::DiscoveryForest,
     lifecycle::ProofStatus,
-    primitives::{classify_primitives, MlPrimitive},
+    primitives::collect_primitive_labels,
     tensor::{self, TensorShape},
 };
 use mathscape_reward::{reward::RewardConfig, StatisticalProver};
@@ -156,36 +156,7 @@ fn run_one(config: RunConfig) -> RunOutcome {
         }
     }
 
-    let mut primitive_labels: Vec<String> = Vec::new();
-    for rule in &active_rules {
-        for p in classify_primitives(rule) {
-            let label = match p {
-                MlPrimitive::LeftIdentity { op, .. } => {
-                    format!("left-identity/{op}")
-                }
-                MlPrimitive::RightIdentity { op, .. } => {
-                    format!("right-identity/{op}")
-                }
-                MlPrimitive::Involution { f } => format!("involution/{f}"),
-                MlPrimitive::Idempotence { f } => format!("idempotence/{f}"),
-                MlPrimitive::LeftDistributive { outer, inner } => {
-                    format!("left-distrib/{outer}-{inner}")
-                }
-                MlPrimitive::RightDistributive { outer, inner } => {
-                    format!("right-distrib/{outer}-{inner}")
-                }
-                MlPrimitive::Homomorphism { f, op } => {
-                    format!("homomorphism/{f}-{op}")
-                }
-                MlPrimitive::MetaDistributive => "meta-distributive".into(),
-                MlPrimitive::MetaIdentity => "meta-identity".into(),
-            };
-            if !primitive_labels.contains(&label) {
-                primitive_labels.push(label);
-            }
-        }
-    }
-    primitive_labels.sort();
+    let primitive_labels = collect_primitive_labels(&active_rules);
 
     let mut tensor_distributive = 0;
     let mut tensor_meta_distributive = 0;

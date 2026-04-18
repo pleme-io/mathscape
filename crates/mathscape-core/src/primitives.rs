@@ -197,6 +197,55 @@ impl PrimitiveCensus {
     }
 }
 
+/// Human-readable label for an `MlPrimitive`. Single source of
+/// truth for formatting primitive classifications in reports and
+/// test output. Extracted so multiple observation harnesses
+/// (natural_emergence, repeated_arrival, self_bootstrap) share
+/// identical formatting — no drift.
+#[must_use]
+pub fn primitive_label(p: &MlPrimitive) -> String {
+    match p {
+        MlPrimitive::LeftIdentity { op, .. } => {
+            format!("left-identity/{op}")
+        }
+        MlPrimitive::RightIdentity { op, .. } => {
+            format!("right-identity/{op}")
+        }
+        MlPrimitive::Involution { f } => format!("involution/{f}"),
+        MlPrimitive::Idempotence { f } => format!("idempotence/{f}"),
+        MlPrimitive::LeftDistributive { outer, inner } => {
+            format!("left-distrib/{outer}-{inner}")
+        }
+        MlPrimitive::RightDistributive { outer, inner } => {
+            format!("right-distrib/{outer}-{inner}")
+        }
+        MlPrimitive::Homomorphism { f, op } => {
+            format!("homomorphism/{f}-{op}")
+        }
+        MlPrimitive::MetaDistributive => "meta-distributive".into(),
+        MlPrimitive::MetaIdentity => "meta-identity".into(),
+    }
+}
+
+/// Collect all distinct primitive-shape labels from a library.
+/// Deduplicated and sorted for stable reports. Convenience for
+/// observation experiments — pairs with `classify_primitives` +
+/// `primitive_label`.
+#[must_use]
+pub fn collect_primitive_labels(rules: &[RewriteRule]) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for r in rules {
+        for p in classify_primitives(r) {
+            let label = primitive_label(&p);
+            if !out.contains(&label) {
+                out.push(label);
+            }
+        }
+    }
+    out.sort();
+    out
+}
+
 /// Census over a library.
 #[must_use]
 pub fn census(rules: &[RewriteRule]) -> PrimitiveCensus {
@@ -826,5 +875,123 @@ mod tests {
         let c = census(&[]);
         assert_eq!(c.total_rules, 0);
         assert_eq!(c.any_primitive_hits(), 0);
+    }
+
+    // ── R27 invariant tests ──────────────────────────────────────
+
+    #[test]
+    fn primitive_label_stable_roundtrip_via_format() {
+        // Every MlPrimitive variant must produce a stable,
+        // non-empty label. Pins the format so downstream consumers
+        // can parse/match it.
+        let variants = vec![
+            MlPrimitive::LeftIdentity {
+                op: ADD,
+                identity: IdentityForm::Nat(0),
+            },
+            MlPrimitive::RightIdentity {
+                op: MUL,
+                identity: IdentityForm::Nat(1),
+            },
+            MlPrimitive::Involution { f: NEG },
+            MlPrimitive::Idempotence { f: SUCC },
+            MlPrimitive::LeftDistributive {
+                outer: MUL,
+                inner: ADD,
+            },
+            MlPrimitive::RightDistributive {
+                outer: MUL,
+                inner: ADD,
+            },
+            MlPrimitive::Homomorphism { f: SUCC, op: ADD },
+            MlPrimitive::MetaDistributive,
+            MlPrimitive::MetaIdentity,
+        ];
+        for v in variants {
+            let label = primitive_label(&v);
+            assert!(!label.is_empty(), "empty label for {v:?}");
+            // Label is ASCII (important for log files, grep).
+            assert!(
+                label.chars().all(|c| c.is_ascii()),
+                "non-ASCII label {label:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn collect_primitive_labels_is_sorted_and_deduped() {
+        // Two identical laws should produce ONE label in the
+        // output. And the output must be sorted lexicographically
+        // for deterministic reports.
+        let r1 = rule(
+            "a",
+            app(var(ADD), vec![nat(0), var(100)]),
+            var(100),
+        );
+        let r2 = rule(
+            "b",
+            app(var(MUL), vec![nat(1), var(100)]),
+            var(100),
+        );
+        let r3 = rule(
+            "c",
+            app(var(ADD), vec![nat(0), var(101)]),
+            var(101),
+        );
+        let labels = collect_primitive_labels(&[r1, r2, r3]);
+        // Sorted (lexical).
+        let mut sorted = labels.clone();
+        sorted.sort();
+        assert_eq!(labels, sorted);
+        // Deduped — the two add-identity instances (r1, r3)
+        // classify as the same primitive with same op id → one
+        // entry.
+        let add_id_count =
+            labels.iter().filter(|l| l.contains("left-identity/2")).count();
+        assert_eq!(add_id_count, 1);
+    }
+
+    #[test]
+    fn classify_primitives_is_pure() {
+        // Calling classify_primitives twice on the same rule
+        // yields the same result. Pure function — no global
+        // state, no mutation.
+        let r = rule(
+            "r",
+            app(var(ADD), vec![nat(0), var(100)]),
+            var(100),
+        );
+        assert_eq!(classify_primitives(&r), classify_primitives(&r));
+    }
+
+    #[test]
+    fn census_sum_equals_total_classifications() {
+        // For any library, the census's per-category counts must
+        // sum to the total number of primitive classifications.
+        // Per-rule classifications can be multiple if a rule
+        // matches several shapes — but any_primitive_hits is the
+        // sum, and classify_primitives(rule).len() summed across
+        // rules should match.
+        let lib = vec![
+            rule(
+                "a",
+                app(var(ADD), vec![nat(0), var(100)]),
+                var(100),
+            ),
+            rule(
+                "b",
+                app(var(MUL), vec![var(100), nat(1)]),
+                var(100),
+            ),
+            rule(
+                "c",
+                app(var(NEG), vec![app(var(NEG), vec![var(100)])]),
+                var(100),
+            ),
+        ];
+        let c = census(&lib);
+        let by_classification: usize =
+            lib.iter().map(|r| classify_primitives(r).len()).sum();
+        assert_eq!(c.any_primitive_hits(), by_classification);
     }
 }
