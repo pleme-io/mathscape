@@ -14,6 +14,7 @@
 //!     simulation)
 //!   - equivalence verification (e-graph, via mathscape-proof)
 
+use crate::lisp_reward::{bindings_from_axes, evaluate_reward_sexp};
 use crate::reward::{compute_reward, RewardConfig};
 use mathscape_core::{
     epoch::{
@@ -23,6 +24,7 @@ use mathscape_core::{
     lifecycle::ProofStatus,
     term::Term,
 };
+use tatara_lisp::ast::Sexp;
 
 /// A [`Prover`] that scores each candidate via `compute_reward` and
 /// accepts if the resulting composite score clears `min_score`.
@@ -32,12 +34,35 @@ pub struct StatisticalProver {
     /// Minimum `reward` value for acceptance. Maps to
     /// `RealizationPolicy::epsilon_compression`.
     pub min_score: f64,
+    /// Phase ML1: optional Lisp form for reward combination. When
+    /// set, axes (cr, novelty, meta-compression, lhs-subsumption)
+    /// are computed in Rust exactly as before, but their COMBINATION
+    /// into a scalar score runs through the Lisp evaluator instead
+    /// of the hardcoded `alpha*cr + beta*nov + gamma*meta +
+    /// delta*sub` arithmetic. None = bit-identical to pre-ML1
+    /// behavior. Set via `.with_reward_form(sexp)`.
+    pub reward_form: Option<Sexp>,
 }
 
 impl StatisticalProver {
     #[must_use]
     pub fn new(reward_config: RewardConfig, min_score: f64) -> Self {
-        Self { reward_config, min_score }
+        Self {
+            reward_config,
+            min_score,
+            reward_form: None,
+        }
+    }
+
+    /// Phase ML1: builder that installs a Lisp combination rule.
+    /// The form must be an arithmetic expression over the symbols
+    /// `alpha`, `beta`, `gamma`, `delta`, `cr`, `novelty`,
+    /// `meta-compression`, `lhs-subsumption` (see
+    /// `lisp_reward::CANONICAL_REWARD_SRC` for the reference shape).
+    #[must_use]
+    pub fn with_reward_form(mut self, form: Sexp) -> Self {
+        self.reward_form = Some(form);
+        self
     }
 }
 
@@ -68,9 +93,31 @@ impl Prover for StatisticalProver {
             compute_reward(corpus, &full_library, &new_rules, &self.reward_config);
         let baseline =
             compute_reward(corpus, &existing, &[], &self.reward_config);
-        let marginal_reward = with_cand.reward - baseline.reward;
         let marginal_cr = with_cand.compression_ratio - baseline.compression_ratio;
         let marginal_meta = with_cand.meta_compression - baseline.meta_compression;
+
+        // Phase ML1: combine axes via Lisp form when one is
+        // installed, else via the legacy Rust formula. Axes
+        // themselves are computed above in Rust regardless.
+        // Evaluator errors fall back to a score that forces
+        // rejection — a malformed apparatus form must never smuggle
+        // a candidate through.
+        let marginal_reward = match &self.reward_form {
+            Some(form) => {
+                let bindings = bindings_from_axes(
+                    self.reward_config.alpha,
+                    self.reward_config.beta,
+                    self.reward_config.gamma,
+                    self.reward_config.delta,
+                    marginal_cr,
+                    with_cand.novelty_total,
+                    marginal_meta,
+                    with_cand.lhs_subsumption_count,
+                );
+                evaluate_reward_sexp(form, &bindings).unwrap_or(f64::MIN)
+            }
+            None => with_cand.reward - baseline.reward,
+        };
 
         let result = crate::reward::RewardResult {
             reward: marginal_reward,

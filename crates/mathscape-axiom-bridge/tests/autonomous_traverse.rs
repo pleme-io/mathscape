@@ -4067,3 +4067,218 @@ fn phase_l_self_feeding_traversal() {
     }
     assert!(!history.is_empty(), "at least one layer must run");
 }
+
+/// Run a traversal with a Lisp-form reward installed in the prover.
+/// Returns (total_rules, axiomatized_count, sorted_apex_names).
+fn run_with_reward_form(
+    seed_offset: u64,
+    procedural_budget: usize,
+    max_depth: usize,
+    extract_config: mathscape_compress::extract::ExtractConfig,
+    form_src: &str,
+) -> (usize, usize, Vec<String>) {
+    let mut zoo: Vec<(String, Vec<Term>)> = Vec::new();
+    for i in 1..=procedural_budget as u64 {
+        let seed = seed_offset.wrapping_add(i);
+        let depth = 2 + (i as usize % (max_depth - 1).max(1));
+        let count = 16 + (i as usize % 8);
+        zoo.push((
+            format!("proc-s{seed}-d{depth}"),
+            procedural(seed, depth, count),
+        ));
+    }
+
+    let base = CompressionGenerator::new(extract_config.clone(), 1);
+    let meta = MetaPatternGenerator::new(
+        ExtractConfig {
+            min_shared_size: 1,
+            min_matches: 2,
+            max_new_rules: 12,
+        },
+        10_000,
+    );
+
+    // Parse the Lisp form and install it on the prover. None = legacy.
+    let prover = {
+        let base_prover = mathscape_reward::StatisticalProver::new(
+            mathscape_reward::reward::RewardConfig::default(),
+            0.0,
+        );
+        if form_src.is_empty() {
+            base_prover
+        } else {
+            let form = mathscape_reward::parse_reward(form_src)
+                .expect("test reward form must parse");
+            base_prover.with_reward_form(form)
+        }
+    };
+
+    let mut epoch = Epoch::new(
+        CompositeGenerator::new(base, meta),
+        prover,
+        RuleEmitter,
+        InMemoryRegistry::new(),
+    );
+    for (_, corpus) in &zoo {
+        for _ in 0..3 {
+            let _ = epoch.step_with_action(
+                corpus,
+                mathscape_core::control::EpochAction::Discover,
+            );
+        }
+        let _ = epoch.step_with_action(
+            corpus,
+            mathscape_core::control::EpochAction::Reinforce,
+        );
+    }
+    let mut names = Vec::new();
+    let mut axiomatized_count = 0usize;
+    for artifact in epoch.registry.all() {
+        let s = epoch
+            .registry
+            .status_of(artifact.content_hash)
+            .unwrap_or_else(|| artifact.certificate.status.clone());
+        if matches!(s, ProofStatus::Axiomatized) {
+            axiomatized_count += 1;
+            names.push(artifact.rule.name.clone());
+        }
+    }
+    names.sort();
+    (epoch.registry.all().len(), axiomatized_count, names)
+}
+
+#[test]
+#[ignore = "phase ML1+: reward-mutation probe — does varying the Lisp reward form shift the bettyfine? ~30s, --ignored"]
+fn phase_ml_reward_mutation_probe() {
+    // Phase ML1 activation probe for the apparatus layer.
+    //
+    // ML1 proved the Rust↔Lisp↔Rust FFI is correct (gold test).
+    // This probe asks the follow-on question: if we VARY the
+    // combination rule expressed in Lisp — not just weights, but
+    // structural shape (conditional terms, clamps, max over axes)
+    // — does the machine produce different bettyfines?
+    //
+    // If yes: apparatus mutation is GENERATIVE. Changing the
+    // apparatus at Lisp level shifts which rules get promoted,
+    // which means the bettyfine is NOT a fixed point of the
+    // operator set — it's a fixed point of (operator set,
+    // apparatus rule). ML2+ is justified by evidence.
+    //
+    // If no: the bettyfine is robust to reward-shape mutations.
+    // The leverage has to come from mutating the EXTRACTOR, not
+    // the reward combination. That's the more expensive ML2
+    // investment, warranted because the cheap reward variant
+    // failed.
+    //
+    // Either verdict is useful — the probe is the crossroads.
+    use mathscape_compress::extract::ExtractConfig as EC;
+
+    const BUDGET: usize = 12;
+    const DEPTH: usize = 4;
+    let ec = EC::default();
+
+    // Six reward forms spanning plausible apparatus mutations:
+    //   1. canonical (gold-matches Rust) — baseline
+    //   2. CR-only — discovers only compressive patterns
+    //   3. novelty-only — pure exploration pressure
+    //   4. max-over-axes — reward = whichever axis is best
+    //   5. CR×novelty — multiplicative AND: both must be positive
+    //   6. threshold-CR — novelty only counts when CR > 0.05
+    let variants: Vec<(&'static str, &'static str)> = vec![
+        (
+            "1. canonical",
+            "(+ (* alpha cr) (* beta novelty) (* gamma meta-compression) (* delta lhs-subsumption))",
+        ),
+        (
+            "2. cr-only",
+            "(* alpha cr)",
+        ),
+        (
+            "3. novelty-only",
+            "(* beta novelty)",
+        ),
+        (
+            "4. max-over-axes",
+            "(max (max (* alpha cr) (* beta novelty)) (max (* gamma meta-compression) (* delta lhs-subsumption)))",
+        ),
+        (
+            "5. cr-times-novelty",
+            "(+ (* cr novelty) (* gamma meta-compression) (* delta lhs-subsumption))",
+        ),
+        (
+            "6. threshold-cr",
+            "(+ (* alpha cr) (if (max (- cr 0.05) 0) (* beta novelty) 0) (* gamma meta-compression) (* delta lhs-subsumption))",
+        ),
+    ];
+
+    // For each variant: run the same seed range, tally the library
+    // and apex set. Compare fingerprints.
+    println!();
+    println!("phase ML1+: reward-mutation probe — 6 Lisp variants × 3 seeds");
+    println!("─────────────────────────────────────────────────────────────");
+
+    let seeds = [0u64, 1000, 2000];
+    let mut fingerprints: Vec<(String, usize, usize, Vec<String>)> = Vec::new();
+    for (label, src) in &variants {
+        let mut total_rules = 0usize;
+        let mut total_axiom = 0usize;
+        let mut apex_union: std::collections::BTreeSet<String> =
+            std::collections::BTreeSet::new();
+        for &s in &seeds {
+            let (lib, axiom, apex) =
+                run_with_reward_form(s, BUDGET, DEPTH, ec.clone(), src);
+            total_rules += lib;
+            total_axiom += axiom;
+            for a in apex {
+                apex_union.insert(a);
+            }
+        }
+        let apex_vec: Vec<String> = apex_union.into_iter().collect();
+        println!();
+        println!("  {label}");
+        println!("    form        : {src}");
+        println!(
+            "    Σrules      : {total_rules}  Σaxiomatized: {total_axiom}"
+        );
+        println!("    apex union  : {apex_vec:?}");
+        fingerprints.push((label.to_string(), total_rules, total_axiom, apex_vec));
+    }
+
+    // Compare variant 1 (canonical) to all others — which
+    // variants diverge? The count of DIVERGENT variants is the
+    // measure of apparatus sensitivity.
+    println!();
+    println!("divergence from canonical:");
+    let canonical = &fingerprints[0];
+    let mut divergent_count = 0usize;
+    for other in fingerprints.iter().skip(1) {
+        let rules_diff = other.1 as i64 - canonical.1 as i64;
+        let axiom_diff = other.2 as i64 - canonical.2 as i64;
+        let apex_diff = other.3 != canonical.3;
+        let any_diff = rules_diff != 0 || axiom_diff != 0 || apex_diff;
+        if any_diff {
+            divergent_count += 1;
+        }
+        println!(
+            "  {:24}  Δrules={:+3}  Δaxiom={:+3}  apex-differs={}",
+            other.0, rules_diff, axiom_diff, apex_diff
+        );
+    }
+
+    println!();
+    if divergent_count > 0 {
+        println!(
+            "  ✓ VERDICT: {divergent_count}/5 apparatus mutations SHIFTED the traversal."
+        );
+        println!("    The bettyfine is NOT a fixed point of the operator set alone;");
+        println!("    it is a fixed point of (operator set, apparatus combination rule).");
+        println!("    ML2+ (extractor in Lisp) is justified — apparatus mutation is");
+        println!("    generative at the current scale.");
+    } else {
+        println!("  ∘ VERDICT: all 5 reward-shape mutations produced the same fingerprint.");
+        println!("    The bettyfine is robust to reward-combination changes within");
+        println!("    the current extract config + prover threshold. Leverage has to");
+        println!("    come from mutating the EXTRACTOR (ML2), not the combination rule.");
+    }
+    assert_eq!(fingerprints.len(), variants.len());
+}
