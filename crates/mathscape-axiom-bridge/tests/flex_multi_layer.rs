@@ -152,6 +152,53 @@ fn successor_chain_corpus() -> Vec<Term> {
     v
 }
 
+/// Procedural corpus generator — deterministic given seed. Builds
+/// `term_count` synthetic terms with varying depth, operator mix,
+/// and constant values. Used by the saturation experiment to feed
+/// the machine a stream of novel corpora and observe when it stops
+/// learning.
+///
+/// Op vocabulary: var(2)=add, var(3)=mul, var(4)=succ. Constants
+/// drawn from [0..=10]. Depth in [1..=max_depth]. Deterministic via
+/// a simple xorshift seeded by `seed` — no heavy RNG dependency.
+fn procedural_corpus(seed: u64, max_depth: usize, term_count: usize) -> Vec<Term> {
+    let mut state = seed.wrapping_mul(0x9E37_79B9_7F4A_7C15).max(1);
+    let mut next_u64 = || {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        state
+    };
+    let ops: [u32; 3] = [2, 3, 4]; // add, mul, succ (succ is unary)
+
+    fn build(
+        depth: usize,
+        max_depth: usize,
+        ops: &[u32],
+        next: &mut dyn FnMut() -> u64,
+    ) -> Term {
+        if depth >= max_depth || next() % 3 == 0 {
+            let v = (next() % 11) as u64;
+            return nat(v);
+        }
+        let op_idx = (next() % ops.len() as u64) as usize;
+        let op = ops[op_idx];
+        // succ is unary; add, mul are binary.
+        let arity = if op == 4 { 1 } else { 2 };
+        let mut args = Vec::with_capacity(arity);
+        for _ in 0..arity {
+            args.push(build(depth + 1, max_depth, ops, next));
+        }
+        apply(var(op), args)
+    }
+
+    let mut out = Vec::with_capacity(term_count);
+    for _ in 0..term_count {
+        out.push(build(0, max_depth, &ops, &mut next_u64));
+    }
+    out
+}
+
 /// Two-operator compositional corpus: terms that mix add and mul
 /// in non-identity ways. `add(mul(x, 2), 0)`, `mul(add(x, 0), 3)`.
 /// After flat-add-identity and flat-mul-identity are discovered,
@@ -544,6 +591,309 @@ fn flex_discovery_forest_end_to_end() {
         final_saving > 0.0,
         "scheduler should save at least some traversal as the forest stabilizes; got {final_saving}"
     );
+}
+
+#[test]
+fn flex_saturation_sweep_with_lynchpin_invariant() {
+    // The saturation experiment. Lynchpin invariant we protect:
+    //
+    //   "Every rule that lands must earn cross-corpus support."
+    //
+    // Rules that only reduce nodes in the one corpus that produced
+    // them are not primitives — they're corpus-local artifacts
+    // and should not survive. We enforce this at the end of the
+    // sweep by asserting no rule in the final library has support
+    // from fewer than 2 corpora.
+    //
+    // Game: feed the zoo + 12 procedurally-generated corpora
+    // through the shared-forest / shared-epoch pipeline. After
+    // every corpus, record (library_size, forest_nodes,
+    // cumulative_retroactive_edges). The saturation curve
+    // tells us the machine's current reach.
+    use std::collections::HashMap;
+    use std::time::Instant;
+
+    // Zoo first (hand-crafted shapes), then 12 procedural corpora
+    // with varying seeds & depths.
+    let mut zoo: Vec<(String, Vec<Term>)> = vec![
+        ("arith-right-id".into(), arith_corpus()),
+        ("mult-right-id".into(), multiplicative_corpus()),
+        ("compositional".into(), compositional_corpus()),
+        ("left-identity".into(), left_identity_corpus()),
+        ("doubling".into(), doubling_corpus()),
+        ("successor-chain".into(), successor_chain_corpus()),
+        ("cross-op".into(), cross_op_corpus()),
+    ];
+    for seed in 1..=12u64 {
+        let depth = 2 + ((seed as usize) % 3); // depth ∈ {2, 3, 4}
+        let count = 16 + ((seed as usize) % 8); // count ∈ [16, 23]
+        zoo.push((
+            format!("proc-s{seed}-d{depth}"),
+            procedural_corpus(seed, depth, count),
+        ));
+    }
+
+    // Shared substrate.
+    let mut forest = DiscoveryForest::new();
+    let base = CompressionGenerator::new(
+        ExtractConfig {
+            min_shared_size: 2,
+            min_matches: 2,
+            max_new_rules: 5,
+        },
+        1,
+    );
+    let meta = MetaPatternGenerator::new(
+        ExtractConfig {
+            min_shared_size: 1,
+            min_matches: 2,
+            max_new_rules: 12,
+        },
+        10_000,
+    );
+    let mut epoch = mathscape_core::epoch::Epoch::new(
+        CompositeGenerator::new(base, meta),
+        mathscape_reward::StatisticalProver::new(
+            mathscape_reward::reward::RewardConfig::default(),
+            0.0,
+        ),
+        mathscape_core::epoch::RuleEmitter,
+        mathscape_core::epoch::InMemoryRegistry::new(),
+    );
+
+    let mut rule_to_corpora: HashMap<TermRef, std::collections::HashSet<String>> =
+        HashMap::new();
+
+    // Saturation curve samples, taken after each corpus.
+    let mut curve: Vec<(String, usize, usize, usize, usize)> = Vec::new();
+    // (corpus_name, lib_size, forest_nodes, cum_edges, new_rules_this_step)
+
+    let mut global_epoch = 0u64;
+    let t_start = Instant::now();
+
+    for (name, corpus) in &zoo {
+        global_epoch += 1;
+        forest.set_epoch(global_epoch);
+        for t in corpus {
+            forest.insert(t.clone());
+        }
+        let pre_accept = epoch.registry.all().len();
+        for _ in 0..3 {
+            let _ = epoch.step_with_action(
+                corpus,
+                mathscape_core::control::EpochAction::Discover,
+            );
+        }
+        let _ = epoch.step_with_action(
+            corpus,
+            mathscape_core::control::EpochAction::Reinforce,
+        );
+        let post_accept = epoch.registry.all().len();
+
+        // Retroactive batch application over shared forest.
+        global_epoch += 1;
+        forest.set_epoch(global_epoch);
+        let library_rules: Vec<_> = epoch
+            .registry
+            .all()
+            .iter()
+            .map(|a| (a.content_hash, a.rule.clone()))
+            .collect();
+        let name_to_hash: HashMap<String, TermRef> = library_rules
+            .iter()
+            .map(|(h, r)| (r.name.clone(), *h))
+            .collect();
+        let edges_before = forest.edges.len();
+        let rule_refs: Vec<&mathscape_core::eval::RewriteRule> =
+            library_rules.iter().map(|(_, r)| r).collect();
+        let _ = forest.apply_rules_retroactively(&rule_refs);
+        for edge in &forest.edges[edges_before..] {
+            if let Some(h) = name_to_hash.get(&edge.rule_name) {
+                rule_to_corpora.entry(*h).or_default().insert(name.clone());
+            }
+        }
+
+        curve.push((
+            name.clone(),
+            epoch.registry.all().len(),
+            forest.len(),
+            forest.edges.len(),
+            post_accept - pre_accept,
+        ));
+    }
+    let total_ms = t_start.elapsed().as_millis();
+
+    println!("\n╔══════════════════════════════════════════════════════╗");
+    println!("║ SATURATION SWEEP — 19 corpora, shared substrate      ║");
+    println!("╚══════════════════════════════════════════════════════╝");
+    println!(
+        "\n{:>3} {:<22} {:>7} {:>9} {:>9} {:>6}",
+        "#", "corpus", "lib", "nodes", "edges", "+rules"
+    );
+    println!("{}", "─".repeat(70));
+    for (i, (name, lib, nodes, edges, delta)) in curve.iter().enumerate() {
+        println!(
+            "{:>3} {:<22} {:>7} {:>9} {:>9} {:>6}",
+            i + 1,
+            name,
+            lib,
+            nodes,
+            edges,
+            delta,
+        );
+    }
+
+    // Find saturation point: last corpus that added a new rule.
+    let last_growing_idx = curve.iter().rposition(|(_, _, _, _, delta)| *delta > 0);
+    match last_growing_idx {
+        Some(idx) => println!(
+            "\n▶ Last library growth: step {} ({}) — {} corpora after contributed 0 new rules",
+            idx + 1,
+            curve[idx].0,
+            curve.len() - idx - 1,
+        ),
+        None => println!("\n▶ Library never grew — check seeding"),
+    }
+
+    // Lynchpin analysis: for every rule, its cross-corpus count.
+    let mut cross_counts: Vec<(String, usize)> = epoch
+        .registry
+        .all()
+        .iter()
+        .map(|a| {
+            (
+                a.rule.name.clone(),
+                rule_to_corpora
+                    .get(&a.content_hash)
+                    .map(|s| s.len())
+                    .unwrap_or(0),
+            )
+        })
+        .collect();
+    cross_counts.sort_by(|a, b| b.1.cmp(&a.1));
+
+    println!("\n▶ Per-rule cross-corpus support (final)");
+    println!("{:>12} {:>8}", "rule", "corpora");
+    println!("{}", "─".repeat(24));
+    for (name, n) in &cross_counts {
+        println!("{:>12} {:>8}", name, n);
+    }
+
+    let robust = cross_counts.iter().filter(|(_, n)| *n >= 2).count();
+    let fragile = cross_counts.iter().filter(|(_, n)| *n < 2).count();
+    let lib_size = epoch.registry.all().len();
+
+    println!("\n▶ Lynchpin census");
+    println!("  robust (≥2 corpora)    : {robust} / {lib_size}");
+    println!("  fragile (<2 corpora)   : {fragile} / {lib_size}");
+    println!("  elapsed (whole sweep)  : {total_ms}ms");
+
+    // The lynchpin invariant. If this fires, it means a rule
+    // landed that DIDN'T earn cross-corpus evidence — that's
+    // exactly the "corpus artifact" failure mode the user called
+    // out. When it fires, investigate.
+    assert!(
+        fragile == 0,
+        "LYNCHPIN VIOLATED: {fragile} rule(s) landed without \
+         cross-corpus support across {} corpora. Fragile rules: {:?}",
+        zoo.len(),
+        cross_counts
+            .iter()
+            .filter(|(_, n)| *n < 2)
+            .collect::<Vec<_>>(),
+    );
+    assert!(
+        robust >= 4,
+        "expected at least 4 robust rules with ≥2 corpus support; got {robust}"
+    );
+
+    // ── THE UNSTICKING OBSERVED ────────────────────────────────
+    //
+    // The lynchpin state is confirmed: every rule has ≥2 corpus
+    // cross-support. What we discover looking at the full status
+    // picture is that the MACHINE ALREADY UNSTICKS ITSELF via the
+    // existing W-window status-advancement mechanism. Rules that
+    // accumulate cross-corpus reach over enough epochs climb the
+    // lifecycle lattice:
+    //
+    //   Proposed → Conjectured → Verified → Exported → Axiomatized
+    //
+    // Reinforcement subsumption collapses less-general rules into
+    // their more-general counterparts. The result at the end of a
+    // 19-corpus sweep is: a couple of "apex" rules reach
+    // Axiomatized, everything else is Subsumed under them.
+    //
+    // This IS the loop the user named. Observing it is the confirm;
+    // the assertion below locks in the invariant that it happened.
+    println!("\n▶ Final status breakdown (the unsticking observed)");
+    use std::collections::BTreeMap;
+    let mut status_tally: BTreeMap<String, usize> = BTreeMap::new();
+    let mut axiomatized_with_support = Vec::new();
+    for artifact in epoch.registry.all() {
+        let s = epoch
+            .registry
+            .status_of(artifact.content_hash)
+            .unwrap_or_else(|| artifact.certificate.status.clone());
+        let cross = rule_to_corpora
+            .get(&artifact.content_hash)
+            .map(|x| x.len())
+            .unwrap_or(0);
+        let s_name = match &s {
+            ProofStatus::Proposed => "Proposed".to_string(),
+            ProofStatus::Conjectured => "Conjectured".to_string(),
+            ProofStatus::Verified => "Verified".to_string(),
+            ProofStatus::Exported => "Exported".to_string(),
+            ProofStatus::Axiomatized => "Axiomatized".to_string(),
+            ProofStatus::Promoted => "Promoted".to_string(),
+            ProofStatus::Primitive(_) => "Primitive".to_string(),
+            ProofStatus::Subsumed(_) => "Subsumed".to_string(),
+            ProofStatus::Demoted(_) => "Demoted".to_string(),
+        };
+        *status_tally.entry(s_name.clone()).or_default() += 1;
+        if matches!(s, ProofStatus::Axiomatized) {
+            axiomatized_with_support.push((artifact.rule.name.clone(), cross));
+        }
+        println!(
+            "  {:<10} cross={:>3}/19  status={}",
+            artifact.rule.name, cross, s_name,
+        );
+    }
+    println!("\n▶ Status tally");
+    for (name, count) in &status_tally {
+        println!("  {:<14} : {count}", name);
+    }
+
+    println!(
+        "\n▶ The apex rules — Axiomatized with cross-corpus evidence:"
+    );
+    for (name, support) in &axiomatized_with_support {
+        println!("    {name} — reduces nodes in {support}/19 corpora");
+    }
+
+    // Lock in: at least one rule reached Axiomatized, and it did so
+    // carrying cross-corpus evidence. This is the confirmed
+    // unsticking: the machine moved a rule from "just discovered"
+    // all the way to "empirically Axiomatized" on the strength of
+    // multi-corpus retroactive reduction.
+    assert!(
+        !axiomatized_with_support.is_empty(),
+        "the sweep should leave at least one rule Axiomatized; \
+         that's the unsticking — confirmed state leads to lifecycle \
+         advancement without human intervention"
+    );
+    // And the Axiomatized rules must carry real cross-corpus support
+    // (≥ half the zoo). Otherwise we'd have Axiomatization without
+    // the lynchpin evidence — a false promotion.
+    let half_zoo = zoo.len() / 2;
+    for (name, support) in &axiomatized_with_support {
+        assert!(
+            *support >= half_zoo,
+            "Axiomatized rule {name} has only {support}/{} corpus support; \
+             axiomatization without substantial cross-corpus evidence is \
+             what the lynchpin invariant is meant to prevent",
+            zoo.len(),
+        );
+    }
 }
 
 #[test]
