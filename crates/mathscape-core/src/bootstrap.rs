@@ -268,6 +268,67 @@ impl LibraryDeduper for AlphaDeduper {
     }
 }
 
+/// R30: subsumption-based deduper — strongest of the shipped
+/// dedupers. A candidate is rejected if ANY library rule
+/// `proper_subsumes` it: i.e., the library rule's LHS pattern-
+/// matches the candidate's LHS AND under that match's
+/// substitution, the library rule's RHS reduces to the
+/// candidate's RHS.
+///
+/// Reject conditions stronger than Alpha (which requires exact
+/// structural equality modulo var renaming) — Subsumption
+/// additionally rejects specializations. E.g., given
+/// `add(?x, ?y) => ?x` in the library, `add(5, 3) => 5` is
+/// subsumed and rejected; alpha-deduper would keep it.
+///
+/// Uses `mathscape_core::eval::proper_subsumes` which is
+/// well-tested and stable.
+#[derive(Debug, Clone, Default)]
+pub struct SubsumptionDeduper;
+
+impl LibraryDeduper for SubsumptionDeduper {
+    fn is_duplicate(
+        &self,
+        candidate: &RewriteRule,
+        library: &[RewriteRule],
+    ) -> bool {
+        library
+            .iter()
+            .any(|r| crate::eval::proper_subsumes(r, candidate))
+    }
+}
+
+/// R30: post-process a collection of rules, partitioning them
+/// into (kept, rejected) using the supplied deduper. Useful for
+/// cleaning up a library AFTER it was built (e.g., collected
+/// from multiple sources, or imported from an external library).
+///
+/// Runs left-to-right: the first occurrence of each equivalence
+/// class is kept; later structural duplicates are rejected. For
+/// a deduper that respects the order-independent property
+/// (`is_duplicate(a, [b]) == is_duplicate(b, [a])` for the same
+/// equivalence class), the kept set is invariant under input
+/// ordering. CanonicalDeduper + AlphaDeduper have this property;
+/// SubsumptionDeduper does NOT — subsumption is asymmetric, so
+/// a more-general rule appearing AFTER a specialization would
+/// not displace it. Use with awareness.
+#[must_use]
+pub fn deduplicate_library<D: LibraryDeduper>(
+    rules: Vec<RewriteRule>,
+    deduper: &D,
+) -> (Vec<RewriteRule>, Vec<RewriteRule>) {
+    let mut kept: Vec<RewriteRule> = Vec::new();
+    let mut rejected: Vec<RewriteRule> = Vec::new();
+    for r in rules {
+        if deduper.is_duplicate(&r, &kept) {
+            rejected.push(r);
+        } else {
+            kept.push(r);
+        }
+    }
+    (kept, rejected)
+}
+
 // ── BootstrapCycle ─────────────────────────────────────────────────
 
 /// The layered, pluggable self-producing discovery cycle.
@@ -882,6 +943,153 @@ mod tests {
         );
         // Two proposals, one kept after intra-iteration dedup.
         assert_eq!(outcome.final_library.len(), 1);
+    }
+
+    // ── R30: SubsumptionDeduper + deduplicate_library tests ─────
+
+    fn ident_law(var_id: u32) -> RewriteRule {
+        // add(0, ?var_id) = ?var_id
+        RewriteRule {
+            name: format!("id-{var_id}"),
+            lhs: Term::Apply(
+                Box::new(Term::Var(2)),
+                vec![Term::Number(Value::Nat(0)), Term::Var(var_id)],
+            ),
+            rhs: Term::Var(var_id),
+        }
+    }
+
+    #[test]
+    fn subsumption_deduper_rejects_specialization() {
+        // General: add(0, ?100) = ?100
+        // Specialization: add(0, 5) = 5
+        // Subsumption deduper rejects the specialization.
+        let d = SubsumptionDeduper;
+        let general = ident_law(100);
+        let specific = RewriteRule {
+            name: "add-0-5".into(),
+            lhs: Term::Apply(
+                Box::new(Term::Var(2)),
+                vec![
+                    Term::Number(Value::Nat(0)),
+                    Term::Number(Value::Nat(5)),
+                ],
+            ),
+            rhs: Term::Number(Value::Nat(5)),
+        };
+        assert!(d.is_duplicate(&specific, &[general]));
+    }
+
+    #[test]
+    fn subsumption_deduper_keeps_orthogonal_rules() {
+        // add-identity does NOT subsume mul-identity.
+        let d = SubsumptionDeduper;
+        let add_id = ident_law(100);
+        let mul_id = RewriteRule {
+            name: "mul-id".into(),
+            lhs: Term::Apply(
+                Box::new(Term::Var(3)),
+                vec![Term::Number(Value::Nat(1)), Term::Var(100)],
+            ),
+            rhs: Term::Var(100),
+        };
+        assert!(!d.is_duplicate(&mul_id, &[add_id]));
+    }
+
+    #[test]
+    fn subsumption_deduper_catches_exact_duplicates() {
+        // Same rule as an existing library entry ⇒ duplicate.
+        let d = SubsumptionDeduper;
+        let r = ident_law(100);
+        assert!(d.is_duplicate(&r, &[r.clone()]));
+    }
+
+    #[test]
+    fn deduplicate_library_removes_duplicates_canonical() {
+        // Library with explicit duplicates (same canonical form,
+        // different var ids). CanonicalDeduper won't catch alpha-
+        // renamed variants; AlphaDeduper should.
+        let input = vec![
+            ident_law(100),
+            ident_law(200), // alpha-renamed identity law
+            ident_law(100), // exact structural duplicate
+        ];
+        let (kept, rejected) =
+            deduplicate_library(input.clone(), &CanonicalDeduper);
+        // Canonical: catches exact duplicate (100) but not alpha-
+        // renamed (200).
+        assert_eq!(kept.len(), 2);
+        assert_eq!(rejected.len(), 1);
+    }
+
+    #[test]
+    fn deduplicate_library_alpha_catches_renamed() {
+        let input = vec![
+            ident_law(100),
+            ident_law(200),
+            ident_law(300),
+        ];
+        let (kept, rejected) =
+            deduplicate_library(input, &AlphaDeduper);
+        // AlphaDeduper: all three are alpha-equivalent. Keep 1.
+        assert_eq!(kept.len(), 1);
+        assert_eq!(rejected.len(), 2);
+    }
+
+    #[test]
+    fn deduplicate_library_preserves_orthogonal_rules() {
+        // Different operators, different shapes. No dedup applies.
+        let mul_id = RewriteRule {
+            name: "mul-id".into(),
+            lhs: Term::Apply(
+                Box::new(Term::Var(3)),
+                vec![Term::Number(Value::Nat(1)), Term::Var(100)],
+            ),
+            rhs: Term::Var(100),
+        };
+        let input = vec![ident_law(100), mul_id];
+        let (kept, rejected) =
+            deduplicate_library(input, &AlphaDeduper);
+        assert_eq!(kept.len(), 2);
+        assert_eq!(rejected.len(), 0);
+    }
+
+    #[test]
+    fn deduplicate_library_empty_input_is_empty_output() {
+        let (kept, rejected) =
+            deduplicate_library(Vec::new(), &CanonicalDeduper);
+        assert!(kept.is_empty());
+        assert!(rejected.is_empty());
+    }
+
+    #[test]
+    fn deduplicate_library_with_nodedup_keeps_everything() {
+        // NoDedup should pass every rule through, including exact
+        // duplicates.
+        let input = vec![
+            ident_law(100),
+            ident_law(100),
+            ident_law(100),
+        ];
+        let (kept, rejected) = deduplicate_library(input, &NoDedup);
+        assert_eq!(kept.len(), 3);
+        assert!(rejected.is_empty());
+    }
+
+    #[test]
+    fn subsumption_stronger_than_alpha_stronger_than_canonical() {
+        // Lattice property: if CanonicalDeduper rejects, so does
+        // AlphaDeduper, so does SubsumptionDeduper. Demonstrate via
+        // an exact-duplicate input that all three catch.
+        let lib = vec![ident_law(100)];
+        let cand = ident_law(100);
+        assert!(CanonicalDeduper.is_duplicate(&cand, &lib));
+        assert!(AlphaDeduper.is_duplicate(&cand, &lib));
+        assert!(SubsumptionDeduper.is_duplicate(&cand, &lib));
+
+        // And Alpha catches some rules Canonical misses (renamed
+        // variants). Subsumption catches some rules Alpha misses
+        // (specializations). Each is strictly stronger.
     }
 
     #[test]
