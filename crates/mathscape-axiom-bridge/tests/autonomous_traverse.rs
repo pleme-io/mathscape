@@ -1399,6 +1399,445 @@ fn run_traversal_pure_procedural_with_library(
 }
 
 #[test]
+#[ignore = "phase M8+: which 2-zoo-corpus pairs trigger the transition, ~60s, --ignored"]
+fn hpo_zoo_pair_transition() {
+    // Zoo-weight sweep showed phase transition at zoo=2 (jump to
+    // 100% modal). Question: which 2-corpus PAIRS cause the
+    // transition, and which don't?
+    //
+    // Hypothesis: pairs that supply cross-operator diversity
+    // (different root operators) trigger the transition; pairs
+    // within the same operator family don't.
+    //
+    // C(7, 2) = 21 pairs. 128 seeds per cell. ~21s expected.
+    use mathscape_compress::extract::ExtractConfig as EC;
+    use std::time::Instant;
+
+    const N_SEEDS: u64 = 128;
+    const PROCEDURAL_BUDGET: usize = 15;
+    const DEPTH: usize = 4;
+    let ec = EC {
+        min_shared_size: 2,
+        min_matches: 2,
+        max_new_rules: 10,
+    };
+
+    let zoo_full = canonical_zoo();
+    let zoo_names: Vec<String> = zoo_full.iter().map(|(n, _)| n.clone()).collect();
+
+    println!("\n╔══════════════════════════════════════════════════════╗");
+    println!("║ ZOO-PAIR PHASE TRANSITION SWEEP                      ║");
+    println!("║   All 21 pairs of 2 zoo corpora + 15 procedural     ║");
+    println!("╚══════════════════════════════════════════════════════╝");
+    println!("\n{:<22} {:<22} {:>9} {:>8} {:>10}",
+        "zoo_a", "zoo_b", "modal%", "basins", "entropy");
+    println!("{}", "─".repeat(75));
+
+    let t0 = Instant::now();
+    let mut results: Vec<(String, String, f64, usize, f64)> = Vec::new();
+    let mut triggers_transition = 0;
+
+    for i in 0..zoo_full.len() {
+        for j in (i + 1)..zoo_full.len() {
+            let pair = vec![zoo_full[i].clone(), zoo_full[j].clone()];
+            let (modal, basins, entropy, _) =
+                measure_bettyfine_with_custom_zoo(&pair, PROCEDURAL_BUDGET, DEPTH, N_SEEDS, &ec);
+            results.push((
+                zoo_names[i].clone(),
+                zoo_names[j].clone(),
+                modal,
+                basins,
+                entropy,
+            ));
+            if modal >= 0.95 {
+                triggers_transition += 1;
+            }
+            let marker = if modal >= 0.95 { "  ✓" } else { "" };
+            println!("{:<22} {:<22} {:>8.1}% {:>8} {:>10.3}{marker}",
+                zoo_names[i], zoo_names[j], modal * 100.0, basins, entropy);
+        }
+    }
+    let elapsed = t0.elapsed().as_millis();
+
+    println!("\n▶ Pairs triggering transition (≥95% modal): {} / 21", triggers_transition);
+    println!("  elapsed: {elapsed}ms");
+
+    // Analysis: which pairs trigger? Group by "operators covered."
+    // Ops in zoo: arith/left=add, mult/cross=mul, doubling=add,
+    // successor=succ. If two pair members have distinct operators,
+    // hypothesis says transition triggers.
+    println!("\n▶ Non-transition pairs (modal < 95%):");
+    let mut any_non = false;
+    for (a, b, m, _, _) in &results {
+        if *m < 0.95 {
+            any_non = true;
+            println!("    ({a}, {b}) → {:.1}%", m * 100.0);
+        }
+    }
+    if !any_non {
+        println!("    (none — every 2-zoo-corpus pair triggers the phase transition)");
+    }
+}
+
+fn measure_bettyfine_with_custom_zoo(
+    zoo: &[(String, Vec<Term>)],
+    procedural_budget: usize,
+    max_depth: usize,
+    n_seeds: u64,
+    ec: &mathscape_compress::extract::ExtractConfig,
+) -> (f64, usize, f64, f64) {
+    use std::collections::HashMap;
+    let mut basin_support: HashMap<Vec<(String, String)>, usize> = HashMap::new();
+    let mut total_rules = 0usize;
+    for seed in 1..=n_seeds {
+        let report = run_with_zoo_prefix(seed, procedural_budget, max_depth, ec.clone(), zoo);
+        total_rules += report.axiomatized_rules_full.len();
+        let fp = structural_fingerprint(&report.axiomatized_rules_full);
+        *basin_support.entry(fp).or_default() += 1;
+    }
+    let basins = basin_support.len();
+    let modal = basin_support.values().copied().max().unwrap_or(0);
+    let modal_frac = modal as f64 / n_seeds as f64;
+    let entropy: f64 = basin_support
+        .values()
+        .map(|&c| {
+            let p = c as f64 / n_seeds as f64;
+            if p > 0.0 { -p * p.log2() } else { 0.0 }
+        })
+        .sum();
+    let mean_rules = total_rules as f64 / n_seeds as f64;
+    (modal_frac, basins, entropy, mean_rules)
+}
+
+#[test]
+#[ignore = "phase M8: zoo-weight sweep, ~60s, --ignored"]
+fn hpo_zoo_weight_sweep() {
+    // The remaining orthogonal dial. Previous sweeps held
+    // zoo-composition fixed (either full 7-corpus zoo or
+    // zero zoo pure-procedural). The zoo is itself a control:
+    // anchoring vs free-running. This sweep varies the
+    // FRACTION of total corpora that are zoo vs procedural.
+    //
+    // Zoo=0, procedural=15 : pure-procedural (the previous "free-running")
+    // Zoo=1..=7 subsets + procedural : intermediate anchoring
+    // Zoo=7, procedural=0 : pure zoo-anchored
+    //
+    // Observation: how does modal support interpolate between
+    // 49.6% (pure procedural LLN) and 89% (zoo-anchored)?
+    // Linear? Sigmoidal? Stepwise at specific zoo entries?
+    use mathscape_compress::extract::ExtractConfig as EC;
+    use std::collections::HashMap;
+    use std::time::Instant;
+
+    const N_SEEDS: u64 = 128;
+    const PROCEDURAL_BUDGET: usize = 15;
+    const DEPTH: usize = 4;
+    let ec = EC {
+        min_shared_size: 2,
+        min_matches: 2,
+        max_new_rules: 10,
+    };
+
+    // Zoo subsets in canonical order. Each row is a progressively
+    // larger zoo prefix + the full procedural suite.
+    let zoo_prefixes = [0usize, 1, 2, 3, 4, 5, 6, 7];
+
+    println!("\n╔══════════════════════════════════════════════════════╗");
+    println!("║ ZOO-WEIGHT SWEEP                                     ║");
+    println!("║   Anchoring axis: 0 → 7 zoo corpora + 15 procedural  ║");
+    println!("╚══════════════════════════════════════════════════════╝");
+    println!("\n{:>8} {:>8} {:>9} {:>8} {:>10} {:>8}",
+        "zoo_n", "total", "modal%", "basins", "entropy", "rules");
+    println!("{}", "─".repeat(55));
+
+    let t0 = Instant::now();
+    let mut grid: Vec<(usize, usize, f64, usize, f64, f64)> = Vec::new();
+    for &n_zoo in &zoo_prefixes {
+        let (modal, basins, entropy, mean_rules) =
+            measure_bettyfine_with_zoo(n_zoo, PROCEDURAL_BUDGET, DEPTH, N_SEEDS, &ec);
+        let total_corpora = n_zoo + PROCEDURAL_BUDGET;
+        grid.push((n_zoo, total_corpora, modal, basins, entropy, mean_rules));
+        println!("{:>8} {:>8} {:>8.1}% {:>8} {:>10.3} {:>8.2}",
+            n_zoo, total_corpora, modal * 100.0, basins, entropy, mean_rules);
+    }
+    let elapsed = t0.elapsed().as_millis();
+
+    let pure_proc = grid[0].2;
+    let full_zoo = grid[grid.len() - 1].2;
+    let range = full_zoo - pure_proc;
+    println!("\n▶ Anchoring range");
+    println!("  0 zoo → {:.1}%", pure_proc * 100.0);
+    println!("  7 zoo → {:.1}%", full_zoo * 100.0);
+    println!("  range : {:.1} points", range * 100.0);
+    println!("  elapsed: {elapsed}ms");
+
+    // Growth pattern
+    println!("\n▶ Modal support growth per zoo addition");
+    for i in 1..grid.len() {
+        let (n_prev, _, p_prev, _, _, _) = grid[i - 1];
+        let (n_curr, _, p_curr, _, _, _) = grid[i];
+        let delta = (p_curr - p_prev) * 100.0;
+        let sign = if delta >= 0.0 { "+" } else { "" };
+        println!("  zoo {} → {} : {sign}{:.1} points", n_prev, n_curr, delta);
+    }
+    assert!(grid.len() == 8);
+}
+
+fn measure_bettyfine_with_zoo(
+    n_zoo_prefix: usize,
+    procedural_budget: usize,
+    max_depth: usize,
+    n_seeds: u64,
+    ec: &mathscape_compress::extract::ExtractConfig,
+) -> (f64, usize, f64, f64) {
+    use std::collections::HashMap;
+    let zoo_full = canonical_zoo();
+    let zoo_prefix: Vec<(String, Vec<Term>)> = zoo_full.into_iter().take(n_zoo_prefix).collect();
+
+    let mut basin_support: HashMap<Vec<(String, String)>, usize> = HashMap::new();
+    let mut total_rules = 0usize;
+    for seed in 1..=n_seeds {
+        let report = run_with_zoo_prefix(seed, procedural_budget, max_depth, ec.clone(), &zoo_prefix);
+        total_rules += report.axiomatized_rules_full.len();
+        let fp = structural_fingerprint(&report.axiomatized_rules_full);
+        *basin_support.entry(fp).or_default() += 1;
+    }
+    let basins = basin_support.len();
+    let modal = basin_support.values().copied().max().unwrap_or(0);
+    let modal_frac = modal as f64 / n_seeds as f64;
+    let entropy: f64 = basin_support
+        .values()
+        .map(|&c| {
+            let p = c as f64 / n_seeds as f64;
+            if p > 0.0 { -p * p.log2() } else { 0.0 }
+        })
+        .sum();
+    let mean_rules = total_rules as f64 / n_seeds as f64;
+    (modal_frac, basins, entropy, mean_rules)
+}
+
+fn run_with_zoo_prefix(
+    seed_offset: u64,
+    procedural_budget: usize,
+    max_depth: usize,
+    extract_config: mathscape_compress::extract::ExtractConfig,
+    zoo_prefix: &[(String, Vec<Term>)],
+) -> TraversalReportWithLibrary {
+    let mut zoo: Vec<(String, Vec<Term>)> = zoo_prefix.to_vec();
+    for i in 1..=procedural_budget as u64 {
+        let seed = seed_offset.wrapping_add(i);
+        let depth = 2 + (i as usize % (max_depth - 1).max(1));
+        let count = 16 + (i as usize % 8);
+        zoo.push((
+            format!("proc-s{seed}-d{depth}"),
+            procedural(seed, depth, count),
+        ));
+    }
+    let base = CompressionGenerator::new(extract_config.clone(), 1);
+    let meta = MetaPatternGenerator::new(
+        ExtractConfig {
+            min_shared_size: 1,
+            min_matches: 2,
+            max_new_rules: 12,
+        },
+        10_000,
+    );
+    let mut epoch = Epoch::new(
+        CompositeGenerator::new(base, meta),
+        mathscape_reward::StatisticalProver::new(
+            mathscape_reward::reward::RewardConfig::default(),
+            0.0,
+        ),
+        RuleEmitter,
+        InMemoryRegistry::new(),
+    );
+    for (_, corpus) in &zoo {
+        for _ in 0..3 {
+            let _ = epoch.step_with_action(
+                corpus,
+                mathscape_core::control::EpochAction::Discover,
+            );
+        }
+        let _ = epoch.step_with_action(
+            corpus,
+            mathscape_core::control::EpochAction::Reinforce,
+        );
+    }
+    let mut names = Vec::new();
+    let mut full = Vec::new();
+    for artifact in epoch.registry.all() {
+        let s = epoch
+            .registry
+            .status_of(artifact.content_hash)
+            .unwrap_or_else(|| artifact.certificate.status.clone());
+        if matches!(s, ProofStatus::Axiomatized) {
+            names.push(artifact.rule.name.clone());
+            full.push(artifact.rule.clone());
+        }
+    }
+    TraversalReportWithLibrary {
+        axiomatized_rule_names: names,
+        axiomatized_rules_full: full,
+    }
+}
+
+#[test]
+#[ignore = "observational: time-to-bettyfine, ~5s, --ignored"]
+fn time_to_bettyfine() {
+    // Observational probe. For each seed, track the Axiomatized
+    // rule set after every (Discover + Reinforce) cycle. Find the
+    // earliest cycle at which the current Axiomatized set equals
+    // the seed's final Axiomatized set. That's the "lock-in
+    // epoch" — the moment the bettyfine crystallized for this seed.
+    //
+    // No expectations. Just measure.
+    use std::collections::HashMap;
+    use std::time::Instant;
+
+    const N_SEEDS: u64 = 64;
+    const BUDGET: usize = 15;
+    const DEPTH: usize = 4;
+    let ec = mathscape_compress::extract::ExtractConfig {
+        min_shared_size: 2,
+        min_matches: 2,
+        max_new_rules: 10,
+    };
+
+    let t0 = Instant::now();
+    let mut lock_in_epochs: Vec<usize> = Vec::new();
+    let mut final_rule_counts: Vec<usize> = Vec::new();
+    // Histogram: epoch → count of seeds that locked in AT this epoch.
+    let mut histogram: HashMap<usize, usize> = HashMap::new();
+
+    for seed in 1..=N_SEEDS {
+        let (lock_in, final_count) = probe_time_to_bettyfine(seed, BUDGET, DEPTH, &ec);
+        lock_in_epochs.push(lock_in);
+        final_rule_counts.push(final_count);
+        *histogram.entry(lock_in).or_default() += 1;
+    }
+    let elapsed = t0.elapsed().as_millis();
+
+    let mean_epoch = lock_in_epochs.iter().sum::<usize>() as f64 / N_SEEDS as f64;
+    let min_epoch = *lock_in_epochs.iter().min().unwrap_or(&0);
+    let max_epoch = *lock_in_epochs.iter().max().unwrap_or(&0);
+    let variance: f64 = lock_in_epochs
+        .iter()
+        .map(|&e| (e as f64 - mean_epoch).powi(2))
+        .sum::<f64>()
+        / N_SEEDS as f64;
+    let std = variance.sqrt();
+    let mean_rules = final_rule_counts.iter().sum::<usize>() as f64 / N_SEEDS as f64;
+
+    println!("\n╔══════════════════════════════════════════════════════╗");
+    println!("║ TIME-TO-BETTYFINE                                    ║");
+    println!("║   Observational probe — no expectations              ║");
+    println!("╚══════════════════════════════════════════════════════╝");
+    println!("\n▶ Scope");
+    println!("  seeds       : {N_SEEDS}");
+    println!("  budget×depth: {BUDGET} × {DEPTH}");
+    println!("  max cycles per seed: {} (= 7 zoo + {} procedural)", 7 + BUDGET, BUDGET);
+    println!("  elapsed     : {elapsed}ms");
+
+    println!("\n▶ Lock-in epoch distribution");
+    println!("  mean : {mean_epoch:.2}");
+    println!("  std  : {std:.2}");
+    println!("  min  : {min_epoch}");
+    println!("  max  : {max_epoch}");
+    println!("  mean final rule count : {mean_rules:.2}");
+
+    println!("\n▶ Histogram (epoch → seeds that locked in at that epoch)");
+    let mut sorted: Vec<(usize, usize)> = histogram.into_iter().collect();
+    sorted.sort_by_key(|x| x.0);
+    let max_count = sorted.iter().map(|x| x.1).max().unwrap_or(1);
+    for (epoch, count) in sorted {
+        let bar_len = (count * 40 / max_count).max(1);
+        let bar = "█".repeat(bar_len);
+        println!("  cycle {:>3}: {:>4}  {bar}", epoch, count);
+    }
+
+    println!("\n▶ No interpretation, just data. What you see is what the machine does.");
+}
+
+fn probe_time_to_bettyfine(
+    seed_offset: u64,
+    procedural_budget: usize,
+    max_depth: usize,
+    extract_config: &mathscape_compress::extract::ExtractConfig,
+) -> (usize, usize) {
+    // Returns (lock_in_cycle, final_axiomatized_count).
+    // "Cycle" = one (Discover × 3 + Reinforce × 1) pass over one corpus.
+    let mut zoo = canonical_zoo();
+    for i in 1..=procedural_budget as u64 {
+        let seed = seed_offset.wrapping_add(i);
+        let depth = 2 + (i as usize % (max_depth - 1).max(1));
+        let count = 16 + (i as usize % 8);
+        zoo.push((
+            format!("proc-s{seed}-d{depth}"),
+            procedural(seed, depth, count),
+        ));
+    }
+
+    let base = CompressionGenerator::new(extract_config.clone(), 1);
+    let meta = MetaPatternGenerator::new(
+        ExtractConfig {
+            min_shared_size: 1,
+            min_matches: 2,
+            max_new_rules: 12,
+        },
+        10_000,
+    );
+    let mut epoch = Epoch::new(
+        CompositeGenerator::new(base, meta),
+        mathscape_reward::StatisticalProver::new(
+            mathscape_reward::reward::RewardConfig::default(),
+            0.0,
+        ),
+        RuleEmitter,
+        InMemoryRegistry::new(),
+    );
+
+    let mut axiom_snapshots: Vec<Vec<String>> = Vec::new();
+    for (_, corpus) in &zoo {
+        for _ in 0..3 {
+            let _ = epoch.step_with_action(
+                corpus,
+                mathscape_core::control::EpochAction::Discover,
+            );
+        }
+        let _ = epoch.step_with_action(
+            corpus,
+            mathscape_core::control::EpochAction::Reinforce,
+        );
+        let mut axioms: Vec<String> = epoch
+            .registry
+            .all()
+            .iter()
+            .filter(|a| {
+                matches!(
+                    epoch.registry.status_of(a.content_hash),
+                    Some(ProofStatus::Axiomatized)
+                )
+            })
+            .map(|a| a.rule.name.clone())
+            .collect();
+        axioms.sort();
+        axiom_snapshots.push(axioms);
+    }
+
+    // Final is the last snapshot. Lock-in = earliest snapshot that
+    // equals the final set AND stays equal thereafter.
+    let final_set = axiom_snapshots.last().cloned().unwrap_or_default();
+    let final_count = final_set.len();
+    let lock_in = axiom_snapshots
+        .iter()
+        .enumerate()
+        .find(|(_, s)| **s == final_set)
+        .map(|(i, _)| i + 1) // 1-indexed epoch
+        .unwrap_or(axiom_snapshots.len());
+    (lock_in, final_count)
+}
+
+#[test]
 #[ignore = "phase M6+: grand HPO sweep, ~90s, --ignored"]
 fn hpo_grand_sweep() {
     // Full tunability exploration. Three orthogonal axes:

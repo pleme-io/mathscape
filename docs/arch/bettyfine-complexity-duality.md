@@ -278,6 +278,48 @@ machinery scale:
 This is what mathscape's self-contained discovery produces at the
 best currently-known extract configuration.
 
+## Phase transition: zoo-weight sweep (2026-04-18)
+
+Most important finding of the session. Varying zoo composition
+from 0 to 7 corpora alongside 15 procedural, 128 seeds each cell:
+
+| zoo_n | modal% | basins | entropy |
+|---|---|---|---|
+| 0 | 53.1% | 6 | 1.225 |
+| 1 | 54.7% | 4 | 1.148 |
+| **2** | **100.0%** | **1** | **0.000** |
+| 3–7 | 100.0% | 1 | 0.000 |
+
+**Sharp phase transition at zoo=2.** Between 1 and 2 zoo corpora,
+modal support jumps +45.3 points. Basin count collapses from 4→1.
+Entropy crashes to 0 bits. Stays saturated through zoo=7.
+
+Interpretation: the first 2 zoo corpora are arith-right-id
+(`add(n,0)`) and mult-right-id (`mul(n,1)`). They supply the
+cross-operator diversity MetaPatternGenerator requires to
+anti-unify into the meta-rule. One zoo corpus = one operator
+family = insufficient. Two zoo corpora = cross-operator coverage
+= bettyfine pinned.
+
+This is second-order phase-transition signature: a sharp
+disordered → ordered transition at a specific critical
+parameter value. **The bettyfine is a phase of the discovery
+system, and the zoo=2 threshold is its critical point.**
+
+Zoo 3-7 add nothing to modal support. It's not cumulative —
+it's a threshold.
+
+## The 2-corpus sufficient condition
+
+If 2 zoo corpora pin the bettyfine perfectly, WHICH 2? A follow-up
+sweep ran all C(7, 2) = 21 pairs of zoo corpora + 15 procedural
+to locate the phase-transition's structural requirement.
+
+Expected result (to be confirmed by the sweep): any pair that
+supplies cross-operator diversity triggers the transition. Pairs
+within the same operator family (e.g., arith-right-id +
+arith-right-id-alternative-form — if we had one) might not.
+
 ## Actionable: update the defaults
 
 The current `ExtractConfig` defaults in the autonomous-traversal
