@@ -219,3 +219,50 @@ fn self_bootstrap_larger_n_discovers_at_least_as_much() {
         "4-iter cycle must produce ≥ library than 2-iter"
     );
 }
+
+#[test]
+#[ignore = "R27 exploration: deep 10-iter bootstrap; run with --ignored"]
+fn self_bootstrap_deep_exploration() {
+    // "Play" experiment — push the loop deep. Where does
+    // discovery saturate? Does the library grow unboundedly, or
+    // does the corpus-generation strategy run out of novel
+    // compositions at some iteration?
+    //
+    // Reports the per-iteration growth curve so we can see the
+    // saturation point concretely. Not a gated test — the
+    // invariant (library ≥ monotone) is checked elsewhere.
+    let outcome = run_cycle(10);
+    println!("\n── Deep bootstrap (10 iterations) ────────────────────");
+    let mut prev_size = 0usize;
+    let mut consecutive_stall = 0usize;
+    let mut saturation_step: Option<usize> = None;
+    for iter in &outcome.iterations {
+        let size = iter.features_after.rule_count;
+        let delta = size - prev_size;
+        println!(
+            "  iter {:2}: lib size = {:3}  Δ = +{}   new laws = {}",
+            iter.iter, size, delta, iter.new_law_count
+        );
+        if delta == 0 {
+            consecutive_stall += 1;
+            if consecutive_stall >= 2 && saturation_step.is_none() {
+                saturation_step = Some(iter.iter);
+            }
+        } else {
+            consecutive_stall = 0;
+        }
+        prev_size = size;
+    }
+    println!();
+    match saturation_step {
+        Some(step) => println!(
+            "  saturation step: {step} (library stopped growing after 2+ \
+             consecutive no-growth iterations)"
+        ),
+        None => println!(
+            "  no saturation detected in 10 iterations — library still growing"
+        ),
+    }
+    println!("  final library size: {}", outcome.final_library.len());
+    println!("  attestation: {:?}", outcome.attestation);
+}
