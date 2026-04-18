@@ -305,169 +305,260 @@ fn derive_apply(head_id: u32, args: &[Term], var_id: u32) -> Term {
     }
 }
 
-/// Simplify `tensor_add(a, b)` — fall back to scalar add when both
-/// derivatives are scalar 0, otherwise wrap in tensor_add.
-fn simplify_tensor_add(a: Term, b: Term) -> Term {
-    if is_int_zero(&a) {
-        return b;
-    }
-    if is_int_zero(&b) {
-        return a;
-    }
-    // Both non-zero: wrap as tensor_add. If the inputs aren't
-    // tensors, evaluation will fail at runtime — same as with
-    // the scalar path. This is fine: the caller must use
-    // tensor-differentiating ops consistently.
-    Term::Apply(Box::new(Term::Var(TENSOR_ADD)), vec![a, b])
+// ── R29: DomainOps trait unifies per-domain simplification ────────
+//
+// Before R29, each numeric domain (Int, Float, Tensor, FloatTensor)
+// had its own hand-rolled `simplify_*_add / mul / neg` trio plus
+// its own `is_*_zero / is_*_one` predicates. Ten parallel helpers
+// encoded the same pattern with domain-specific constants. R29
+// abstracts them behind a single `DomainOps` trait: each domain
+// implements it once, the simplify functions become generic.
+//
+// The generic simplify functions enforce three invariants:
+//   - simplify_add:  zero⊕b=b,  a⊕zero=a,  else wrap in add
+//   - simplify_mul:  zero⊗_=zero, _⊗zero=zero, one⊗b=b,
+//                    a⊗one=a, else wrap in mul
+//   - simplify_neg:  zero->zero, neg(neg(x))=x, else wrap in neg
+//
+// Adding a new numeric domain (e.g. Rational) becomes: define an
+// Ops struct, implement DomainOps, use the same simplify_X<MyOps>
+// downstream. No duplication.
+
+/// Domain-operations interface: provides the zero/one terms, the
+/// builtin ids to wrap simplified expressions in, and the
+/// predicates for "is this term zero/one in my domain." Used by
+/// the generic simplify_* functions below.
+pub trait DomainOps {
+    fn zero() -> Term;
+    fn one() -> Term;
+    fn add_id() -> u32;
+    fn mul_id() -> u32;
+    fn neg_id() -> u32;
+    fn is_zero(t: &Term) -> bool;
+    fn is_one(t: &Term) -> bool;
 }
 
-fn simplify_tensor_mul(a: Term, b: Term) -> Term {
-    if is_int_zero(&a) || is_int_zero(&b) {
-        return Term::Number(Value::Int(0));
+/// Integer-domain derivative ops. Uses Int(0) / Int(1) constants;
+/// also accepts Nat(0) / Nat(1) as zero/one for flexibility when
+/// derivatives produced on the scalar-only path flow through
+/// code paths that don't care about Nat vs Int.
+pub struct IntOps;
+
+impl DomainOps for IntOps {
+    fn zero() -> Term {
+        Term::Number(Value::Int(0))
     }
-    Term::Apply(Box::new(Term::Var(TENSOR_MUL)), vec![a, b])
+    fn one() -> Term {
+        Term::Number(Value::Int(1))
+    }
+    fn add_id() -> u32 {
+        INT_ADD
+    }
+    fn mul_id() -> u32 {
+        INT_MUL
+    }
+    fn neg_id() -> u32 {
+        NEG
+    }
+    fn is_zero(t: &Term) -> bool {
+        matches!(
+            t,
+            Term::Number(Value::Int(0)) | Term::Number(Value::Nat(0))
+        )
+    }
+    fn is_one(t: &Term) -> bool {
+        matches!(
+            t,
+            Term::Number(Value::Int(1)) | Term::Number(Value::Nat(1))
+        )
+    }
 }
 
-fn simplify_tensor_neg(a: Term) -> Term {
-    if is_int_zero(&a) {
-        return Term::Number(Value::Int(0));
+/// Float-domain derivative ops. Accepts Float(0.0) AND Int(0) as
+/// zero, tolerating cross-domain zeros produced by the scalar
+/// derivative path feeding into Float simplifiers.
+pub struct FloatOps;
+
+impl DomainOps for FloatOps {
+    fn zero() -> Term {
+        Term::Number(Value::zero_float())
     }
-    // Double-negation: tensor_neg(tensor_neg(x)) = x
-    if let Term::Apply(head, inner) = &a {
-        if let Term::Var(TENSOR_NEG) = head.as_ref() {
-            if inner.len() == 1 {
-                return inner[0].clone();
-            }
+    fn one() -> Term {
+        Term::Number(Value::from_f64(1.0).unwrap())
+    }
+    fn add_id() -> u32 {
+        FLOAT_ADD
+    }
+    fn mul_id() -> u32 {
+        FLOAT_MUL
+    }
+    fn neg_id() -> u32 {
+        FLOAT_NEG
+    }
+    fn is_zero(t: &Term) -> bool {
+        match t {
+            Term::Number(Value::Float(bits)) => f64::from_bits(*bits) == 0.0,
+            Term::Number(Value::Int(0)) | Term::Number(Value::Nat(0)) => true,
+            _ => false,
         }
     }
-    Term::Apply(Box::new(Term::Var(TENSOR_NEG)), vec![a])
+    fn is_one(t: &Term) -> bool {
+        match t {
+            Term::Number(Value::Float(bits)) => f64::from_bits(*bits) == 1.0,
+            Term::Number(Value::Int(1)) | Term::Number(Value::Nat(1)) => true,
+            _ => false,
+        }
+    }
 }
 
+/// Tensor-domain ops. In practice the derivative of a tensor
+/// expression w.r.t. a scalar var produces either a tensor
+/// (non-zero case) or an integer zero (zero case, from the
+/// scalar-path recursion). This Ops treats Int(0) as the
+/// tensor-zero marker.
+pub struct TensorOps;
+
+impl DomainOps for TensorOps {
+    fn zero() -> Term {
+        // No universal "zero tensor" (shape-dependent). Use
+        // Int(0) as the canonical zero marker — simplify_* checks
+        // recognize it. If the caller needs a specific shape, they
+        // construct it explicitly rather than relying on default.
+        Term::Number(Value::Int(0))
+    }
+    fn one() -> Term {
+        Term::Number(Value::Int(1))
+    }
+    fn add_id() -> u32 {
+        TENSOR_ADD
+    }
+    fn mul_id() -> u32 {
+        TENSOR_MUL
+    }
+    fn neg_id() -> u32 {
+        TENSOR_NEG
+    }
+    fn is_zero(t: &Term) -> bool {
+        matches!(
+            t,
+            Term::Number(Value::Int(0)) | Term::Number(Value::Nat(0))
+        )
+    }
+    fn is_one(t: &Term) -> bool {
+        matches!(
+            t,
+            Term::Number(Value::Int(1)) | Term::Number(Value::Nat(1))
+        )
+    }
+}
+
+// ── Generic simplify functions (domain-parameterized) ───────────
+//
+// Named with `_of` suffix to avoid name collision with the
+// existing per-domain helpers (`simplify_add`, etc.) that derive_apply
+// call sites use. The per-domain wrappers below delegate to these
+// generic forms — single-source-of-truth logic for what
+// "simplify" means.
+
 /// Simplify `add(a, b)` during derivative construction:
-/// - If either side is Int(0), return the other side.
-/// - Otherwise, build an Apply(INT_ADD, [a, b]).
-fn simplify_add(a: Term, b: Term) -> Term {
-    if is_int_zero(&a) {
+///   zero ⊕ b = b;  a ⊕ zero = a;  else Apply(add_id, [a, b])
+pub fn simplify_add_of<D: DomainOps>(a: Term, b: Term) -> Term {
+    if D::is_zero(&a) {
         return b;
     }
-    if is_int_zero(&b) {
+    if D::is_zero(&b) {
         return a;
     }
-    Term::Apply(Box::new(Term::Var(INT_ADD)), vec![a, b])
+    Term::Apply(Box::new(Term::Var(D::add_id())), vec![a, b])
 }
 
 /// Simplify `mul(a, b)` during derivative construction:
-/// - If either side is Int(0), return Int(0).
-/// - If either side is Int(1), return the other side.
-/// - Otherwise, build an Apply(INT_MUL, [a, b]).
-fn simplify_mul(a: Term, b: Term) -> Term {
-    if is_int_zero(&a) || is_int_zero(&b) {
-        return Term::Number(Value::Int(0));
+///   zero ⊗ _ = zero;  _ ⊗ zero = zero;  one ⊗ b = b;  a ⊗ one = a;
+///   else Apply(mul_id, [a, b])
+pub fn simplify_mul_of<D: DomainOps>(a: Term, b: Term) -> Term {
+    if D::is_zero(&a) || D::is_zero(&b) {
+        return D::zero();
     }
-    if is_int_one(&a) {
+    if D::is_one(&a) {
         return b;
     }
-    if is_int_one(&b) {
+    if D::is_one(&b) {
         return a;
     }
-    Term::Apply(Box::new(Term::Var(INT_MUL)), vec![a, b])
+    Term::Apply(Box::new(Term::Var(D::mul_id())), vec![a, b])
 }
 
 /// Simplify `neg(a)`:
-/// - If `a` is already `neg(b)`, return `b` (double-negation
-///   cancels).
-/// - If `a` is Int(0), return Int(0).
-/// - Otherwise, wrap.
-fn simplify_neg(a: Term) -> Term {
-    if is_int_zero(&a) {
-        return Term::Number(Value::Int(0));
+///   zero -> zero;  neg(neg(x)) -> x (involution);
+///   else Apply(neg_id, [a])
+pub fn simplify_neg_of<D: DomainOps>(a: Term) -> Term {
+    if D::is_zero(&a) {
+        return D::zero();
     }
-    // Double-negation unwrap.
+    // Double-negation: if a = Apply(Var(neg_id), [x]), return x.
     if let Term::Apply(head, inner) = &a {
-        if let Term::Var(NEG) = head.as_ref() {
-            if inner.len() == 1 {
+        if let Term::Var(id) = head.as_ref() {
+            if *id == D::neg_id() && inner.len() == 1 {
                 return inner[0].clone();
             }
         }
     }
-    Term::Apply(Box::new(Term::Var(NEG)), vec![a])
+    Term::Apply(Box::new(Term::Var(D::neg_id())), vec![a])
 }
 
-fn is_int_zero(t: &Term) -> bool {
-    matches!(t, Term::Number(Value::Int(0)) | Term::Number(Value::Nat(0)))
+// ── Per-domain wrappers (used by derive_apply) ──────────────────
+// Thin delegations to the generic forms. Keeps call sites stable
+// while the logic lives in one place.
+
+fn simplify_add(a: Term, b: Term) -> Term {
+    simplify_add_of::<IntOps>(a, b)
 }
-
-fn is_int_one(t: &Term) -> bool {
-    matches!(t, Term::Number(Value::Int(1)) | Term::Number(Value::Nat(1)))
+fn simplify_mul(a: Term, b: Term) -> Term {
+    simplify_mul_of::<IntOps>(a, b)
 }
-
-// ── R18: Float-domain derivative helpers ─────────────────────────
-
-fn float_zero() -> Term {
-    Term::Number(Value::zero_float())
+fn simplify_neg(a: Term) -> Term {
+    simplify_neg_of::<IntOps>(a)
 }
-
-fn float_one() -> Term {
-    Term::Number(Value::from_f64(1.0).unwrap())
+fn simplify_tensor_add(a: Term, b: Term) -> Term {
+    simplify_add_of::<TensorOps>(a, b)
 }
-
-fn is_float_zero(t: &Term) -> bool {
-    match t {
-        Term::Number(Value::Float(bits)) => f64::from_bits(*bits) == 0.0,
-        _ => false,
-    }
+fn simplify_tensor_mul(a: Term, b: Term) -> Term {
+    simplify_mul_of::<TensorOps>(a, b)
 }
-
-fn is_float_one(t: &Term) -> bool {
-    match t {
-        Term::Number(Value::Float(bits)) => f64::from_bits(*bits) == 1.0,
-        _ => false,
-    }
+fn simplify_tensor_neg(a: Term) -> Term {
+    simplify_neg_of::<TensorOps>(a)
 }
-
 fn simplify_float_add(a: Term, b: Term) -> Term {
-    if is_float_zero(&a) || is_int_zero(&a) {
-        return b;
-    }
-    if is_float_zero(&b) || is_int_zero(&b) {
-        return a;
-    }
-    Term::Apply(Box::new(Term::Var(FLOAT_ADD)), vec![a, b])
+    simplify_add_of::<FloatOps>(a, b)
+}
+fn simplify_float_mul(a: Term, b: Term) -> Term {
+    simplify_mul_of::<FloatOps>(a, b)
+}
+fn simplify_float_neg(a: Term) -> Term {
+    simplify_neg_of::<FloatOps>(a)
 }
 
+/// Float-specific subtraction simplifier. Sub isn't a universal
+/// domain op — Nat has no direct subtraction, Tensor uses add+neg
+/// composition. Stays Float-specific.
 fn simplify_float_sub(a: Term, b: Term) -> Term {
-    if is_float_zero(&b) || is_int_zero(&b) {
+    if FloatOps::is_zero(&b) {
         return a;
     }
     Term::Apply(Box::new(Term::Var(FLOAT_SUB)), vec![a, b])
 }
 
-fn simplify_float_mul(a: Term, b: Term) -> Term {
-    if is_float_zero(&a) || is_float_zero(&b) || is_int_zero(&a) || is_int_zero(&b)
-    {
-        return float_zero();
-    }
-    if is_float_one(&a) || is_int_one(&a) {
-        return b;
-    }
-    if is_float_one(&b) || is_int_one(&b) {
-        return a;
-    }
-    Term::Apply(Box::new(Term::Var(FLOAT_MUL)), vec![a, b])
+fn is_int_zero(t: &Term) -> bool {
+    IntOps::is_zero(t)
 }
-
-fn simplify_float_neg(a: Term) -> Term {
-    if is_float_zero(&a) || is_int_zero(&a) {
-        return float_zero();
-    }
-    if let Term::Apply(head, inner) = &a {
-        if let Term::Var(FLOAT_NEG) = head.as_ref() {
-            if inner.len() == 1 {
-                return inner[0].clone();
-            }
-        }
-    }
-    Term::Apply(Box::new(Term::Var(FLOAT_NEG)), vec![a])
+fn float_zero() -> Term {
+    FloatOps::zero()
+}
+fn float_one() -> Term {
+    FloatOps::one()
+}
+fn is_float_zero(t: &Term) -> bool {
+    FloatOps::is_zero(t)
 }
 
 /// R18: Float-aware symbolic derivative.
@@ -987,6 +1078,89 @@ mod tests {
 
     fn f(v: f64) -> Term {
         Term::Number(Value::from_f64(v).unwrap())
+    }
+
+    // ── R29: DomainOps trait property tests ──────────────────────
+
+    #[test]
+    fn domain_ops_zero_is_zero_in_itself() {
+        // Tautology check: each domain's zero() must satisfy its
+        // own is_zero(). If not, the trait impls disagree with
+        // themselves — would break simplify_*.
+        assert!(IntOps::is_zero(&IntOps::zero()));
+        assert!(FloatOps::is_zero(&FloatOps::zero()));
+        assert!(TensorOps::is_zero(&TensorOps::zero()));
+    }
+
+    #[test]
+    fn domain_ops_one_is_one_in_itself() {
+        assert!(IntOps::is_one(&IntOps::one()));
+        assert!(FloatOps::is_one(&FloatOps::one()));
+        assert!(TensorOps::is_one(&TensorOps::one()));
+    }
+
+    #[test]
+    fn simplify_add_generic_zero_identity() {
+        // Property: simplify_add_of(zero, x) = x for any x.
+        // Generalized across all three domains.
+        let x = var(500);
+        assert_eq!(simplify_add_of::<IntOps>(IntOps::zero(), x.clone()), x);
+        assert_eq!(
+            simplify_add_of::<FloatOps>(FloatOps::zero(), x.clone()),
+            x
+        );
+        assert_eq!(
+            simplify_add_of::<TensorOps>(TensorOps::zero(), x.clone()),
+            x
+        );
+    }
+
+    #[test]
+    fn simplify_mul_generic_zero_absorbs() {
+        // Property: simplify_mul_of(zero, x) = zero for any x.
+        let x = var(500);
+        assert!(IntOps::is_zero(&simplify_mul_of::<IntOps>(
+            IntOps::zero(),
+            x.clone()
+        )));
+        assert!(FloatOps::is_zero(&simplify_mul_of::<FloatOps>(
+            FloatOps::zero(),
+            x.clone()
+        )));
+        assert!(TensorOps::is_zero(&simplify_mul_of::<TensorOps>(
+            TensorOps::zero(),
+            x
+        )));
+    }
+
+    #[test]
+    fn simplify_mul_generic_one_identity() {
+        // Property: simplify_mul_of(one, x) = x for any x.
+        let x = var(500);
+        assert_eq!(simplify_mul_of::<IntOps>(IntOps::one(), x.clone()), x);
+        assert_eq!(
+            simplify_mul_of::<FloatOps>(FloatOps::one(), x.clone()),
+            x
+        );
+        assert_eq!(
+            simplify_mul_of::<TensorOps>(TensorOps::one(), x.clone()),
+            x
+        );
+    }
+
+    #[test]
+    fn simplify_neg_generic_involution() {
+        // Property: simplify_neg_of(simplify_neg_of(x)) = x when
+        // x is not zero (double-negation cancels).
+        let x = var(500);
+        let neg_int = simplify_neg_of::<IntOps>(x.clone());
+        assert_eq!(simplify_neg_of::<IntOps>(neg_int), x);
+
+        let neg_float = simplify_neg_of::<FloatOps>(x.clone());
+        assert_eq!(simplify_neg_of::<FloatOps>(neg_float), x);
+
+        let neg_tensor = simplify_neg_of::<TensorOps>(x.clone());
+        assert_eq!(simplify_neg_of::<TensorOps>(neg_tensor), x);
     }
 
     #[test]

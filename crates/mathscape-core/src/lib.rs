@@ -47,7 +47,10 @@ pub use epoch::{
     AcceptanceCertificate, Artifact, Candidate, Emitter, Epoch, EpochTrace, Generator,
     InMemoryRegistry, Prover, Registry, Rejection, RuleEmitter, Verdict,
 };
-pub use autograd::{symbolic_derivative, symbolic_derivative_float};
+pub use autograd::{
+    simplify_add_of, simplify_mul_of, simplify_neg_of, symbolic_derivative,
+    symbolic_derivative_float, DomainOps, FloatOps, IntOps, TensorOps,
+};
 pub use bootstrap::{
     compute_attestation, AlphaDeduper, BootstrapCycle, BootstrapOutcome,
     CanonicalDeduper, CorpusGenerator, DefaultCorpusGenerator,
