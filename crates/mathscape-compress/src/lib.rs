@@ -13,6 +13,7 @@ pub mod meta_gen;
 
 pub use adapter::CompressionGenerator;
 pub use law_generator::{
-    derive_laws_from_corpus, derive_laws_from_corpus_instrumented, LawGenStats,
+    derive_laws_from_corpus, derive_laws_from_corpus_instrumented,
+    derive_laws_with_cache, LawGenStats, MemoizingAntiUnifier,
 };
 pub use meta_gen::{CompositeGenerator, MetaPatternGenerator};

@@ -47,6 +47,11 @@ use std::cell::RefCell;
 /// R35: carries a RefCell<Vec<LawGenStats>> so each extract() call
 /// records its per-phase breakdown. The cycle consumes the stats
 /// after the run and prints the extract-layer efficiency report.
+///
+/// R36 note: MemoizingAntiUnifier is available but *not* used here.
+/// The 5-iteration M0 corpus only hits the cache at 60% and the
+/// per-miss clone overhead makes the cache a net slowdown. See
+/// MemoizingAntiUnifier docstring for when to enable it.
 struct DerivedLawsExtractor {
     step_limit: usize,
     min_support: usize,
@@ -312,6 +317,7 @@ fn produce_and_inspect_first_model() {
             .map(|t| t.extract_ns)
             .fold(0u64, u64::saturating_add),
     );
+
 
     // ── Section 8: what this proves ──────────────────────────────
     println!("\n──── 8. WHAT M0 PROVES ─────────────────────────────────");

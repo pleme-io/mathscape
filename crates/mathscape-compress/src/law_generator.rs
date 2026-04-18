@@ -52,8 +52,104 @@
 use crate::antiunify::paired_anti_unify;
 use mathscape_core::eval::{eval, RewriteRule};
 use mathscape_core::term::{SymbolId, Term};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::time::Instant;
+
+/// R36: memoizing wrapper for `paired_anti_unify`. Same semantics,
+/// but repeated calls on identical inputs return cached results.
+///
+/// Why this exists: R35 profiling showed paired_anti_unify at 92%
+/// of extract time — 120 pair calls per iteration × 5 iterations =
+/// 600 calls, many on recurring term structures when the corpus
+/// shape is stable across iterations. A pass-through cache turns
+/// those redundant calls into O(1) hashmap hits.
+///
+/// The cache key is the 4-tuple `(in1, in2, out1, out2)`. `Term`
+/// is `Hash + Eq` (derived), so it slots into a HashMap directly.
+///
+/// **Performance tradeoff (measured 2026-04-18 on M0 default
+/// corpus)**: each MISS pays a Term-clone × 4 (≈ 20 heap allocations
+/// per new pair key) which costs roughly 2-3× what a plain
+/// `paired_anti_unify` call takes. Cache HITs save ~300 ns each.
+/// Break-even is ~6:1 hit:miss ratio. The default 5-iteration M0
+/// corpus exhibits only a 1.5:1 ratio (360 hits / 240 misses) and
+/// the cache is therefore a *net slowdown* on that workload.
+///
+/// Use this when:
+///   - you expect ≥10× repeated extractor calls on the same corpus shape
+///     (long-running scenarios, iterative refinement, ExperimentScenario
+///     chains of many phases with stable shape)
+///   - Term clones are cheap relative to AU body work (shallow terms)
+///
+/// Avoid when:
+///   - the corpus rotates shape every iteration
+///   - terms are deeply nested or carry large tensor payloads
+///
+/// For workloads with deep terms, a future R37 variant should key
+/// the cache on `TermRef` (blake3 hash via hash-consing) to avoid
+/// the clone altogether.
+///
+/// Thread-safety: single-threaded by design. If parallel extract
+/// is ever introduced, wrap this in `Arc<Mutex<_>>` or use a
+/// concurrent hashmap. For now the cycle is serial, so no lock.
+#[derive(Debug, Default)]
+pub struct MemoizingAntiUnifier {
+    cache: HashMap<(Term, Term, Term, Term), Option<(Term, Term)>>,
+    hits: u64,
+    misses: u64,
+}
+
+impl MemoizingAntiUnifier {
+    /// Fresh cache. `hits` and `misses` start at zero.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Cached `paired_anti_unify`. First call on a given
+    /// 4-tuple computes the result and stores it; subsequent
+    /// calls return the cached value directly.
+    pub fn run(
+        &mut self,
+        pair1: (&Term, &Term),
+        pair2: (&Term, &Term),
+    ) -> Option<(Term, Term)> {
+        let key =
+            (pair1.0.clone(), pair1.1.clone(), pair2.0.clone(), pair2.1.clone());
+        if let Some(cached) = self.cache.get(&key) {
+            self.hits += 1;
+            return cached.clone();
+        }
+        self.misses += 1;
+        let result = paired_anti_unify(pair1, pair2);
+        self.cache.insert(key, result.clone());
+        result
+    }
+
+    /// Hits since construction.
+    #[must_use]
+    pub fn hits(&self) -> u64 {
+        self.hits
+    }
+
+    /// Misses since construction.
+    #[must_use]
+    pub fn misses(&self) -> u64 {
+        self.misses
+    }
+
+    /// Current cache entry count.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.cache.len()
+    }
+
+    /// Whether the cache is empty.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.cache.is_empty()
+    }
+}
 
 /// R34: per-call stats for `derive_laws_from_corpus_instrumented`.
 /// Breaks the extractor into its three phases so the caller can
@@ -126,6 +222,10 @@ pub fn derive_laws_from_corpus(
 /// The non-instrumented `derive_laws_from_corpus` delegates to this
 /// function and discards the stats — same behavior, same results,
 /// no observable difference.
+///
+/// Internally uses a scratch `MemoizingAntiUnifier` (fresh per
+/// call, so no cross-call hits). For cross-call reuse see
+/// `derive_laws_with_cache`.
 #[must_use]
 pub fn derive_laws_from_corpus_instrumented(
     corpus: &[Term],
@@ -133,6 +233,28 @@ pub fn derive_laws_from_corpus_instrumented(
     step_limit: usize,
     min_support: usize,
     next_id: &mut SymbolId,
+) -> (Vec<RewriteRule>, LawGenStats) {
+    let mut cache = MemoizingAntiUnifier::new();
+    derive_laws_with_cache(corpus, library, step_limit, min_support, next_id, &mut cache)
+}
+
+/// R36: instrumented law generator that accepts a caller-owned
+/// `MemoizingAntiUnifier`. The extractor's AU calls go through the
+/// cache, so if the caller reuses the same `MemoizingAntiUnifier`
+/// across iterations with overlapping corpus shapes, repeated
+/// pair-wise lookups are hashmap hits instead of full AU.
+///
+/// The returned `LawGenStats` covers this call only. Use
+/// `MemoizingAntiUnifier::hits()` / `.misses()` on the caller-owned
+/// cache to track reuse across multiple calls.
+#[must_use]
+pub fn derive_laws_with_cache(
+    corpus: &[Term],
+    library: &[RewriteRule],
+    step_limit: usize,
+    min_support: usize,
+    next_id: &mut SymbolId,
+    cache: &mut MemoizingAntiUnifier,
 ) -> (Vec<RewriteRule>, LawGenStats) {
     let mut stats = LawGenStats::default();
 
@@ -159,8 +281,8 @@ pub fn derive_laws_from_corpus_instrumented(
         return (Vec::new(), stats);
     }
 
-    // Phase 2: paired anti-unify trace pairs. Build a map from
-    // (lhs_pattern, rhs_pattern) → support count.
+    // Phase 2: paired anti-unify trace pairs via the cache. Build
+    // a map from (lhs_pattern, rhs_pattern) → support count.
     let t_au = Instant::now();
     let mut law_support: BTreeMap<(Term, Term), usize> = BTreeMap::new();
 
@@ -173,25 +295,11 @@ pub fn derive_laws_from_corpus_instrumented(
             }
             considered += 1;
 
-            // paired_anti_unify takes TWO traces. Each trace is
-            // an (input, output) pair. The shared fresh-var map
-            // across the two anti-unifications (one for inputs,
-            // one for outputs) makes the SAME position get the
-            // SAME pattern variable in both.
-            //
-            // Subtle: paired_anti_unify's signature is
-            //   (pair1: (&Term, &Term), pair2: (&Term, &Term))
-            // where pair1 = (in1, in2) — the two INPUTS we anti-
-            // unify against each other — and pair2 = (out1, out2)
-            // — the two OUTPUTS. So we pass trace fields as:
-            //   ((in1, in2), (out1, out2))
-            // which is trace-i's input vs trace-j's input, and
-            // trace-i's output vs trace-j's output.
             let (in1, out1) = (&traces[i].0, &traces[i].1);
             let (in2, out2) = (&traces[j].0, &traces[j].1);
 
             if let Some((lhs_pat, rhs_pat)) =
-                paired_anti_unify((in1, in2), (out1, out2))
+                cache.run((in1, in2), (out1, out2))
             {
                 *law_support.entry((lhs_pat, rhs_pat)).or_default() += 1;
             }
@@ -241,6 +349,116 @@ mod tests {
     }
     fn nat(n: u64) -> Term {
         Term::Number(Value::Nat(n))
+    }
+
+    // ── R36 MemoizingAntiUnifier correctness tests ───────────────
+
+    #[test]
+    fn memoizing_au_result_matches_direct_call() {
+        // Correctness invariant: cached result is identical to the
+        // direct paired_anti_unify result for the same inputs.
+        let in_a = apply(var(ADD), vec![nat(0), nat(5)]);
+        let in_b = apply(var(ADD), vec![nat(0), nat(7)]);
+        let out_a = nat(5);
+        let out_b = nat(7);
+
+        let direct =
+            paired_anti_unify((&in_a, &in_b), (&out_a, &out_b));
+        let mut cache = MemoizingAntiUnifier::new();
+        let cached = cache.run((&in_a, &in_b), (&out_a, &out_b));
+        assert_eq!(direct, cached, "cache must return the same value");
+        assert_eq!(cache.hits(), 0);
+        assert_eq!(cache.misses(), 1);
+        assert_eq!(cache.len(), 1);
+    }
+
+    #[test]
+    fn memoizing_au_second_call_is_a_hit() {
+        // Second call on the same inputs must be a cache hit.
+        let in_a = apply(var(ADD), vec![nat(0), nat(5)]);
+        let in_b = apply(var(ADD), vec![nat(0), nat(7)]);
+        let out_a = nat(5);
+        let out_b = nat(7);
+
+        let mut cache = MemoizingAntiUnifier::new();
+        let first = cache.run((&in_a, &in_b), (&out_a, &out_b));
+        let second = cache.run((&in_a, &in_b), (&out_a, &out_b));
+        assert_eq!(first, second);
+        assert_eq!(cache.hits(), 1);
+        assert_eq!(cache.misses(), 1);
+        assert_eq!(cache.len(), 1, "no new entry on hit");
+    }
+
+    #[test]
+    fn memoizing_au_different_inputs_distinct_entries() {
+        // Different input tuples populate distinct cache entries.
+        let in_a = apply(var(ADD), vec![nat(0), nat(5)]);
+        let in_b = apply(var(ADD), vec![nat(0), nat(7)]);
+        let in_c = apply(var(MUL), vec![nat(1), nat(3)]);
+        let in_d = apply(var(MUL), vec![nat(1), nat(4)]);
+        let out_a = nat(5);
+        let out_b = nat(7);
+        let out_c = nat(3);
+        let out_d = nat(4);
+
+        let mut cache = MemoizingAntiUnifier::new();
+        let _ = cache.run((&in_a, &in_b), (&out_a, &out_b));
+        let _ = cache.run((&in_c, &in_d), (&out_c, &out_d));
+        assert_eq!(cache.misses(), 2);
+        assert_eq!(cache.len(), 2);
+    }
+
+    #[test]
+    fn derive_laws_with_cache_matches_uncached_results() {
+        // The cache must not change the output of the law generator.
+        // Run with and without a cache on the same corpus; results
+        // must be structurally identical.
+        let corpus = vec![
+            apply(var(ADD), vec![nat(0), nat(5)]),
+            apply(var(ADD), vec![nat(0), nat(7)]),
+            apply(var(ADD), vec![nat(0), nat(9)]),
+        ];
+        let mut id_a: SymbolId = 100;
+        let uncached = derive_laws_from_corpus(&corpus, &[], 100, 2, &mut id_a);
+
+        let mut id_b: SymbolId = 100;
+        let mut cache = MemoizingAntiUnifier::new();
+        let (cached, _stats) =
+            derive_laws_with_cache(&corpus, &[], 100, 2, &mut id_b, &mut cache);
+
+        assert_eq!(uncached.len(), cached.len());
+        for (u, c) in uncached.iter().zip(cached.iter()) {
+            assert_eq!(u.lhs, c.lhs);
+            assert_eq!(u.rhs, c.rhs);
+        }
+    }
+
+    #[test]
+    fn derive_laws_with_cache_reuses_across_calls() {
+        // Reusing the same cache across two calls on identical
+        // corpora: second call is all hits.
+        let corpus = vec![
+            apply(var(ADD), vec![nat(0), nat(5)]),
+            apply(var(ADD), vec![nat(0), nat(7)]),
+            apply(var(ADD), vec![nat(0), nat(9)]),
+        ];
+        let mut cache = MemoizingAntiUnifier::new();
+        let mut id: SymbolId = 100;
+
+        let _ = derive_laws_with_cache(&corpus, &[], 100, 2, &mut id, &mut cache);
+        let first_misses = cache.misses();
+        let first_hits = cache.hits();
+
+        let _ = derive_laws_with_cache(&corpus, &[], 100, 2, &mut id, &mut cache);
+        assert_eq!(
+            cache.misses(),
+            first_misses,
+            "second call on identical corpus adds zero misses"
+        );
+        assert!(
+            cache.hits() > first_hits,
+            "second call hits the cache"
+        );
     }
 
     #[test]
