@@ -23,6 +23,7 @@ is running it all.
     │   │   C: CorpusGenerator   ←── hijackable                      │   │
     │   │   E: LawExtractor      ←── hijackable                      │   │
     │   │   M: ModelUpdater      ←── hijackable                      │   │
+    │   │   D: LibraryDeduper    ←── hijackable (R28)                │   │
     │   │                                                           │   │
     │   │   attestation: BLAKE3(library, policy, trajectory)        │   │
     │   │                                                           │   │
@@ -44,6 +45,47 @@ Over time, the orchestrator converges on the best layer
 implementations for the problem class it's working on.
 
 ## The layers and their optimization seams
+
+### Layer 4 (R28): LibraryDeduper
+
+**Default behavior.** `NoDedup` — every candidate is accepted.
+Backward-compatible; `BootstrapCycle::run` uses this.
+
+Two stronger defaults are shipped:
+
+- `CanonicalDeduper` — catches exact duplicates after
+  canonicalization (R3/R4/R6 fold). Two rules with identical
+  (canonical LHS, canonical RHS) are duplicates.
+- `AlphaDeduper` — also canonicalizes pattern-variable ids via
+  `anonymize_rule`. Catches alpha-renamed duplicates that
+  `CanonicalDeduper` misses.
+
+**Empirical proof the layer works.** Same 10-iteration deep
+bootstrap:
+
+| Deduper            | Final library | Saturation |
+|--------------------|---------------|------------|
+| `NoDedup`          | 30 rules      | never      |
+| `CanonicalDeduper` | 4 rules       | step 3     |
+
+The linear-growth pathology (R27's deep exploration finding) is
+closed. The cycle now **converges to a structurally-distinct
+core**.
+
+**Optimization axes.**
+
+- *Faster dedup*: index the library by canonical hash; dedup
+  becomes O(1) per candidate instead of O(library_size).
+- *Proper-subsumption*: use `eval::proper_subsumes` to reject
+  candidates whose (LHS, RHS) is strictly generalized by an
+  existing rule — stronger than equality.
+- *E-graph saturation*: union-find over candidate + library to
+  detect semantic equivalence beyond syntactic shape.
+- *Empirical equivalence*: run the candidate and an existing
+  rule on K random instances; if they agree on all of them, treat
+  as duplicate.
+
+**Hijack surface.** Any `impl LibraryDeduper for MyType`.
 
 ### Layer 1: CorpusGenerator
 
