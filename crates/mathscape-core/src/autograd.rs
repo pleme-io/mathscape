@@ -1,0 +1,429 @@
+//! R14 — Autograd: symbolic gradient via rewrite rules.
+//!
+//! # The compute step up from R13
+//!
+//! R13 gave us tensors and element-wise ops. R14 gives us
+//! DERIVATIVES — the second ingredient of gradient-based learning.
+//!
+//! `symbolic_derivative(expr, var)` takes an expression tree and
+//! a variable id, and produces another expression tree
+//! representing `d(expr)/d(var)`. The rules are the standard
+//! calculus ones:
+//!
+//! ```text
+//!   d(c)/dx         = 0                (constant rule)
+//!   d(x)/dx         = 1                (identity)
+//!   d(y)/dx         = 0     (y ≠ x)    (independent variable)
+//!   d(a + b)/dx     = d(a)/dx + d(b)/dx        (sum rule)
+//!   d(a * b)/dx     = d(a)/dx * b + a * d(b)/dx (product rule)
+//!   d(-a)/dx        = -d(a)/dx                  (linearity of neg)
+//!   d(succ(a))/dx   = d(a)/dx                   (succ is offset)
+//! ```
+//!
+//! Output is Int-valued (`Value::Int`): 0, 1, and the
+//! compositional products/sums. The caller can evaluate or
+//! canonicalize the result to get the numeric derivative at a
+//! point.
+//!
+//! # Why symbolic, not numeric
+//!
+//! Numeric gradients (finite differences) require float arithmetic
+//! (`(f(x+h) - f(x)) / h`). Our substrate is integer-only until
+//! we add `Value::Float`. Symbolic gradients work with integers:
+//! the derivative of an integer-valued expression is itself an
+//! integer-valued expression. The result can be evaluated at any
+//! point with the existing kernel.
+//!
+//! # What this enables
+//!
+//! - `grad(w*x + b, w) = x` — the gradient of a linear predictor
+//!   w.r.t. the weight parameter is the input
+//! - `grad(loss, param) = gradient` — the full ingredient for
+//!   gradient descent
+//! - Composability: `grad(grad(f, x), x)` gives the second
+//!   derivative symbolically
+//!
+//! # What this doesn't yet do
+//!
+//! - Vector-valued derivatives (Jacobians). `grad` of a tensor-
+//!   valued expression w.r.t. a vector variable is a rank-2
+//!   tensor; we handle only scalar-valued expressions.
+//! - Tensor ops in gradient (tensor_dot, etc.): those need
+//!   vector-Jacobian product rules. Added incrementally.
+//! - Learning rate / optimizer step (that's R15).
+//!
+//! # Discovery path
+//!
+//! The rules here are hard-coded for USE. The machine can
+//! INDEPENDENTLY DISCOVER these patterns given enough corpus
+//! examples: corpora rich in `grad(f, x)` expressions would let
+//! anti-unification produce `grad(add(a, b), ?x) => add(grad(a,
+//! ?x), grad(b, ?x))` as a meta-rule. R14.1 provides corpus
+//! generators that exercise these patterns so discovery has
+//! material to work with.
+
+use crate::builtin::{
+    ADD, INT_ADD, INT_MUL, INT_SUCC, INT_ZERO, MUL, NEG, SUCC, ZERO,
+};
+use crate::term::Term;
+use crate::value::Value;
+
+/// Compute the symbolic derivative of `expr` with respect to the
+/// variable `var_id`. Returns an Int-valued Term.
+///
+/// Applies chain/sum/product rules recursively. Basic
+/// simplifications (mul by 0, add of 0) are performed at
+/// construction to keep the output term tree shallow; the caller
+/// can apply `.canonical()` for further reduction.
+#[must_use]
+pub fn symbolic_derivative(expr: &Term, var_id: u32) -> Term {
+    match expr {
+        // Constant: derivative is 0. All Nat / Int / Tensor
+        // numbers are constants w.r.t. any variable.
+        Term::Number(_) => Term::Number(Value::Int(0)),
+        // Point: opaque atom; treat as constant.
+        Term::Point(_) => Term::Number(Value::Int(0)),
+        // Variable: derivative is 1 if it matches var_id, else 0.
+        Term::Var(v) => {
+            if *v == var_id {
+                Term::Number(Value::Int(1))
+            } else {
+                Term::Number(Value::Int(0))
+            }
+        }
+        // Apply: dispatch on head.
+        Term::Apply(head, args) => {
+            let head_id = match head.as_ref() {
+                Term::Var(id) => *id,
+                _ => {
+                    // Non-builtin head: can't differentiate;
+                    // return 0. Future: could return an abstract
+                    // d-expression.
+                    return Term::Number(Value::Int(0));
+                }
+            };
+            derive_apply(head_id, args, var_id)
+        }
+        // Fn / Symbol: return 0 for now — these would require
+        // beta-reduction or library expansion before
+        // differentiation. Future work.
+        Term::Fn(_, _) | Term::Symbol(_, _) => Term::Number(Value::Int(0)),
+    }
+}
+
+fn derive_apply(head_id: u32, args: &[Term], var_id: u32) -> Term {
+    match head_id {
+        // Sum rule: d(add(a, b))/dx = add(da, db)
+        // Works for both Nat ADD and Int INT_ADD.
+        ADD | INT_ADD => {
+            if args.len() != 2 {
+                return Term::Number(Value::Int(0));
+            }
+            let da = symbolic_derivative(&args[0], var_id);
+            let db = symbolic_derivative(&args[1], var_id);
+            simplify_add(da, db)
+        }
+        // Product rule: d(mul(a, b))/dx = add(mul(da, b), mul(a, db))
+        MUL | INT_MUL => {
+            if args.len() != 2 {
+                return Term::Number(Value::Int(0));
+            }
+            let da = symbolic_derivative(&args[0], var_id);
+            let db = symbolic_derivative(&args[1], var_id);
+            let term_1 = simplify_mul(da, args[1].clone());
+            let term_2 = simplify_mul(args[0].clone(), db);
+            simplify_add(term_1, term_2)
+        }
+        // Neg: d(-a)/dx = -(da)
+        NEG => {
+            if args.len() != 1 {
+                return Term::Number(Value::Int(0));
+            }
+            let da = symbolic_derivative(&args[0], var_id);
+            simplify_neg(da)
+        }
+        // Succ: d(succ(a))/dx = d(a)/dx (succ is a += 1 offset)
+        SUCC | INT_SUCC => {
+            if args.len() != 1 {
+                return Term::Number(Value::Int(0));
+            }
+            symbolic_derivative(&args[0], var_id)
+        }
+        // Zero / int_zero: nullary constant.
+        ZERO | INT_ZERO => Term::Number(Value::Int(0)),
+        // Unknown builtin or not-yet-supported (e.g., tensor ops,
+        // dot, sum). Return 0; future work adds specific rules.
+        _ => Term::Number(Value::Int(0)),
+    }
+}
+
+/// Simplify `add(a, b)` during derivative construction:
+/// - If either side is Int(0), return the other side.
+/// - Otherwise, build an Apply(INT_ADD, [a, b]).
+fn simplify_add(a: Term, b: Term) -> Term {
+    if is_int_zero(&a) {
+        return b;
+    }
+    if is_int_zero(&b) {
+        return a;
+    }
+    Term::Apply(Box::new(Term::Var(INT_ADD)), vec![a, b])
+}
+
+/// Simplify `mul(a, b)` during derivative construction:
+/// - If either side is Int(0), return Int(0).
+/// - If either side is Int(1), return the other side.
+/// - Otherwise, build an Apply(INT_MUL, [a, b]).
+fn simplify_mul(a: Term, b: Term) -> Term {
+    if is_int_zero(&a) || is_int_zero(&b) {
+        return Term::Number(Value::Int(0));
+    }
+    if is_int_one(&a) {
+        return b;
+    }
+    if is_int_one(&b) {
+        return a;
+    }
+    Term::Apply(Box::new(Term::Var(INT_MUL)), vec![a, b])
+}
+
+/// Simplify `neg(a)`:
+/// - If `a` is already `neg(b)`, return `b` (double-negation
+///   cancels).
+/// - If `a` is Int(0), return Int(0).
+/// - Otherwise, wrap.
+fn simplify_neg(a: Term) -> Term {
+    if is_int_zero(&a) {
+        return Term::Number(Value::Int(0));
+    }
+    // Double-negation unwrap.
+    if let Term::Apply(head, inner) = &a {
+        if let Term::Var(NEG) = head.as_ref() {
+            if inner.len() == 1 {
+                return inner[0].clone();
+            }
+        }
+    }
+    Term::Apply(Box::new(Term::Var(NEG)), vec![a])
+}
+
+fn is_int_zero(t: &Term) -> bool {
+    matches!(t, Term::Number(Value::Int(0)) | Term::Number(Value::Nat(0)))
+}
+
+fn is_int_one(t: &Term) -> bool {
+    matches!(t, Term::Number(Value::Int(1)) | Term::Number(Value::Nat(1)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn var(id: u32) -> Term {
+        Term::Var(id)
+    }
+    fn apply(head: Term, args: Vec<Term>) -> Term {
+        Term::Apply(Box::new(head), args)
+    }
+    fn int_(n: i64) -> Term {
+        Term::Number(Value::Int(n))
+    }
+
+    #[test]
+    fn derivative_of_constant_is_zero() {
+        assert_eq!(symbolic_derivative(&int_(5), 100), int_(0));
+        assert_eq!(
+            symbolic_derivative(&Term::Number(Value::Nat(7)), 100),
+            int_(0)
+        );
+    }
+
+    #[test]
+    fn derivative_of_self_variable_is_one() {
+        // d(x)/dx = 1
+        assert_eq!(symbolic_derivative(&var(100), 100), int_(1));
+    }
+
+    #[test]
+    fn derivative_of_other_variable_is_zero() {
+        // d(y)/dx = 0
+        assert_eq!(symbolic_derivative(&var(101), 100), int_(0));
+    }
+
+    #[test]
+    fn sum_rule_d_add_ab() {
+        // d(add(x, y))/dx = add(1, 0) = 1 (via simplify_add)
+        let expr = apply(var(INT_ADD), vec![var(100), var(101)]);
+        let d = symbolic_derivative(&expr, 100);
+        assert_eq!(d, int_(1));
+    }
+
+    #[test]
+    fn product_rule_d_mul_xy_dx_is_y() {
+        // d(mul(x, y))/dx = add(mul(1, y), mul(x, 0))
+        //                 = y  (via simplify)
+        let expr = apply(var(INT_MUL), vec![var(100), var(101)]);
+        let d = symbolic_derivative(&expr, 100);
+        assert_eq!(d, var(101));
+    }
+
+    #[test]
+    fn product_rule_d_mul_xy_dy_is_x() {
+        // d(mul(x, y))/dy = x
+        let expr = apply(var(INT_MUL), vec![var(100), var(101)]);
+        let d = symbolic_derivative(&expr, 101);
+        assert_eq!(d, var(100));
+    }
+
+    #[test]
+    fn chain_rule_via_composition() {
+        // d(mul(add(x, y), z))/dx
+        //   = d(add(x,y))/dx * z + add(x,y) * d(z)/dx
+        //   = 1 * z + add(x,y) * 0
+        //   = z  (via simplify)
+        let inner = apply(var(INT_ADD), vec![var(100), var(101)]);
+        let outer = apply(var(INT_MUL), vec![inner, var(102)]);
+        let d = symbolic_derivative(&outer, 100);
+        assert_eq!(d, var(102));
+    }
+
+    #[test]
+    fn negation_flips_derivative() {
+        // d(-x)/dx = -1
+        let expr = apply(var(NEG), vec![var(100)]);
+        let d = symbolic_derivative(&expr, 100);
+        assert_eq!(d, apply(var(NEG), vec![int_(1)]));
+    }
+
+    #[test]
+    fn double_negation_cancels_in_derivative() {
+        // d(-(-x))/dx = -(-(1)) → double-neg unwrap → 1
+        let expr = apply(
+            var(NEG),
+            vec![apply(var(NEG), vec![var(100)])],
+        );
+        let d = symbolic_derivative(&expr, 100);
+        assert_eq!(d, int_(1));
+    }
+
+    #[test]
+    fn succ_is_transparent_under_derivative() {
+        // d(succ(x))/dx = d(x)/dx = 1 (succ is just +1 offset)
+        let expr = apply(var(SUCC), vec![var(100)]);
+        let d = symbolic_derivative(&expr, 100);
+        assert_eq!(d, int_(1));
+    }
+
+    // ── PROOF: gradient evaluated at a point ─────────────────────
+
+    #[test]
+    fn proof_linear_regression_gradient_at_point() {
+        // Linear predictor: y = w*x + b.
+        // Gradient w.r.t. w: d(y)/dw = x
+        // Evaluate that symbolic gradient at x=7 → should be 7.
+        //
+        // Proves: symbolic gradient composes with concrete
+        // evaluation. We derive the expression, then substitute
+        // the concrete x, and the kernel eval machinery reduces
+        // it to the correct gradient value.
+        use crate::eval::eval;
+        let w = var(100);
+        let x = var(101);
+        let b = var(102);
+        let mul_wx = apply(var(INT_MUL), vec![w.clone(), x.clone()]);
+        let y = apply(var(INT_ADD), vec![mul_wx, b]);
+
+        // Symbolic gradient w.r.t. w.
+        let dy_dw = symbolic_derivative(&y, 100);
+        // It should be exactly `x` (Var(101)).
+        assert_eq!(dy_dw, x);
+
+        // Substitute x=7 and evaluate.
+        let grounded = dy_dw.substitute(101, &int_(7));
+        let v = eval(&grounded, &[], 100).unwrap();
+        assert_eq!(v, int_(7));
+    }
+
+    #[test]
+    fn proof_gradient_of_scalar_polynomial() {
+        // f(x) = x*x + 3*x + 5
+        // df/dx = 2x + 3
+        //
+        // Symbolically:
+        //   d(x*x)/dx     = add(mul(1, x), mul(x, 1)) → add(x, x)
+        //                   (no further simplification — we don't
+        //                   collapse x+x to 2*x without library help)
+        //   d(3*x)/dx     = add(mul(0, x), mul(3, 1)) → 3
+        //   d(5)/dx       = 0
+        //   total         = add(add(x, x), 3)
+        //
+        // Evaluate at x=4:
+        //   (4 + 4) + 3 = 11
+        //   Ground truth: 2*4 + 3 = 11 ✓
+        use crate::eval::eval;
+        let x_sq = apply(var(INT_MUL), vec![var(100), var(100)]);
+        let three_x = apply(var(INT_MUL), vec![int_(3), var(100)]);
+        let five = int_(5);
+        let poly = apply(
+            var(INT_ADD),
+            vec![
+                apply(var(INT_ADD), vec![x_sq, three_x]),
+                five,
+            ],
+        );
+
+        let dpoly = symbolic_derivative(&poly, 100);
+        // Substitute x=4 and evaluate.
+        let grounded = dpoly.substitute(100, &int_(4));
+        let v = eval(&grounded, &[], 100).unwrap();
+        assert_eq!(v, int_(11));
+    }
+
+    #[test]
+    fn proof_second_derivative_is_recursive_grad() {
+        // f(x) = x*x*x
+        // df/dx = 3x²
+        // d²f/dx² = 6x
+        //
+        // Compose symbolic_derivative twice:
+        //   d/dx (x*x*x) = 3*x²  (symbolically, not reduced)
+        //   d/dx (previous) = 6x
+        // Evaluate at x=2:
+        //   d²f/dx² = 12
+        use crate::eval::eval;
+        let x = var(100);
+        // Build x*x*x as mul(mul(x, x), x).
+        let x_sq = apply(var(INT_MUL), vec![x.clone(), x.clone()]);
+        let x_cube = apply(var(INT_MUL), vec![x_sq, x.clone()]);
+
+        let d1 = symbolic_derivative(&x_cube, 100);
+        let d2 = symbolic_derivative(&d1, 100);
+        let grounded = d2.substitute(100, &int_(2));
+        let v = eval(&grounded, &[], 200).unwrap();
+        assert_eq!(v, int_(12));
+    }
+
+    #[test]
+    fn proof_gradient_flow_through_mixed_expression() {
+        // f(w, x, b) = (w * x + b) * x
+        // df/dw = x * x
+        //
+        // At w=1 (doesn't matter since not in gradient), x=5, b=3:
+        // df/dw should evaluate to 25.
+        use crate::eval::eval;
+        let w = var(100);
+        let x = var(101);
+        let b = var(102);
+        let wx = apply(var(INT_MUL), vec![w, x.clone()]);
+        let wx_b = apply(var(INT_ADD), vec![wx, b]);
+        let y = apply(var(INT_MUL), vec![wx_b, x]);
+
+        let df_dw = symbolic_derivative(&y, 100);
+        // Substitute numeric values.
+        let g = df_dw
+            .substitute(101, &int_(5))
+            .substitute(102, &int_(3));
+        let v = eval(&g, &[], 200).unwrap();
+        assert_eq!(v, int_(25));
+    }
+}

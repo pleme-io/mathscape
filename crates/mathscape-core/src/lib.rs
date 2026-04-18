@@ -1,6 +1,7 @@
 //! Core types: Point, Number, Fn, Term enum, hash-consing, evaluation,
 //! substitution, s-expression parser/printer.
 
+pub mod autograd;
 pub mod bettyfine;
 pub mod builtin;
 pub mod control;
@@ -44,6 +45,7 @@ pub use epoch::{
     AcceptanceCertificate, Artifact, Candidate, Emitter, Epoch, EpochTrace, Generator,
     InMemoryRegistry, Prover, Registry, Rejection, RuleEmitter, Verdict,
 };
+pub use autograd::symbolic_derivative;
 pub use bettyfine::{bettyfine_library, standard_bettyfine_cardinality, OperatorSpec};
 pub use event::{Event, EventCategory, StatusAdvance};
 pub use form_tree::{
