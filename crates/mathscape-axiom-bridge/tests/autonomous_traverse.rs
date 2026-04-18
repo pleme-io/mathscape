@@ -1246,6 +1246,80 @@ struct TraversalReportWithLibrary {
     axiomatized_rules_full: Vec<mathscape_core::eval::RewriteRule>,
 }
 
+fn run_traversal_pure_procedural_with_reward(
+    seed_offset: u64,
+    procedural_budget: usize,
+    max_depth: usize,
+    reward_config: mathscape_reward::reward::RewardConfig,
+) -> TraversalReportWithLibrary {
+    use std::collections::HashSet;
+
+    let mut zoo: Vec<(String, Vec<Term>)> = Vec::new();
+    for i in 1..=procedural_budget as u64 {
+        let seed = seed_offset.wrapping_add(i);
+        let depth = 2 + (i as usize % (max_depth - 1).max(1));
+        let count = 16 + (i as usize % 8);
+        zoo.push((
+            format!("proc-s{seed}-d{depth}"),
+            procedural(seed, depth, count),
+        ));
+    }
+
+    let base = CompressionGenerator::new(
+        ExtractConfig {
+            min_shared_size: 2,
+            min_matches: 2,
+            max_new_rules: 5,
+        },
+        1,
+    );
+    let meta = MetaPatternGenerator::new(
+        ExtractConfig {
+            min_shared_size: 1,
+            min_matches: 2,
+            max_new_rules: 12,
+        },
+        10_000,
+    );
+    let mut epoch = Epoch::new(
+        CompositeGenerator::new(base, meta),
+        mathscape_reward::StatisticalProver::new(reward_config, 0.0),
+        RuleEmitter,
+        InMemoryRegistry::new(),
+    );
+
+    for (_, corpus) in &zoo {
+        for _ in 0..3 {
+            let _ = epoch.step_with_action(
+                corpus,
+                mathscape_core::control::EpochAction::Discover,
+            );
+        }
+        let _ = epoch.step_with_action(
+            corpus,
+            mathscape_core::control::EpochAction::Reinforce,
+        );
+    }
+
+    let mut names = Vec::new();
+    let mut full = Vec::new();
+    for artifact in epoch.registry.all() {
+        let s = epoch
+            .registry
+            .status_of(artifact.content_hash)
+            .unwrap_or_else(|| artifact.certificate.status.clone());
+        if matches!(s, ProofStatus::Axiomatized) {
+            names.push(artifact.rule.name.clone());
+            full.push(artifact.rule.clone());
+        }
+    }
+    let _ = HashSet::<TermRef>::new();
+    TraversalReportWithLibrary {
+        axiomatized_rule_names: names,
+        axiomatized_rules_full: full,
+    }
+}
+
 fn run_traversal_pure_procedural_with_library(
     seed_offset: u64,
     procedural_budget: usize,
@@ -1322,6 +1396,298 @@ fn run_traversal_pure_procedural_with_library(
         axiomatized_rule_names: names,
         axiomatized_rules_full: full,
     }
+}
+
+#[test]
+#[ignore = "phase M6: HPO sweep extract-config vs bettyfine, ~15s, --ignored"]
+fn hpo_sweep_extract_config_vs_bettyfine() {
+    // After discovering reward HPs are insensitive, the next suspect
+    // is extract config. These parameters control which candidates
+    // even ENTER the pipeline — upstream of the prover.
+    //
+    //   min_shared_size : minimum shared structure before a pair is
+    //                     anti-unified into a candidate. Low = more
+    //                     candidates; high = fewer but better.
+    //   max_new_rules   : top-K cut on candidates per epoch. Low =
+    //                     only most-general patterns survive; high =
+    //                     rich candidate pool.
+    use mathscape_compress::extract::ExtractConfig as EC;
+    use std::collections::HashMap;
+    use std::time::Instant;
+
+    const N_SEEDS: u64 = 64;
+    const BUDGET: usize = 15;
+    const DEPTH: usize = 4;
+    let min_shared = [1usize, 2, 3];
+    let max_rules = [3usize, 5, 10, 20];
+
+    println!("\n╔══════════════════════════════════════════════════════╗");
+    println!("║ HPO SWEEP — extract config vs bettyfine              ║");
+    println!("║   3 × 4 × {N_SEEDS} seeds per cell                        ║");
+    println!("╚══════════════════════════════════════════════════════╝");
+    println!(
+        "\n{:>10} {:>10} {:>10} {:>10} {:>12} {:>12}",
+        "min_share", "max_rules", "modal%", "basins", "entropy_b", "mean_rules"
+    );
+    println!("{}", "─".repeat(70));
+
+    let t_all = Instant::now();
+    let mut grid: Vec<(usize, usize, f64, usize, f64, f64)> = Vec::new();
+
+    for &mss in &min_shared {
+        for &mnr in &max_rules {
+            let ec = EC {
+                min_shared_size: mss,
+                min_matches: 2,
+                max_new_rules: mnr,
+            };
+            let mut basin_support: HashMap<Vec<(String, String)>, usize> = HashMap::new();
+            let mut total_rule_count = 0usize;
+            for seed in 1..=N_SEEDS {
+                let report = run_traversal_pure_procedural_with_extract(
+                    seed,
+                    BUDGET,
+                    DEPTH,
+                    ec.clone(),
+                );
+                total_rule_count += report.axiomatized_rules_full.len();
+                let fp = structural_fingerprint(&report.axiomatized_rules_full);
+                *basin_support.entry(fp).or_default() += 1;
+            }
+            let basin_count = basin_support.len();
+            let modal = basin_support.values().copied().max().unwrap_or(0);
+            let modal_frac = modal as f64 / N_SEEDS as f64;
+            let entropy: f64 = basin_support
+                .values()
+                .map(|&c| {
+                    let p = c as f64 / N_SEEDS as f64;
+                    if p > 0.0 { -p * p.log2() } else { 0.0 }
+                })
+                .sum();
+            let mean_rules = total_rule_count as f64 / N_SEEDS as f64;
+            grid.push((mss, mnr, modal_frac, basin_count, entropy, mean_rules));
+            println!(
+                "{:>10} {:>10} {:>9.1}% {:>10} {:>12.3} {:>12.2}",
+                mss, mnr, modal_frac * 100.0, basin_count, entropy, mean_rules,
+            );
+        }
+    }
+    let elapsed_ms = t_all.elapsed().as_millis();
+    println!("\n  elapsed: {elapsed_ms}ms");
+
+    let min_modal = grid.iter().map(|x| x.2).fold(f64::INFINITY, f64::min);
+    let max_modal = grid.iter().map(|x| x.2).fold(f64::NEG_INFINITY, f64::max);
+    let min_basins = grid.iter().map(|x| x.3).min().unwrap_or(0);
+    let max_basins = grid.iter().map(|x| x.3).max().unwrap_or(0);
+    let min_entropy = grid.iter().map(|x| x.4).fold(f64::INFINITY, f64::min);
+    let max_entropy = grid.iter().map(|x| x.4).fold(f64::NEG_INFINITY, f64::max);
+    let min_rules = grid.iter().map(|x| x.5).fold(f64::INFINITY, f64::min);
+    let max_rules_found = grid.iter().map(|x| x.5).fold(f64::NEG_INFINITY, f64::max);
+
+    println!("\n▶ Sensitivity summary (min → max across 12 cells)");
+    println!("  modal support  : {:.1}% → {:.1}% (range {:.1}%)",
+        min_modal * 100.0, max_modal * 100.0, (max_modal - min_modal) * 100.0);
+    println!("  basin count    : {min_basins:>3} → {max_basins:>3}             (range {})",
+        max_basins - min_basins);
+    println!("  shannon entropy: {:.3} → {:.3}         (range {:.3})",
+        min_entropy, max_entropy, max_entropy - min_entropy);
+    println!("  mean rules/run : {:.2} → {:.2}            (range {:.2})",
+        min_rules, max_rules_found, max_rules_found - min_rules);
+
+    println!("\n▶ Interpretation");
+    if max_modal - min_modal > 0.3 {
+        println!("  STRONG STEERING — extract config moves modal support\n  >30 points. The bettyfine IS controllable via this dial.");
+    } else if max_modal - min_modal > 0.1 {
+        println!("  MODERATE STEERING — extract config shifts modal by\n  10-30 points. Useful control surface.");
+    } else {
+        println!("  WEAK STEERING — extract config is not the dominant\n  lever either. The steering likely lives in the equivalence\n  discipline (phase M5).");
+    }
+
+    assert!(grid.len() == 12);
+}
+
+fn run_traversal_pure_procedural_with_extract(
+    seed_offset: u64,
+    procedural_budget: usize,
+    max_depth: usize,
+    extract_config: mathscape_compress::extract::ExtractConfig,
+) -> TraversalReportWithLibrary {
+    let mut zoo: Vec<(String, Vec<Term>)> = Vec::new();
+    for i in 1..=procedural_budget as u64 {
+        let seed = seed_offset.wrapping_add(i);
+        let depth = 2 + (i as usize % (max_depth - 1).max(1));
+        let count = 16 + (i as usize % 8);
+        zoo.push((
+            format!("proc-s{seed}-d{depth}"),
+            procedural(seed, depth, count),
+        ));
+    }
+
+    let base = CompressionGenerator::new(extract_config.clone(), 1);
+    let meta = MetaPatternGenerator::new(
+        ExtractConfig {
+            min_shared_size: 1,
+            min_matches: 2,
+            max_new_rules: 12,
+        },
+        10_000,
+    );
+    let mut epoch = Epoch::new(
+        CompositeGenerator::new(base, meta),
+        mathscape_reward::StatisticalProver::new(
+            mathscape_reward::reward::RewardConfig::default(),
+            0.0,
+        ),
+        RuleEmitter,
+        InMemoryRegistry::new(),
+    );
+    for (_, corpus) in &zoo {
+        for _ in 0..3 {
+            let _ = epoch.step_with_action(
+                corpus,
+                mathscape_core::control::EpochAction::Discover,
+            );
+        }
+        let _ = epoch.step_with_action(
+            corpus,
+            mathscape_core::control::EpochAction::Reinforce,
+        );
+    }
+    let mut names = Vec::new();
+    let mut full = Vec::new();
+    for artifact in epoch.registry.all() {
+        let s = epoch
+            .registry
+            .status_of(artifact.content_hash)
+            .unwrap_or_else(|| artifact.certificate.status.clone());
+        if matches!(s, ProofStatus::Axiomatized) {
+            names.push(artifact.rule.name.clone());
+            full.push(artifact.rule.clone());
+        }
+    }
+    TraversalReportWithLibrary {
+        axiomatized_rule_names: names,
+        axiomatized_rules_full: full,
+    }
+}
+
+#[test]
+#[ignore = "phase M6: HPO sweep α × δ × 64 seeds × 12 cells, ~15s, --ignored"]
+fn hpo_sweep_alpha_delta_vs_bettyfine() {
+    // Phase M6: the first empirical hyperparameter sweep. For each
+    // cell in (alpha, delta) × 64 seeds, measure bettyfine features:
+    //
+    //   - modal_support (dominance of top basin)
+    //   - basin_count (moduli space cardinality at this config)
+    //   - mean_rule_count (canonical library size)
+    //   - shannon_entropy (distributional spread)
+    //
+    // What we're testing: does the bettyfine's shape respond to
+    // reward hyperparameters? If yes, we have a control surface for
+    // the discovery process — the steering wheel works. If no, the
+    // bettyfine is robust against reward weighting and the steering
+    // wheel lives at a different layer (extract config / equivalence
+    // dial / corpus vocabulary).
+    //
+    // Either outcome is valuable.
+    use std::collections::HashMap;
+    use std::time::Instant;
+
+    const N_SEEDS: u64 = 64;
+    const BUDGET: usize = 15;
+    const DEPTH: usize = 4;
+    let alphas = [0.1f64, 0.3, 0.6, 0.9];
+    let deltas = [0.0f64, 0.5, 1.0];
+
+    println!("\n╔══════════════════════════════════════════════════════╗");
+    println!("║ HPO SWEEP — α × δ vs bettyfine features              ║");
+    println!("║   4 × 3 × {N_SEEDS} seeds per cell                        ║");
+    println!("╚══════════════════════════════════════════════════════╝");
+    println!(
+        "\n{:>6} {:>6} {:>10} {:>10} {:>12} {:>12}",
+        "α", "δ", "modal%", "basins", "entropy_b", "mean_rules"
+    );
+    println!("{}", "─".repeat(64));
+
+    let t_all = Instant::now();
+    let mut grid: Vec<(f64, f64, f64, usize, f64, f64)> = Vec::new();
+
+    for &alpha in &alphas {
+        for &delta in &deltas {
+            let reward_config = mathscape_reward::reward::RewardConfig {
+                alpha,
+                beta: 0.3,
+                gamma: 0.1,
+                delta,
+            };
+            let mut basin_support: HashMap<Vec<(String, String)>, usize> = HashMap::new();
+            let mut total_rule_count = 0usize;
+            for seed in 1..=N_SEEDS {
+                let report = run_traversal_pure_procedural_with_reward(
+                    seed,
+                    BUDGET,
+                    DEPTH,
+                    reward_config.clone(),
+                );
+                total_rule_count += report.axiomatized_rules_full.len();
+                let fp = structural_fingerprint(&report.axiomatized_rules_full);
+                *basin_support.entry(fp).or_default() += 1;
+            }
+            let basin_count = basin_support.len();
+            let modal = basin_support.values().copied().max().unwrap_or(0);
+            let modal_frac = modal as f64 / N_SEEDS as f64;
+            let entropy: f64 = basin_support
+                .values()
+                .map(|&c| {
+                    let p = c as f64 / N_SEEDS as f64;
+                    if p > 0.0 { -p * p.log2() } else { 0.0 }
+                })
+                .sum();
+            let mean_rules = total_rule_count as f64 / N_SEEDS as f64;
+
+            grid.push((alpha, delta, modal_frac, basin_count, entropy, mean_rules));
+            println!(
+                "{:>6.1} {:>6.1} {:>9.1}% {:>10} {:>12.3} {:>12.2}",
+                alpha, delta, modal_frac * 100.0, basin_count, entropy, mean_rules
+            );
+        }
+    }
+    let elapsed_ms = t_all.elapsed().as_millis();
+    println!("\n  elapsed: {elapsed_ms}ms");
+
+    // Aggregate analysis
+    let min_modal = grid.iter().map(|x| x.2).fold(f64::INFINITY, f64::min);
+    let max_modal = grid.iter().map(|x| x.2).fold(f64::NEG_INFINITY, f64::max);
+    let min_basins = grid.iter().map(|x| x.3).min().unwrap_or(0);
+    let max_basins = grid.iter().map(|x| x.3).max().unwrap_or(0);
+    let min_entropy = grid.iter().map(|x| x.4).fold(f64::INFINITY, f64::min);
+    let max_entropy = grid.iter().map(|x| x.4).fold(f64::NEG_INFINITY, f64::max);
+
+    println!("\n▶ Sensitivity summary (min → max across 12 cells)");
+    println!("  modal support  : {:.1}% → {:.1}%  (range {:.1}%)",
+        min_modal * 100.0, max_modal * 100.0, (max_modal - min_modal) * 100.0);
+    println!("  basin count    : {min_basins:>3} → {max_basins:>3}            (range {})",
+        max_basins - min_basins);
+    println!("  shannon entropy: {:.3} → {:.3}        (range {:.3})",
+        min_entropy, max_entropy, max_entropy - min_entropy);
+
+    println!("\n▶ Interpretation");
+    if max_modal - min_modal < 0.05 {
+        println!(
+            "  INSENSITIVE — reward hyperparameters barely shift modal\n  support. The bettyfine is ROBUST against this slice of the\n  reward space. Steering wheel lives elsewhere (probably in\n  equivalence dial, extract config, or vocabulary)."
+        );
+    } else if max_modal - min_modal > 0.2 {
+        println!(
+            "  STRONG STEERING — reward hyperparameters shift modal\n  support by >20 points. The reward config IS a meaningful\n  control surface for the bettyfine's shape. First-class\n  hyperparameter for M5/M6 automation."
+        );
+    } else {
+        println!(
+            "  MODERATE STEERING — reward hyperparameters shift modal\n  support 5-20 points. Useful but not dominant control\n  surface. Worth pairing with equivalence dial (M5)."
+        );
+    }
+
+    assert!(grid.len() == 12);
+    assert!(min_modal > 0.0);
 }
 
 #[test]
