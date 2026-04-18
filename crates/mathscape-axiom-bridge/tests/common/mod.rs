@@ -169,3 +169,70 @@ pub fn procedural(seed: u64, max_depth: usize, term_count: usize) -> Vec<Term> {
     }
     out
 }
+
+/// R21 (2026-04-18): tensor-exercising corpus generator.
+///
+/// Produces Terms rich in `tensor_add` (id 20) and `tensor_mul`
+/// (id 21) over small shape-[2] integer tensors. Seeded xorshift
+/// over a small operand pool gives reproducible corpora that
+/// contain enough tensor-shape repetition for anti-unification
+/// to extract patterns like:
+///
+///   tensor_add(?a, 0) = ?a
+///   tensor_mul(?a, 1) = ?a
+///   tensor_add(?a, ?b) = tensor_add(?b, ?a)  (commutativity,
+///                                             trivial post-R3)
+///
+/// Kept OUT of the canonical milestone (autonomous_traverse) to
+/// avoid perturbing its pinned apex fingerprint. Use from new
+/// tests that specifically probe tensor discovery.
+pub fn tensor_corpus(seed: u64, max_depth: usize, term_count: usize) -> Vec<Term> {
+    use mathscape_core::term::Term;
+    use mathscape_core::value::Value;
+
+    let mut state = seed.wrapping_mul(0x9E37_79B9_7F4A_7C15).max(1);
+    let mut next_u64 = || {
+        state ^= state << 13;
+        state ^= state >> 7;
+        state ^= state << 17;
+        state
+    };
+
+    // Operand pool: a few shape-[2] tensors including the
+    // identity elements for tensor_add (zeros) and tensor_mul
+    // (ones). Repetition of these in corpora is what lets
+    // anti-unification find tensor identity laws.
+    let operands: Vec<Term> = vec![
+        Term::Number(Value::tensor(vec![2], vec![0, 0]).unwrap()),
+        Term::Number(Value::tensor(vec![2], vec![1, 1]).unwrap()),
+        Term::Number(Value::tensor(vec![2], vec![2, 3]).unwrap()),
+        Term::Number(Value::tensor(vec![2], vec![4, 5]).unwrap()),
+        Term::Number(Value::tensor(vec![2], vec![1, 0]).unwrap()),
+    ];
+
+    let ops: [u32; 2] = [20, 21]; // TENSOR_ADD, TENSOR_MUL
+
+    fn build(
+        depth: usize,
+        max_depth: usize,
+        ops: &[u32],
+        operands: &[Term],
+        next: &mut dyn FnMut() -> u64,
+    ) -> Term {
+        if depth >= max_depth || next() % 3 == 0 {
+            let idx = (next() % operands.len() as u64) as usize;
+            return operands[idx].clone();
+        }
+        let op_idx = (next() % ops.len() as u64) as usize;
+        let op = ops[op_idx];
+        let a = build(depth + 1, max_depth, ops, operands, next);
+        let b = build(depth + 1, max_depth, ops, operands, next);
+        Term::Apply(Box::new(Term::Var(op)), vec![a, b])
+    }
+
+    let mut out = Vec::with_capacity(term_count);
+    for _ in 0..term_count {
+        out.push(build(0, max_depth, &ops, &operands, &mut next_u64));
+    }
+    out
+}
