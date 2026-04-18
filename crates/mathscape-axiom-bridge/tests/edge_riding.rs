@@ -400,19 +400,26 @@ fn extract_new_theorems(
 #[test]
 #[ignore = "phase L5: edge-riding loop — perpetual discovery engine. ~5min, --ignored"]
 fn edge_riding_loop() {
-    const CYCLES: usize = 6;
-    const PROBES_PER_CYCLE: usize = 2000;
-    const KEEP_TOP_APPARATUSES: usize = 4;
-    const MUTANTS_PER_PARENT: usize = 2;
-    const POPULATION_CAP: usize = 16;
-    const RUSTIFY_TOP_K: usize = 8;
-    const SATURATION_THRESHOLD: f64 = 0.5; // new theorems per cycle / baseline
+    // Knobs tuned for the long campaign (2026-04-18).
+    // MATHSCAPE_EDGE_CYCLES env var overrides CYCLES for ad-hoc runs.
+    const CYCLES_DEFAULT: usize = 50;
+    const PROBES_PER_CYCLE: usize = 4000;
+    const KEEP_TOP_APPARATUSES: usize = 6;
+    const MUTANTS_PER_PARENT: usize = 3;
+    const POPULATION_CAP: usize = 24;
+    const RUSTIFY_TOP_K: usize = 16;
+    const SATURATION_THRESHOLD: f64 = 0.5;
+
+    let cycles: usize = std::env::var("MATHSCAPE_EDGE_CYCLES")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(CYCLES_DEFAULT);
 
     println!();
     println!("╔══════════════════════════════════════════════════════════════════════╗");
     println!("║ PHASE L5 — EDGE-RIDING LOOP (perpetual discovery)                    ║");
     println!(
-        "║ cycles={CYCLES}  probes/cycle={PROBES_PER_CYCLE}  keep_top={KEEP_TOP_APPARATUSES}  mutants={MUTANTS_PER_PARENT}             ║"
+        "║ cycles={cycles}  probes/cycle={PROBES_PER_CYCLE}  keep_top={KEEP_TOP_APPARATUSES}  mutants={MUTANTS_PER_PARENT}             ║"
     );
     println!("║ correctness criterion: nonzero novelty rate across every cycle       ║");
     println!("╚══════════════════════════════════════════════════════════════════════╝");
@@ -435,15 +442,16 @@ fn edge_riding_loop() {
 
     let start = std::time::Instant::now();
 
-    for cycle in 0..CYCLES {
+    for cycle in 0..cycles {
         let cycle_start = std::time::Instant::now();
         println!();
         println!(
-            "── cycle {} / {} ─────  pool size: {}  substrate size: {}",
+            "── cycle {} / {} ─────  pool size: {}  substrate size: {}  ledger size: {}",
             cycle + 1,
-            CYCLES,
+            cycles,
             pool.len(),
-            session.substrate.len()
+            session.substrate.len(),
+            session.ledger.len()
         );
 
         // 1. Run sub-campaign over the current substrate + ledger.
@@ -562,7 +570,7 @@ fn edge_riding_loop() {
     let final_substrate = session.substrate.len();
 
     println!(
-        "ran {CYCLES} cycles in {total_elapsed:.1}s, discovered {total_new_theorems} new theorems"
+        "ran {cycles} cycles in {total_elapsed:.1}s, discovered {total_new_theorems} new theorems"
     );
     println!("mean theorems per cycle: {mean_per_cycle:.2}");
     println!("final substrate size: {final_substrate}  ledger size: {}", session.ledger.len());

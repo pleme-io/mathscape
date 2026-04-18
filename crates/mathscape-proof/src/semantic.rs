@@ -344,11 +344,10 @@ pub fn generate_semantic_candidates_with_ledger(
     // theorems. It's the Gödel-style bootstrap: each validated
     // shape becomes a building block for the next layer.
     //
-    // Capped at a small number of compositions per rule to keep
-    // the candidate count tractable. With N ledger shapes, we
-    // generate N (succ-wrapped) + 2×N² (binary-wrapped) =
-    // O(N²) candidates. For N=10 that's 210 extra candidates.
-    let composition_cap = 12;
+    // Capped to keep the candidate count tractable. With N ledger
+    // shapes, we generate N (succ-wrapped) + 2×N² (binary-wrapped)
+    // = O(N²) candidates. For N=30 that's ~1830 extra per rule.
+    let composition_cap = 30;
     let shapes: Vec<&Term> =
         ledger_rhs_shapes.iter().take(composition_cap).collect();
     let mut compositional: Vec<Term> = Vec::new();
