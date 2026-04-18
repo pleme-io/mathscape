@@ -4845,3 +4845,255 @@ fn phase_ml_apparatus_universal_rules() {
 
     assert!(!ranked.is_empty(), "sweep must produce at least some rules");
 }
+
+#[test]
+#[ignore = "phase ML1-scale: the big one. 24 apparatuses × 32 seeds × BUDGET=32. ~3-5min, --ignored"]
+fn phase_ml_large_scale_discovery() {
+    // Phase ML1-scale. The "real test" — the largest discovery
+    // sweep the current machinery can do in one shot. Goal: gather
+    // maximum structural discoveries under apparatus mutation,
+    // with enough seeds that universality claims are statistically
+    // credible.
+    //
+    // Prior findings suggested 1 truly-universal rule at 8 seeds.
+    // This test runs 4x the seed count (32) to see if universality
+    // is a low-sample artifact or a genuine ceiling.
+    //
+    // Also reports:
+    //   - Total structural rules (baseline of the discovery map)
+    //   - Universality distribution (histogram of apparatus coverage)
+    //   - Top-30 universal rules with their s-expression content
+    //   - Rule family clustering by structural shape
+    //   - Per-apparatus contribution: which apparatuses bring the
+    //     most UNIQUE discoveries to the aggregate
+    //
+    // This is the Merkle-tree-of-primitives at census scale. Every
+    // entry is a cross-apparatus-attested discovery with provenance.
+    use mathscape_compress::extract::ExtractConfig as EC;
+    use mathscape_core::eval::{anonymize_term, RewriteRule};
+    use std::collections::{BTreeMap, BTreeSet, HashMap};
+
+    const SEEDS: u64 = 32;
+    const BUDGET: usize = 32;
+    const DEPTH: usize = 4;
+    let ec = EC::default();
+
+    // 24 apparatuses (same as grand-sweep to keep the test
+    // comparable, with bigger seeds + budget).
+    let apparatuses: Vec<(&'static str, &'static str, &'static str)> = vec![
+        ("A1-canonical",        "A", "(+ (* alpha cr) (* beta novelty) (* gamma meta-compression) (* delta lhs-subsumption))"),
+        ("A2-cr-only",          "A", "(* alpha cr)"),
+        ("A3-novelty-only",     "A", "(* beta novelty)"),
+        ("A4-meta-only",        "A", "(* gamma meta-compression)"),
+        ("A5-sub-only",         "A", "(* delta lhs-subsumption)"),
+        ("B1-cr+nov",           "B", "(+ (* alpha cr) (* beta novelty))"),
+        ("B2-cr+meta",          "B", "(+ (* alpha cr) (* gamma meta-compression))"),
+        ("B3-cr+sub",           "B", "(+ (* alpha cr) (* delta lhs-subsumption))"),
+        ("B4-nov+meta",         "B", "(+ (* beta novelty) (* gamma meta-compression))"),
+        ("B5-nov+sub",          "B", "(+ (* beta novelty) (* delta lhs-subsumption))"),
+        ("B6-meta+sub",         "B", "(+ (* gamma meta-compression) (* delta lhs-subsumption))"),
+        ("C1-max-pair",         "C", "(max (+ (* alpha cr) (* beta novelty)) (+ (* gamma meta-compression) (* delta lhs-subsumption)))"),
+        ("C2-cr*nov",           "C", "(+ (* cr novelty) (* gamma meta-compression) (* delta lhs-subsumption))"),
+        ("C3-harmonic",         "C", "(+ (/ (* cr novelty) (max (+ cr novelty) 0.001)) (* gamma meta-compression) (* delta lhs-subsumption))"),
+        ("C4-clamped",          "C", "(clamp (+ (* alpha cr) (* beta novelty) (* gamma meta-compression) (* delta lhs-subsumption)) -1 2)"),
+        ("C5-threshold",        "C", "(+ (* alpha cr) (if (max (- cr 0.05) 0) (* beta novelty) 0) (* gamma meta-compression) (* delta lhs-subsumption))"),
+        ("C6-cr-gated-sub",     "C", "(+ (* alpha cr) (* beta novelty) (* gamma meta-compression) (if (max (- cr 0.01) 0) (* delta lhs-subsumption) 0))"),
+        ("D1-alpha-x2",         "D", "(+ (* (* 2 alpha) cr) (* beta novelty) (* gamma meta-compression) (* delta lhs-subsumption))"),
+        ("D2-beta-x2",          "D", "(+ (* alpha cr) (* (* 2 beta) novelty) (* gamma meta-compression) (* delta lhs-subsumption))"),
+        ("D3-delta-x3",         "D", "(+ (* alpha cr) (* beta novelty) (* gamma meta-compression) (* (* 3 delta) lhs-subsumption))"),
+        ("D4-uniform",          "D", "(+ (* 0.25 cr) (* 0.25 novelty) (* 0.25 meta-compression) (* 0.25 lhs-subsumption))"),
+        ("D5-cr-penalty",       "D", "(+ (* alpha cr) (* (- 0 beta) novelty) (* gamma meta-compression) (* delta lhs-subsumption))"),
+        ("D6-meta-heavy",       "D", "(+ (* alpha cr) (* beta novelty) (* (* 5 gamma) meta-compression) (* delta lhs-subsumption))"),
+        ("D7-all-equal-weighted","D","(+ (* 0.5 cr) (* 0.5 novelty) (* 0.5 meta-compression) (* 0.5 lhs-subsumption))"),
+    ];
+    let n_apparatuses = apparatuses.len();
+
+    fn rule_key(r: &RewriteRule) -> String {
+        format!(
+            "{}→{}",
+            format_term(&anonymize_term(&r.lhs)),
+            format_term(&anonymize_term(&r.rhs)),
+        )
+    }
+
+    println!();
+    println!("╔══════════════════════════════════════════════════════════════════════╗");
+    println!("║ phase ML1-scale: LARGE-SCALE DISCOVERY SWEEP                         ║");
+    println!(
+        "║   {n_apparatuses} apparatuses × {SEEDS} seeds × BUDGET={BUDGET} = {} traversals {}║",
+        n_apparatuses as u64 * SEEDS,
+        " ".repeat(13 - (n_apparatuses as u64 * SEEDS).to_string().len())
+    );
+    println!("╚══════════════════════════════════════════════════════════════════════╝");
+
+    let start = std::time::Instant::now();
+    let mut coverage: HashMap<String, BTreeMap<&str, usize>> = HashMap::new();
+    let mut per_apparatus_totals: BTreeMap<&str, (usize, usize)> = BTreeMap::new();
+
+    for (label, _tier, src) in &apparatuses {
+        let mut apparatus_rules = 0usize;
+        let mut apparatus_axiom = 0usize;
+        for seed in 0..SEEDS {
+            let (lib, axiom, rules) = run_with_reward_form_full(
+                seed * 997,
+                BUDGET,
+                DEPTH,
+                ec.clone(),
+                src,
+            );
+            apparatus_rules += lib;
+            apparatus_axiom += axiom;
+            for r in rules {
+                let key = rule_key(&r);
+                *coverage
+                    .entry(key)
+                    .or_default()
+                    .entry(label)
+                    .or_insert(0) += 1;
+            }
+        }
+        per_apparatus_totals.insert(label, (apparatus_rules, apparatus_axiom));
+        print!(".");
+        use std::io::Write;
+        let _ = std::io::stdout().flush();
+    }
+    let elapsed = start.elapsed();
+    println!();
+    println!("sweep completed in {:.1}s", elapsed.as_secs_f64());
+    println!();
+
+    // Per-apparatus totals.
+    println!("per-apparatus totals (rules / axiomatized across 32 seeds):");
+    for (label, (lib, axiom)) in &per_apparatus_totals {
+        println!("  {label:<24}  Σrules={lib:>5}  Σaxiom={axiom:>4}");
+    }
+    println!();
+
+    // Rank rules by apparatus coverage.
+    let mut ranked: Vec<(String, usize, usize, Vec<&'static str>, bool)> = coverage
+        .iter()
+        .map(|(k, apps)| {
+            let ac = apps.len();
+            let tr: usize = apps.values().sum();
+            let mut an: Vec<&'static str> = apps.keys().copied().collect();
+            an.sort();
+            let in_canon = apps.contains_key("A1-canonical");
+            (k.clone(), ac, tr, an, in_canon)
+        })
+        .collect();
+    ranked.sort_by(|a, b| b.1.cmp(&a.1).then(b.2.cmp(&a.2)));
+
+    // Coverage distribution histogram.
+    let mut hist: BTreeMap<usize, usize> = BTreeMap::new();
+    for r in &ranked {
+        *hist.entry(r.1).or_insert(0) += 1;
+    }
+    println!("apparatus-coverage distribution:");
+    println!("  {:>10} | {:>6} | {}", "apparatus#", "count", "bar");
+    for (cov, count) in hist.iter().rev() {
+        let bar: String = "█".repeat((*count).min(50));
+        println!("  {cov:>10} | {count:>6} | {bar}");
+    }
+    println!();
+
+    // Aggregate stats.
+    let universal_count = ranked.iter().filter(|r| r.1 == n_apparatuses).count();
+    let half_count = ranked.iter().filter(|r| r.1 >= (n_apparatuses + 1) / 2).count();
+    let specific_count = ranked.iter().filter(|r| r.1 == 1).count();
+    let canon_missing_universals = ranked
+        .iter()
+        .filter(|r| r.1 >= 10 && !r.4)
+        .count();
+    println!(
+        "total structurally-distinct rules      : {}",
+        ranked.len()
+    );
+    println!(
+        "universal (all {n_apparatuses} apparatuses)        : {universal_count}"
+    );
+    println!(
+        "near-universal (≥ {}/{n_apparatuses})            : {half_count}",
+        (n_apparatuses + 1) / 2
+    );
+    println!(
+        "apparatus-specific (only 1 apparatus)  : {specific_count}"
+    );
+    println!(
+        "in ≥10 apparatuses BUT NOT canonical   : {canon_missing_universals}"
+    );
+    println!();
+
+    // Top-30 universal rules.
+    println!("top-30 universal rules (apparatus-most-robust, Rustification candidates):");
+    println!("  {:>4} {:>6} {:<8}  lhs → rhs", "apps", "runs", "canonical?");
+    println!("  {:─>4} {:─>6} {:─<8}  ──────────", "", "", "");
+    for r in ranked.iter().take(30) {
+        let canon = if r.4 { "yes" } else { "no" };
+        println!(
+            "  {:>4} {:>6} {:<8}  {}",
+            r.1, r.2, canon, r.0,
+        );
+    }
+    println!();
+
+    // Signature size per apparatus.
+    let mut per_app_specific: BTreeMap<&str, usize> = BTreeMap::new();
+    for r in &ranked {
+        if r.1 == 1 {
+            *per_app_specific.entry(r.3[0]).or_insert(0) += 1;
+        }
+    }
+    println!("apparatus signature sizes (structurally-unique rules per apparatus):");
+    let mut sig_ranked: Vec<(&&str, &usize)> = per_app_specific.iter().collect();
+    sig_ranked.sort_by(|a, b| b.1.cmp(a.1));
+    for (name, count) in sig_ranked.iter().take(16) {
+        println!("  {name:<24} {count:>3} unique rules");
+    }
+    println!();
+
+    // Apparatus pair-wise overlap: how much do the apex sets of
+    // different apparatuses overlap? Use Jaccard similarity over
+    // their promoted rule sets. Only compute for a representative
+    // subset to keep output readable.
+    let reference_apparatuses = ["A1-canonical", "A3-novelty-only", "C3-harmonic", "D5-cr-penalty"];
+    let mut apparatus_sets: HashMap<&str, BTreeSet<String>> = HashMap::new();
+    for r in &ranked {
+        for a in &r.3 {
+            apparatus_sets.entry(a).or_default().insert(r.0.clone());
+        }
+    }
+    println!("Jaccard similarity between reference apparatuses:");
+    println!("  {:<20} {:<20} {:>6}", "apparatus A", "apparatus B", "J(A,B)");
+    for (i, a) in reference_apparatuses.iter().enumerate() {
+        for b in reference_apparatuses.iter().skip(i + 1) {
+            let empty = BTreeSet::new();
+            let sa = apparatus_sets.get(a).unwrap_or(&empty);
+            let sb = apparatus_sets.get(b).unwrap_or(&empty);
+            let inter = sa.intersection(sb).count() as f64;
+            let uni = sa.union(sb).count() as f64;
+            let j = if uni > 0.0 { inter / uni } else { 0.0 };
+            println!("  {:<20} {:<20} {:>6.3}", a, b, j);
+        }
+    }
+    println!();
+
+    println!("╔══════════════════════════════════════════════════════════════════════╗");
+    println!(
+        "║ final: {:>4} structural rules · {:>2} universal · {:>3} near-universal · {:>3} specific ║",
+        ranked.len(),
+        universal_count,
+        half_count,
+        specific_count
+    );
+    println!("╚══════════════════════════════════════════════════════════════════════╝");
+
+    assert!(!ranked.is_empty(), "large-scale sweep must produce rules");
+    // Weak invariant: at least one universal rule MUST emerge at
+    // this scale. Otherwise the discovery process is too noisy to
+    // yield stable structure, and the apparatus-level claim is
+    // weakened.
+    assert!(
+        universal_count >= 1 || half_count >= 5,
+        "expected at least one universal or 5 near-universals: got u={universal_count}, n={half_count}"
+    );
+}

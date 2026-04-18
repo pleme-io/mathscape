@@ -1946,6 +1946,7 @@ dependencies = [
  "axiom-forge",
  "mathscape-compress",
  "mathscape-core",
+ "mathscape-proof",
  "mathscape-reward",
  "rayon",
 ]

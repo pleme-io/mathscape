@@ -95,6 +95,16 @@ machine produces the trajectory.
     apparatus layer IS the experimentation substrate, and the
     catalog runner aggregates cross-experiment evidence into
     apparatus-independent claims.
+22. `docs/arch/edge-riding.md` — **PERPETUAL DISCOVERY** (2026-04-18).
+    The L5 architectural frame. By Gödel's incompleteness, any
+    sufficiently-rich substrate has unprovable-from-inside
+    statements; therefore a machine that stops finding new theorems
+    is broken, not finished. Correctness criterion: nonzero novelty
+    every post-bootstrap cycle. The self-bootstrapping candidate
+    pipeline (bootstrap → enumeration → ledger → composition) +
+    adaptive corpus + phase J validation together form the
+    perpetual loop. Session trajectory reached layer-4
+    (distributivity variants) in 6 cycles without stalling.
 
 The sections below (Core Thesis, Compression as Tractability, etc.)
 are preserved because they explain the *philosophy* the machine

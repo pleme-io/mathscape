@@ -5,9 +5,14 @@
 //! SemanticallyValidated equations the machine can compose and
 //! Rustify with confidence.
 
+pub mod discovery;
 pub mod lean_export;
 pub mod semantic;
 
+pub use discovery::{
+    is_reducing, term_size, theorem_key, CycleRecord, DiscoverySession, Ledger,
+    Substrate,
+};
 pub use lean_export::{export_rule_as_lean, LeanExportOptions};
 pub use semantic::{
     discover_semantic_projections, discover_semantic_projections_with_ledger,

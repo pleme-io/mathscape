@@ -41,6 +41,7 @@ use common::experiment::{
 use mathscape_compress::extract::ExtractConfig;
 use mathscape_core::eval::{anonymize_term, RewriteRule};
 use mathscape_core::term::Term;
+use mathscape_proof::discovery::{theorem_key, DiscoverySession};
 use mathscape_proof::semantic::{
     discover_semantic_projections_with_ledger, SemanticCandidate, SemanticVerdict,
     ValidationConfig,
@@ -356,25 +357,6 @@ fn run_sub_campaign(
     (provenance, yield_by_app)
 }
 
-/// Key a theorem by its literal LHS + RHS form. Anonymization is
-/// NOT applied because it renumbers LHS and RHS independently and
-/// would collapse commutativity (`add(a,b) → add(b,a)`) to
-/// identity (`add(a,b) → add(a,b)`). The variable IDs come from
-/// the generator and are already stable for identical rules.
-fn theorem_key(rule: &RewriteRule) -> String {
-    format!("{}={}", format_term(&rule.lhs), format_term(&rule.rhs))
-}
-
-use common::experiment::term_size;
-
-/// A rule is "substrate-eligible" iff it strictly REDUCES: the
-/// RHS tree is smaller than the LHS tree. Equivalences (commutativity,
-/// associativity — valid theorems but RHS size == LHS size) are
-/// excluded from substrate to avoid oscillating rewrites in
-/// `rewrite_fixed_point`. Equivalences belong in phase K's e-graph.
-fn is_reducing(rule: &RewriteRule) -> bool {
-    term_size(&rule.rhs) < term_size(&rule.lhs)
-}
 
 /// Extract validated theorems from the campaign results that are
 /// NOT already in the ledger. Returns up to `top_k` new theorems
@@ -444,15 +426,12 @@ fn edge_riding_loop() {
         })
         .collect();
 
-    // Substrate starts empty (just the primitive evaluator).
-    // As theorems validate, they get appended.
-    let mut substrate: Vec<RewriteRule> = Vec::new();
-    // All validated theorems as full rules — feeds the ledger-
-    // driven candidate generator. Includes equivalence theorems
-    // (like commutativity) that don't enter substrate.
-    let mut ledger_rules: Vec<RewriteRule> = Vec::new();
-    let mut theorem_ledger: HashSet<String> = HashSet::new();
-    let mut trajectory: Vec<(usize, usize, usize, usize)> = Vec::new(); // (cycle, structural, new_theorems, substrate_size)
+    // All discovery state lives in the DiscoverySession: substrate
+    // (reducing theorems), ledger (every theorem), trajectory
+    // (cycle-by-cycle record). Correctness invariant — "any
+    // post-bootstrap zero-novelty cycle is a bug" — is enforced by
+    // session.has_stalled() / session.stalled_cycles().
+    let mut session = DiscoverySession::new();
 
     let start = std::time::Instant::now();
 
@@ -464,15 +443,15 @@ fn edge_riding_loop() {
             cycle + 1,
             CYCLES,
             pool.len(),
-            substrate.len()
+            session.substrate.len()
         );
 
-        // 1. Run sub-campaign.
+        // 1. Run sub-campaign over the current substrate + ledger.
         let (provenance, yield_by_app) = run_sub_campaign(
             PROBES_PER_CYCLE,
             &pool,
-            &substrate,
-            &ledger_rules,
+            session.substrate.rules(),
+            session.ledger.rules(),
         );
 
         println!(
@@ -482,21 +461,18 @@ fn edge_riding_loop() {
             yield_by_app.len()
         );
 
-        // 2. Extract new theorems (not already in ledger).
+        // 2. Extract new theorems — test each exemplar's
+        //    candidates against the validator, skip any already
+        //    in the ledger.
         let mut ledger_keys: HashSet<String> = HashSet::new();
-        for r in &substrate {
-            ledger_keys.insert(format!(
-                "{}→{}",
-                format_term(&anonymize_term(&r.lhs)),
-                format_term(&anonymize_term(&r.rhs)),
-            ));
+        for r in session.ledger.rules() {
+            ledger_keys.insert(theorem_key(r));
         }
-        ledger_keys.extend(theorem_ledger.iter().cloned());
 
         let new_theorems = extract_new_theorems(
             &provenance,
             &ledger_keys,
-            &ledger_rules,
+            session.ledger.rules(),
             RUSTIFY_TOP_K,
         );
         println!("  new theorems discovered: {}", new_theorems.len());
@@ -508,22 +484,15 @@ fn edge_riding_loop() {
             );
         }
 
-        // 3. Rustify. Every new theorem enters the LEDGER (so
-        //    we don't re-credit it next cycle). Only REDUCING
-        //    theorems enter the SUBSTRATE — equivalences like
-        //    commutativity belong to phase K's e-graph, not the
-        //    term-rewriting library. A non-reducing rule in
-        //    `rewrite_fixed_point` would oscillate (add(a,b) →
-        //    add(b,a) → add(a,b) → ...) and stall the loop.
+        // 3. Promote each new theorem. Session handles the
+        //    reducing-vs-equivalence split automatically.
         let mut added_to_substrate = 0usize;
         let mut ledger_only = 0usize;
-        for t in &new_theorems {
-            theorem_ledger.insert(theorem_key(t));
-            ledger_rules.push(t.clone());
-            if is_reducing(t) {
-                substrate.push(t.clone());
+        for t in new_theorems.iter().cloned() {
+            let (added_ledger, added_substrate) = session.promote(t);
+            if added_substrate {
                 added_to_substrate += 1;
-            } else {
+            } else if added_ledger {
                 ledger_only += 1;
             }
         }
@@ -555,14 +524,13 @@ fn edge_riding_loop() {
             cycle as u64,
         );
 
-        trajectory.push((
+        let cycle_elapsed = cycle_start.elapsed().as_secs_f64();
+        session.record_cycle(
             cycle,
             provenance.len(),
             new_theorems.len(),
-            substrate.len(),
-        ));
-
-        let cycle_elapsed = cycle_start.elapsed().as_secs_f64();
+            cycle_elapsed,
+        );
         println!("  cycle elapsed: {cycle_elapsed:.1}s");
     }
 
@@ -573,27 +541,36 @@ fn edge_riding_loop() {
     println!("╔══════════════════════════════════════════════════════════════════════╗");
     println!("║ EDGE TRAJECTORY                                                      ║");
     println!("╚══════════════════════════════════════════════════════════════════════╝");
-    println!("  {:>6}  {:>12}  {:>12}  {:>14}",
-        "cycle", "structural", "new_theorems", "substrate_size");
-    for (c, s, nt, sz) in &trajectory {
-        println!("  {:>6}  {:>12}  {:>12}  {:>14}", c, s, nt, sz);
+    println!(
+        "  {:>6}  {:>12}  {:>12}  {:>14}  {:>10}",
+        "cycle", "structural", "new_theorems", "substrate_size", "elapsed"
+    );
+    for rec in &session.trajectory {
+        println!(
+            "  {:>6}  {:>12}  {:>12}  {:>14}  {:>9.1}s",
+            rec.cycle,
+            rec.structural_rules,
+            rec.new_theorems,
+            rec.substrate_size,
+            rec.elapsed_secs
+        );
     }
     println!();
 
-    let total_new_theorems: usize = trajectory.iter().map(|t| t.2).sum();
-    let mean_per_cycle = total_new_theorems as f64 / CYCLES as f64;
-    let final_substrate = substrate.len();
+    let total_new_theorems = session.total_new_theorems();
+    let mean_per_cycle = session.mean_theorems_per_cycle();
+    let final_substrate = session.substrate.len();
 
     println!(
         "ran {CYCLES} cycles in {total_elapsed:.1}s, discovered {total_new_theorems} new theorems"
     );
     println!("mean theorems per cycle: {mean_per_cycle:.2}");
-    println!("final substrate size: {final_substrate}");
+    println!("final substrate size: {final_substrate}  ledger size: {}", session.ledger.len());
     println!();
 
     // Print the evolved substrate — what the machine now knows.
     println!("── evolved substrate (machine's validated axioms) ───");
-    for (i, r) in substrate.iter().enumerate() {
+    for (i, r) in session.substrate.rules().iter().enumerate() {
         println!(
             "  [{i:>2}] {} → {}",
             format_term(&anonymize_term(&r.lhs)),
@@ -603,15 +580,11 @@ fn edge_riding_loop() {
     println!();
 
     // ── CORRECTNESS CRITERION ───────────────────────────────
-    // The machine is broken if any cycle produced zero new
-    // theorems AFTER substrate expansion. That would mean the
-    // expansion failed to open new Gödel-frontier territory —
-    // a structural failure.
-    let late_cycles_zero_novelty: Vec<_> = trajectory
-        .iter()
-        .skip(2) // skip bootstrap cycles where substrate is empty
-        .filter(|(_, _, nt, _)| *nt == 0)
-        .collect();
+    // By Gödel's incompleteness, any rich enough substrate has
+    // new unprovables outside it. So any zero-novelty post-
+    // bootstrap cycle is a bug — the machine stopped finding
+    // theorems that must exist. The session enforces this check.
+    let late_cycles_zero_novelty = session.stalled_cycles();
 
     println!("── correctness check ───────");
     println!(
@@ -622,7 +595,7 @@ fn edge_riding_loop() {
         println!("  ✓ EDGE-RIDING CONFIRMED — nonzero novelty across all post-bootstrap cycles");
     } else {
         println!("  ✗ MACHINE STALLED — novelty collapsed at cycles:");
-        for (c, _, _, _) in late_cycles_zero_novelty {
+        for c in late_cycles_zero_novelty {
             println!("      cycle {c}");
         }
     }
