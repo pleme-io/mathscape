@@ -4068,6 +4068,85 @@ fn phase_l_self_feeding_traversal() {
 }
 
 /// Run a traversal with a Lisp-form reward installed in the prover.
+/// Returns the full axiomatized rules along with summary counts, so
+/// callers can compare STRUCTURALLY (via anonymized terms) rather
+/// than by mint-dependent S_NNN ids that vary across runs.
+fn run_with_reward_form_full(
+    seed_offset: u64,
+    procedural_budget: usize,
+    max_depth: usize,
+    extract_config: mathscape_compress::extract::ExtractConfig,
+    form_src: &str,
+) -> (usize, usize, Vec<mathscape_core::eval::RewriteRule>) {
+    let mut zoo: Vec<(String, Vec<Term>)> = Vec::new();
+    for i in 1..=procedural_budget as u64 {
+        let seed = seed_offset.wrapping_add(i);
+        let depth = 2 + (i as usize % (max_depth - 1).max(1));
+        let count = 16 + (i as usize % 8);
+        zoo.push((
+            format!("proc-s{seed}-d{depth}"),
+            procedural(seed, depth, count),
+        ));
+    }
+
+    let base = CompressionGenerator::new(extract_config.clone(), 1);
+    let meta = MetaPatternGenerator::new(
+        ExtractConfig {
+            min_shared_size: 1,
+            min_matches: 2,
+            max_new_rules: 12,
+        },
+        10_000,
+    );
+
+    let prover = {
+        let base_prover = mathscape_reward::StatisticalProver::new(
+            mathscape_reward::reward::RewardConfig::default(),
+            0.0,
+        );
+        if form_src.is_empty() {
+            base_prover
+        } else {
+            let form = mathscape_reward::parse_reward(form_src)
+                .expect("test reward form must parse");
+            base_prover.with_reward_form(form)
+        }
+    };
+
+    let mut epoch = Epoch::new(
+        CompositeGenerator::new(base, meta),
+        prover,
+        RuleEmitter,
+        InMemoryRegistry::new(),
+    );
+    for (_, corpus) in &zoo {
+        for _ in 0..3 {
+            let _ = epoch.step_with_action(
+                corpus,
+                mathscape_core::control::EpochAction::Discover,
+            );
+        }
+        let _ = epoch.step_with_action(
+            corpus,
+            mathscape_core::control::EpochAction::Reinforce,
+        );
+    }
+    let mut full_rules = Vec::new();
+    let mut axiomatized_count = 0usize;
+    for artifact in epoch.registry.all() {
+        let s = epoch
+            .registry
+            .status_of(artifact.content_hash)
+            .unwrap_or_else(|| artifact.certificate.status.clone());
+        if matches!(s, ProofStatus::Axiomatized) {
+            axiomatized_count += 1;
+            full_rules.push(artifact.rule.clone());
+        }
+    }
+    (epoch.registry.all().len(), axiomatized_count, full_rules)
+}
+
+/// Run a traversal with a Lisp-form reward installed in the prover.
 /// Returns (total_rules, axiomatized_count, sorted_apex_names).
 fn run_with_reward_form(
     seed_offset: u64,
@@ -4540,4 +4619,229 @@ fn phase_ml_apparatus_grand_sweep() {
         results[0].avg_rules >= 1.0,
         "canonical variant must find at least 1 rule"
     );
+}
+
+#[test]
+#[ignore = "phase ML1-universal: which rules emerge across MANY apparatuses? Rust-promotion candidates. ~3min, --ignored"]
+fn phase_ml_apparatus_universal_rules() {
+    // Phase ML1-universal. The grand sweep proved 715 rules are
+    // discoverable across apparatus mutations. This test asks a
+    // different question:
+    //
+    //   Which rules are APPARATUS-INDEPENDENT?
+    //
+    // A rule that emerges as Axiomatized under N different
+    // apparatuses is structurally robust — it's not an accident
+    // of one reward shape. Rules that appear under ALL
+    // apparatuses are universal: they're the pressure-points of
+    // the discovery space, the cores that every reward function
+    // eventually surfaces.
+    //
+    // These are the first candidates for Rustification. Each
+    // universal rule becomes a new Rust primitive — a ground
+    // type the machine can assume, freeing the Lisp layer to
+    // explore higher-level patterns. This is the promotion
+    // ladder in action: Lisp discovers, stability across
+    // apparatuses certifies, Rust absorbs.
+    //
+    // Method:
+    //   1. Run 14 diverse apparatuses × 8 seeds on same seed range.
+    //   2. Anonymize each axiomatized rule (canonical var + symbol
+    //      ids) so we compare by STRUCTURE, not by mint-dependent
+    //      S_NNN.
+    //   3. For each structural identity, count distinct
+    //      apparatuses that promote it.
+    //   4. Report top 20 by apparatus coverage, the "universal
+    //      apex" (in ≥ threshold), and the "apparatus-specific"
+    //      (in only 1).
+    use mathscape_compress::extract::ExtractConfig as EC;
+    use mathscape_core::eval::{anonymize_term, RewriteRule};
+    use std::collections::{BTreeMap, HashMap};
+
+    const SEEDS: u64 = 8;
+    const BUDGET: usize = 16;
+    const DEPTH: usize = 4;
+    let ec = EC::default();
+
+    // Choose 14 apparatuses from the grand sweep spanning tiers.
+    // Mix of stable + chaotic so universals must survive both.
+    let apparatuses: Vec<(&'static str, &'static str)> = vec![
+        ("canonical", "(+ (* alpha cr) (* beta novelty) (* gamma meta-compression) (* delta lhs-subsumption))"),
+        ("cr-only", "(* alpha cr)"),
+        ("novelty-only", "(* beta novelty)"),
+        ("meta-only", "(* gamma meta-compression)"),
+        ("sub-only", "(* delta lhs-subsumption)"),
+        ("cr+nov", "(+ (* alpha cr) (* beta novelty))"),
+        ("nov+meta", "(+ (* beta novelty) (* gamma meta-compression))"),
+        ("nov+sub", "(+ (* beta novelty) (* delta lhs-subsumption))"),
+        ("max-pair", "(max (+ (* alpha cr) (* beta novelty)) (+ (* gamma meta-compression) (* delta lhs-subsumption)))"),
+        ("cr*nov", "(+ (* cr novelty) (* gamma meta-compression) (* delta lhs-subsumption))"),
+        ("harmonic", "(+ (/ (* cr novelty) (max (+ cr novelty) 0.001)) (* gamma meta-compression) (* delta lhs-subsumption))"),
+        ("alpha-x2", "(+ (* (* 2 alpha) cr) (* beta novelty) (* gamma meta-compression) (* delta lhs-subsumption))"),
+        ("uniform", "(+ (* 0.25 cr) (* 0.25 novelty) (* 0.25 meta-compression) (* 0.25 lhs-subsumption))"),
+        ("meta-heavy", "(+ (* alpha cr) (* beta novelty) (* (* 5 gamma) meta-compression) (* delta lhs-subsumption))"),
+    ];
+    let n_apparatuses = apparatuses.len();
+
+    // Structural identity for a rule: the anonymized (lhs, rhs)
+    // pair, keyed by its s-expression rendering. Two rules with the
+    // same anonymized content produce the same string — so the
+    // string IS the structural identity. Avoids needing Term: Ord.
+    fn rule_key(r: &RewriteRule) -> String {
+        format!(
+            "{}→{}",
+            format_term(&anonymize_term(&r.lhs)),
+            format_term(&anonymize_term(&r.rhs)),
+        )
+    }
+
+    let mut coverage: HashMap<String, BTreeMap<&str, usize>> = HashMap::new();
+    // Also keep an example rule for each key so we can print content.
+    let mut example: HashMap<String, RewriteRule> = HashMap::new();
+
+    println!();
+    println!("phase ML1-universal: apparatus-universal rule discovery");
+    println!(
+        "  {n_apparatuses} apparatuses × {SEEDS} seeds × BUDGET={BUDGET} = \
+         {} traversals",
+        n_apparatuses as u64 * SEEDS
+    );
+    println!("════════════════════════════════════════════════════════════════════");
+
+    let start = std::time::Instant::now();
+    for (label, src) in &apparatuses {
+        for seed in 0..SEEDS {
+            let (_lib, _axiom, rules) = run_with_reward_form_full(
+                seed * 997,
+                BUDGET,
+                DEPTH,
+                ec.clone(),
+                src,
+            );
+            for r in rules {
+                let key = rule_key(&r);
+                *coverage
+                    .entry(key.clone())
+                    .or_default()
+                    .entry(label)
+                    .or_insert(0) += 1;
+                example.entry(key).or_insert(r);
+            }
+        }
+    }
+    let elapsed = start.elapsed();
+    println!("sweep completed in {:.1}s", elapsed.as_secs_f64());
+    println!();
+
+    // Rank by apparatus coverage (number of distinct apparatuses
+    // that promote the rule). Tie-break by total run count.
+    #[derive(Debug)]
+    struct UniversalRule {
+        key: String,
+        apparatus_count: usize,
+        total_runs: usize,
+        apparatuses: Vec<&'static str>,
+        in_canonical: bool,
+    }
+    let mut ranked: Vec<UniversalRule> = coverage
+        .iter()
+        .map(|(key, apps)| {
+            let apparatus_count = apps.len();
+            let total_runs: usize = apps.values().sum();
+            let mut app_names: Vec<&'static str> = apps.keys().copied().collect();
+            app_names.sort();
+            let in_canonical = apps.contains_key("canonical");
+            UniversalRule {
+                key: key.clone(),
+                apparatus_count,
+                total_runs,
+                apparatuses: app_names,
+                in_canonical,
+            }
+        })
+        .collect();
+    ranked.sort_by(|a, b| {
+        b.apparatus_count
+            .cmp(&a.apparatus_count)
+            .then(b.total_runs.cmp(&a.total_runs))
+    });
+
+    println!("total structurally-distinct axiomatized rules: {}", ranked.len());
+    println!(
+        "rules appearing in ALL {n_apparatuses} apparatuses: {}",
+        ranked.iter().filter(|r| r.apparatus_count == n_apparatuses).count()
+    );
+    println!(
+        "rules appearing in ≥ half ({}+) apparatuses: {}",
+        (n_apparatuses + 1) / 2,
+        ranked.iter().filter(|r| r.apparatus_count >= (n_apparatuses + 1) / 2).count()
+    );
+    println!(
+        "apparatus-specific (in only 1 apparatus): {}",
+        ranked.iter().filter(|r| r.apparatus_count == 1).count()
+    );
+    println!();
+
+    println!("top-20 UNIVERSAL rules (most apparatus-robust, candidates for Rustification):");
+    println!("  {:>4} {:>6}  {:<12}  lhs → rhs", "apps", "runs", "canonical?");
+    println!("  {:─>4} {:─>6}  {:─<12}  {}", "", "", "", "──────────");
+    for r in ranked.iter().take(20) {
+        let canon = if r.in_canonical { "yes" } else { "no" };
+        println!(
+            "  {:>4} {:>6}  {:<12}  {}",
+            r.apparatus_count, r.total_runs, canon, r.key,
+        );
+    }
+    println!();
+
+    // Apparatus-specific discoveries: rules only ONE apparatus finds.
+    let specific: Vec<&UniversalRule> =
+        ranked.iter().filter(|r| r.apparatus_count == 1).collect();
+    println!(
+        "apparatus-specific discoveries: {} rules. Top 10 by run count:",
+        specific.len()
+    );
+    let mut specific_sorted = specific.clone();
+    specific_sorted.sort_by(|a, b| b.total_runs.cmp(&a.total_runs));
+    println!("  {:>4} {:>6}  {:<12}  lhs → rhs", "apps", "runs", "apparatus");
+    println!("  {:─>4} {:─>6}  {:─<12}  ──────────", "", "", "");
+    for r in specific_sorted.iter().take(10) {
+        println!(
+            "  {:>4} {:>6}  {:<12}  {}",
+            r.apparatus_count, r.total_runs, r.apparatuses[0], r.key,
+        );
+    }
+    println!();
+
+    // Each apparatus's "signature" — rules only it promotes.
+    let mut per_apparatus_signature: BTreeMap<&str, usize> = BTreeMap::new();
+    for r in &ranked {
+        if r.apparatus_count == 1 {
+            *per_apparatus_signature.entry(r.apparatuses[0]).or_insert(0) += 1;
+        }
+    }
+    println!("apparatus signature sizes (unique structural rules):");
+    let mut sig_ranked: Vec<(&&str, &usize)> =
+        per_apparatus_signature.iter().collect();
+    sig_ranked.sort_by(|a, b| b.1.cmp(a.1));
+    for (name, count) in sig_ranked.iter().take(12) {
+        println!("  {name:<12} {count:>3} unique rules");
+    }
+    println!();
+
+    // Final invariant check.
+    let universal_count = ranked
+        .iter()
+        .filter(|r| r.apparatus_count == n_apparatuses)
+        .count();
+    println!("════════════════════════════════════════════════════════════════════");
+    println!(
+        "summary: {} structurally-distinct rules total; {} apparatus-universal \
+         (promotion candidates); {} apparatus-specific (need wider apparatus evidence)",
+        ranked.len(),
+        universal_count,
+        specific.len()
+    );
+
+    assert!(!ranked.is_empty(), "sweep must produce at least some rules");
 }
