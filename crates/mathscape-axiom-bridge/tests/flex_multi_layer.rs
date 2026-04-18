@@ -18,6 +18,7 @@ use mathscape_core::{
     epoch::{Epoch, InMemoryRegistry, Registry, RuleEmitter},
     hash::TermRef,
     lifecycle::ProofStatus,
+    meta::{MetaOptimizer, PolicyTweak},
     orchestrator::{MultiLayerRunner, PromotionHook, PromotionOutcome},
     promotion::PromotionSignal,
     reduction::{reduction_pressure, ReductionPolicy, ReductionVerdict},
@@ -334,6 +335,122 @@ fn flex_compositional_corpus() {
         25,
         5,
     );
+}
+
+#[test]
+fn flex_meta_kick_at_equilibrium() {
+    // Observational: after the normal runner reaches equilibrium
+    // on the compositional corpus (4 library entries, 2 Primitives),
+    // run N meta-rounds directly. Each round simulates 9 candidate
+    // policy tweaks over a 5-epoch lookahead, picks the winner,
+    // applies it to the allocator's policy — OR kicks if nothing
+    // beats baseline. Then we run the *real* epoch forward a few
+    // times under the new policy and record whether anything
+    // changed: library size, primitive set, registry root.
+    //
+    // What we're looking for:
+    //   (a) meta round finds a winning tweak that unlocks further
+    //       discovery → genuine policy-level exploration works
+    //   (b) every round is kick → the corpus is exhausted; no
+    //       policy perturbation helps. The machine is truly at
+    //       rest because there is no more structure to find, not
+    //       because the policy is mis-tuned.
+    //   (c) kicks change the policy but the real forward runs
+    //       produce no new candidates → kicker is acting but
+    //       discovery doesn't respond → next work: kicker ranges
+    //       are too small to cross the ΔCR threshold.
+    //
+    // Either outcome is a finding.
+    use std::time::Instant;
+
+    let corpus = compositional_corpus();
+    let mut runner = MultiLayerRunner {
+        epoch: build_epoch_with(5),
+        allocator: Allocator::new(RealizationPolicy::default(), RewardEstimator::new(0.3)),
+        per_layer_max_epochs: 25,
+        max_layers: 6,
+        policy: ReductionPolicy::layer_0_default(),
+    };
+    let fired = Rc::new(RefCell::new(Vec::new()));
+    let hook = build_observational_hook(fired);
+    let _report = runner.run(&corpus, hook);
+
+    let baseline_lib_size = runner.epoch.registry.all().len();
+    let baseline_root = runner.epoch.registry.root();
+    let baseline_policy = runner.allocator.policy.clone();
+
+    println!("\n╔══════════════════════════════════════════════════════╗");
+    println!("║ META-KICK AT EQUILIBRIUM                             ║");
+    println!("╚══════════════════════════════════════════════════════╝");
+    println!("\n▶ State at equilibrium (pre-meta)");
+    println!("  library size        : {baseline_lib_size}");
+    println!("  registry root       : {baseline_root}");
+    println!("  epsilon_compression : {}", baseline_policy.epsilon_compression);
+    println!("  exploration_rho     : {}", baseline_policy.exploration_rho);
+    println!("  epsilon_plateau     : {}", baseline_policy.epsilon_plateau);
+    println!("  k_condensation      : {}", baseline_policy.k_condensation);
+
+    let mut meta = MetaOptimizer::new(PolicyTweak::default_candidates(), 5);
+    let rounds_to_run = 20usize;
+    println!(
+        "\n▶ Meta trajectory ({rounds_to_run} rounds, 5-epoch lookahead over 9 tweaks each)"
+    );
+    println!(
+        "\n{:>5} {:>20} {:>14} {:>14} {:>6} {:>8} {:>8}",
+        "round", "winner", "winner_rew", "baseline_rew", "kicked", "lib_sz", "root"
+    );
+    println!("{}", "─".repeat(90));
+
+    let t0 = Instant::now();
+    for _ in 0..rounds_to_run {
+        let round = meta
+            .round(&runner.epoch, &mut runner.allocator, &corpus)
+            .clone();
+        // After meta, fire 5 real epochs under the (possibly kicked) policy.
+        for _ in 0..5 {
+            let _ = runner.epoch.step_auto(&corpus, &mut runner.allocator);
+        }
+        let lib_sz = runner.epoch.registry.all().len();
+        let root = runner.epoch.registry.root();
+        println!(
+            "{:>5} {:>20} {:>14.3} {:>14.3} {:>6} {:>8} {:>8}",
+            round.round_id,
+            round.winner_name,
+            round.winner_reward,
+            round.baseline_reward,
+            round.kicked,
+            lib_sz,
+            format!("{root}").chars().take(8).collect::<String>(),
+        );
+    }
+    let elapsed = t0.elapsed();
+
+    let final_lib_size = runner.epoch.registry.all().len();
+    let final_root = runner.epoch.registry.root();
+    let kick_count = meta.history.iter().filter(|r| r.kicked).count();
+    let non_baseline_wins =
+        meta.history.iter().filter(|r| r.winner_name != "baseline").count();
+
+    println!("\n▶ Aggregate");
+    println!("  elapsed             : {:?}", elapsed);
+    println!("  rounds total        : {}", meta.history.len());
+    println!("  kicks fired         : {kick_count}");
+    println!("  non-baseline wins   : {non_baseline_wins}");
+    println!("  library size Δ      : {baseline_lib_size} → {final_lib_size}");
+    println!("  root Δ              : {baseline_root} → {final_root}");
+    let grew = final_lib_size > baseline_lib_size;
+    let root_changed = final_root != baseline_root;
+
+    println!();
+    if grew {
+        println!("  ✦ meta rounds UNLOCKED further discovery — policy-level exploration works");
+    } else if root_changed {
+        println!("  ○ policy changed, registry shifted (reinforcement-only, no new candidates)");
+    } else {
+        println!(
+            "  · policy explored across {kick_count} kicks but corpus is exhausted — true equilibrium"
+        );
+    }
 }
 
 #[test]
