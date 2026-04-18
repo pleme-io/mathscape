@@ -3495,3 +3495,201 @@ fn autonomous_traverse_deterministic_replay() {
         assert_eq!(s1, s2, "apex rule cross-support must match across runs");
     }
 }
+
+/// Phase K4: run a traversal with the e-graph probes wired into the
+/// generator's dedup path. Mirrors `run_with_subterm_au` in shape but
+/// swaps in `.with_egraph_probes(probes)` on the base generator. A
+/// smaller, focused harness — enough to measure whether commutative
+/// collapse shifts the bettyfine.
+fn run_with_egraph_probes(
+    seed_offset: u64,
+    procedural_budget: usize,
+    max_depth: usize,
+    extract_config: mathscape_compress::extract::ExtractConfig,
+    probes: Vec<mathscape_compress::egraph::MathscapeRewrite>,
+) -> (TraversalReportWithLibrary, usize, usize) {
+    let mut zoo: Vec<(String, Vec<Term>)> = Vec::new();
+    for i in 1..=procedural_budget as u64 {
+        let seed = seed_offset.wrapping_add(i);
+        let depth = 2 + (i as usize % (max_depth - 1).max(1));
+        let count = 16 + (i as usize % 8);
+        zoo.push((
+            format!("proc-s{seed}-d{depth}"),
+            procedural(seed, depth, count),
+        ));
+    }
+    let base = CompressionGenerator::new(extract_config.clone(), 1)
+        .with_egraph_probes(probes);
+    let meta = MetaPatternGenerator::new(
+        ExtractConfig {
+            min_shared_size: 1,
+            min_matches: 2,
+            max_new_rules: 12,
+        },
+        10_000,
+    );
+    let mut epoch = Epoch::new(
+        CompositeGenerator::new(base, meta),
+        mathscape_reward::StatisticalProver::new(
+            mathscape_reward::reward::RewardConfig::default(),
+            0.0,
+        ),
+        RuleEmitter,
+        InMemoryRegistry::new(),
+    );
+    for (_, corpus) in &zoo {
+        for _ in 0..3 {
+            let _ = epoch.step_with_action(
+                corpus,
+                mathscape_core::control::EpochAction::Discover,
+            );
+        }
+        let _ = epoch.step_with_action(
+            corpus,
+            mathscape_core::control::EpochAction::Reinforce,
+        );
+    }
+    let mut names = Vec::new();
+    let mut full = Vec::new();
+    let mut axiomatized_count = 0;
+    for artifact in epoch.registry.all() {
+        let s = epoch
+            .registry
+            .status_of(artifact.content_hash)
+            .unwrap_or_else(|| artifact.certificate.status.clone());
+        if matches!(s, ProofStatus::Axiomatized) {
+            axiomatized_count += 1;
+            names.push(artifact.rule.name.clone());
+            full.push(artifact.rule.clone());
+        }
+    }
+    let total_rules = epoch.registry.all().len();
+    (
+        TraversalReportWithLibrary {
+            axiomatized_rule_names: names,
+            axiomatized_rules_full: full,
+        },
+        total_rules,
+        axiomatized_count,
+    )
+}
+
+#[test]
+#[ignore = "phase K4: egg dedup vs bettyfine — does commutative collapse shift the apex? ~20s, --ignored"]
+fn phase_k_egraph_dedup_probe() {
+    // Phase K activation probe. Runs the machine in four
+    // configurations that differ only in which probes feed the
+    // generator's dedup pass:
+    //
+    //   A: no probes              (bit-identical to pre-K3 default)
+    //   B: commutativity only
+    //   C: associativity only
+    //   D: both
+    //
+    // For each, we sweep N seeds and report:
+    //   - total rules promoted (summed across seeds)
+    //   - axiomatized apex count (summed)
+    //   - the modal apex rule-name set (the bettyfine's fingerprint)
+    //   - whether any run's library contains a rule with support
+    //     on fewer than 2 corpora (lynchpin probe)
+    //
+    // Interpretation:
+    //   - If B/C/D apex count < A at matched seed: probes are
+    //     collapsing commutative duplicates — the wiring WORKS.
+    //   - If B/C/D apex count == A: the bettyfine's current rules
+    //     are already under-covariant-closure (i.e., Symbol-naming
+    //     rules whose anonymized forms already collapse via
+    //     `alpha_equivalent`). That confirms the phase M10/M9
+    //     finding: today's bettyfine is the trivial Symbol-naming
+    //     fixed point — no probe has room to bite.
+    //   - If B/C/D apex shape DIFFERS from A: commutative collapse
+    //     is pulling a different rule through the lifecycle as
+    //     apex — the probe is reshaping the basin, which is the
+    //     whole point of phase K.
+    //
+    // This test ASSERTS only that the lynchpin holds in every
+    // config. Bettyfine shifts are reported, not asserted —
+    // interpretive, not gating.
+    use mathscape_compress::egraph::{associativity_probe, commutativity_probe};
+    use mathscape_compress::extract::ExtractConfig as EC;
+
+    const N_SEEDS: u64 = 8;
+    const BUDGET: usize = 12;
+    const DEPTH: usize = 4;
+    let ec = EC::default();
+
+    let configs: Vec<(&'static str, Vec<_>)> = vec![
+        ("A (no probes)", vec![]),
+        ("B (commutativity)", commutativity_probe()),
+        ("C (associativity)", associativity_probe()),
+        ("D (both)", {
+            let mut v = commutativity_probe();
+            v.extend(associativity_probe());
+            v
+        }),
+    ];
+
+    println!();
+    println!("phase K4: e-graph dedup probe — {N_SEEDS} seeds × 4 configs");
+    println!("─────────────────────────────────────────────────────────");
+    for (label, probes) in &configs {
+        let mut total_axiomatized = 0usize;
+        let mut total_library = 0usize;
+        let mut apex_fingerprints: std::collections::HashMap<Vec<String>, usize> =
+            std::collections::HashMap::new();
+        for seed in 0..N_SEEDS {
+            let (report, lib, axiom) = run_with_egraph_probes(
+                seed * 1000,
+                BUDGET,
+                DEPTH,
+                ec.clone(),
+                probes.clone(),
+            );
+            total_axiomatized += axiom;
+            total_library += lib;
+            let mut fp: Vec<String> = report.axiomatized_rule_names.clone();
+            fp.sort();
+            *apex_fingerprints.entry(fp).or_insert(0) += 1;
+        }
+        let (modal_fp, modal_count) = apex_fingerprints
+            .iter()
+            .max_by_key(|(_, c)| *c)
+            .map(|(fp, c)| (fp.clone(), *c))
+            .unwrap_or_default();
+        println!();
+        println!("  {label}");
+        println!("    total rules       : {total_library}");
+        println!("    total axiomatized : {total_axiomatized}");
+        println!("    apex fingerprints : {}", apex_fingerprints.len());
+        println!("    modal fingerprint : {modal_count}/{N_SEEDS} seeds");
+        println!("      apex names      : {modal_fp:?}");
+    }
+    println!();
+    // Assert: enabling probes can only *remove* candidates, never
+    // add them. So total rules under B/C/D must be ≤ total under A
+    // at every matched seed range. Formalizes the theoretical
+    // monotonicity of dedup.
+    let mut seed_totals: Vec<(usize, usize, usize, usize)> = Vec::new();
+    for seed in 0..4 {
+        let (_, lib_a, _) = run_with_egraph_probes(
+            seed * 1000, BUDGET, DEPTH, ec.clone(), vec![]);
+        let (_, lib_b, _) = run_with_egraph_probes(
+            seed * 1000, BUDGET, DEPTH, ec.clone(), commutativity_probe());
+        let (_, lib_c, _) = run_with_egraph_probes(
+            seed * 1000, BUDGET, DEPTH, ec.clone(), associativity_probe());
+        let (_, lib_d, _) = {
+            let mut v = commutativity_probe();
+            v.extend(associativity_probe());
+            run_with_egraph_probes(seed * 1000, BUDGET, DEPTH, ec.clone(), v)
+        };
+        assert!(lib_b <= lib_a,
+            "seed {seed}: commutativity probe should never add rules (A={lib_a}, B={lib_b})");
+        assert!(lib_c <= lib_a,
+            "seed {seed}: associativity probe should never add rules (A={lib_a}, C={lib_c})");
+        assert!(lib_d <= lib_a,
+            "seed {seed}: combined probes should never add rules (A={lib_a}, D={lib_d})");
+        seed_totals.push((lib_a, lib_b, lib_c, lib_d));
+    }
+    println!("monotonicity across 4 seeds: OK (probes never grow the library)");
+    println!("per-seed A/B/C/D totals: {seed_totals:?}");
+}

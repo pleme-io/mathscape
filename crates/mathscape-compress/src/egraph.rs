@@ -31,6 +31,10 @@ use mathscape_core::eval::{anonymize_term, RewriteRule};
 use mathscape_core::term::Term;
 use mathscape_core::value::Value;
 
+/// Type alias so consumers (traversal tests, downstream crates)
+/// can hold probe sets without depending on `egg` directly.
+pub type MathscapeRewrite = Rewrite<MathscapeLang, ()>;
+
 // ── The e-graph language ────────────────────────────────────────
 //
 // MathscapeLang mirrors mathscape_core::Term in the form egg wants:

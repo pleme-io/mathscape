@@ -173,16 +173,60 @@ would catch this.
 COMPRESSIONS (renamings) not EQUATIONS. An empirical check forces
 the equation interpretation. Deliberate choice needed.
 
-### Phase K: e-graph equivalence saturation (egg)
+### Phase K: e-graph equivalence saturation (egg) — K1–K4 LANDED 2026-04-18
 
-**The move.** Integrate the `egg` crate as an optional `Prover` impl.
-Accept rules based on structural equivalence under saturation.
+**Status.** Foundation + dedup wiring + activation probe all green.
+Empirical finding: **today's bettyfine is already closed under
+commutativity AND associativity.** The probes are correct and wired,
+but the machine's anti-unifier + alpha_equivalent collapse has
+already reduced every candidate pair that commutativity or
+associativity could catch.
 
-**Unlocks.** Commutativity (`add(a, b) = add(b, a)`), associativity,
-distributivity — patterns that syntactic anti-unification cannot see.
+**What K1–K3 built.**
+- K1: `crates/mathscape-compress/src/egraph.rs` — bridge from
+  mathscape's `Term` to egg's `MathscapeLang`, plus
+  `check_equivalence(lhs, rhs, rewrites, step_limit)` and the
+  canonical `commutativity_probe()` + `associativity_probe()`
+  rewrite builders. 7 unit tests.
+- K2: `check_rule_equivalence(r1, r2, probes, step_limit)` — rule-
+  level equivalence via anonymization-normalized LHS/RHS pairs.
+  Strictly more powerful than `alpha_equivalent`: with probes,
+  catches commutatively-swapped variants alpha_equiv misses. 4
+  unit tests.
+- K3: `CompressionGenerator::with_egraph_probes(probes)` — opt-in
+  dedup via e-graph. Empty probes = bit-identical pre-K3
+  behavior (regression sentinel). 3 adapter tests.
 
-**Scope.** Medium architectural — `egg` has its own term type we'd
-bridge to; saturation is bounded per candidate via step limits.
+**What K4 probed.** `phase_k_egraph_dedup_probe` (ignored) runs 8
+seeds × 4 configs (none / commutativity / associativity / both).
+At the default extract config + procedural corpora + ε=0.0 prover
+settings: all four configs produce bit-identical library sizes (40
+rules), axiomatized counts (18), modal apex (S_10000), fingerprint
+distribution (7 distinct across 8 seeds, mode 2/8). Monotonicity
+assertion: across 4 additional seeds, probe-enabled totals never
+exceed probe-disabled totals — (4,4,4,4), (5,5,5,5), (4,4,4,4),
+(7,7,7,7).
+
+**Interpretation.** The bettyfine is the trivial Symbol-naming
+fixed point identified in phase M10. Symbol-naming rules of the
+form `op(?a, ?b) → S(?a, ?b)` are already alpha-equivalent to
+their arg-swapped variants (anonymization canonicalizes var ids),
+so commutativity adds no new collapse. Associativity needs
+asymmetric nesting in candidates, which the current extract config
++ min-shared-size filters away before AU emits them.
+
+**Next move for real penetration.** Phase K's leverage has to shift
+from **dedup** to **prover** or **reinforcement**:
+- K5 (prover): accept a rule if it closes a new equivalence class
+  in the corpus under saturation — semantic accept, not ΔDL.
+- K6 (reinforcement): count a corpus node as "reduced" by rule R
+  if any e-graph equivalent of R's LHS matches — inflating R's
+  cross-corpus support and accelerating its promotion. This
+  changes the bettyfine composition because rules with broader
+  *semantic* coverage become more supported.
+
+K5/K6 are architecturally heavier than K1–K4. The K1–K4 chain is
+the bench they'll be built on.
 
 ### Phase L: adaptive corpus generation
 
