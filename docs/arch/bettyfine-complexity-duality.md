@@ -197,6 +197,100 @@ across the sweep. That gives us the first empirical map of "how
 does reward shape the bettyfine." From there, multi-dim sweeps
 and automated HPO follow.
 
+## Empirical findings from the grand HPO sweep (2026-04-18)
+
+Four thousand-plus in-memory runs across three orthogonal sweeps,
+~90 seconds total wall-clock. The bettyfine's shape characterized
+empirically.
+
+### Finding 1: Extract config is the real control surface
+
+Reward config (α × δ sweep): modal support range 3.1 points.
+Extract config (min_share × min_matches × max_rules sweep):
+modal support range **43.7 points**. The steering wheel lives in
+extract config, as the duality predicted.
+
+### Finding 2: Global argmax
+
+```
+min_shared_size = 2
+min_matches     = 1  (or any value — inert at this config)
+max_new_rules   = 10
+```
+
+At 128 seeds: 53.1% modal, 6 basins, 1.225 entropy, 2.03 rules.
+Strictly dominant over the current default (min=2, min_matches=2,
+max=5) which gives 45.3% modal, 7 basins.
+
+### Finding 3: `min_matches` is inert at the optimum
+
+At (min_shared=2, max_rules=10), varying min_matches between 1, 2,
+and 3 produces IDENTICAL bettyfine features. The constraint is
+vacuous — top-10 candidate cut already filters more aggressively
+than any min_matches threshold. This eliminates a hyperparameter
+dimension from the search space.
+
+### Finding 4: Corpus saturates early
+
+Sweep B varied procedural_budget × max_depth:
+
+| budget | depth | modal | basins | entropy |
+|---|---|---|---|---|
+| 5 | 2 | 49.2% | 8 | 1.347 |
+| 15 | 4 | **53.1%** | **6** | **1.225** |
+| 15 | 6 | 53.1% | 6 | 1.225 |
+| 30 | 4 | 53.1% | 6 | 1.225 |
+| 30 | 6 | 53.1% | 6 | 1.225 |
+
+Past (budget=15, depth=4), the bettyfine plateaus. More corpus
+data DOESN'T tighten it. The basin shape is determined by the
+structural vocabulary and the machinery's equivalence discipline,
+not by how much corpus you feed.
+
+### Finding 5: True LLN modal support is ~50%, not 56%
+
+Sweep C varied seed count at the optimum:
+
+| seeds | modal | basins | entropy |
+|---|---|---|---|
+| 64 | 56.2% | 3 | 1.086 |
+| 128 | 53.1% | 6 | 1.225 |
+| 256 | **49.6%** | 11 | 1.342 |
+| 512 | **49.6%** | 16 | 1.337 |
+
+Modal support DROPS with more seeds as niche basins emerge, then
+stabilizes at ~49.6% at 256+ seeds. Our earlier 89% figure was
+zoo-anchored (hand-crafted zoo pins discovery to a single mode);
+pure-procedural true modal is ~50%. The zoo is itself a control
+dial — anchoring vs free-running.
+
+### Bettyfine at the optimum, restated
+
+The empirically-optimal pure-procedural bettyfine at current
+machinery scale:
+
+- **50% modal support** (LLN stable)
+- **6-16 structural basins** (grows with seed count, but slowly)
+- **1.2-1.3 bits entropy** (concentrated)
+- **2.03 mean rules per run** (matches the "unary + binary"
+  canonical library)
+
+This is what mathscape's self-contained discovery produces at the
+best currently-known extract configuration.
+
+## Actionable: update the defaults
+
+The current `ExtractConfig` defaults in the autonomous-traversal
+harness (min_shared=2, min_matches=2, max_new_rules=5) are 8
+points below the empirical optimum for modal support. Bumping
+`max_new_rules` from 5 → 10 captures most of the improvement
+without changing the structural shape of the milestone (the zoo-
+anchored tests still converge to the same apex fingerprint, just
+with tighter modal dominance).
+
+This is a one-line change and is a direct empirical win. Phase M7
+deliverable.
+
 ## The core insight, stated
 
 The machine's discoveries exist in a moduli space. Viewed under

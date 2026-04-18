@@ -141,7 +141,7 @@ pub fn run_traversal(procedural_budget: usize, max_depth: usize) -> TraversalRep
         ExtractConfig {
             min_shared_size: 2,
             min_matches: 2,
-            max_new_rules: 5,
+            max_new_rules: 10,
         },
         1,
     );
@@ -439,7 +439,7 @@ fn rank2_inception_probe() {
         ExtractConfig {
             min_shared_size: 2,
             min_matches: 2,
-            max_new_rules: 5,
+            max_new_rules: 10,
         },
         1,
     );
@@ -1269,7 +1269,7 @@ fn run_traversal_pure_procedural_with_reward(
         ExtractConfig {
             min_shared_size: 2,
             min_matches: 2,
-            max_new_rules: 5,
+            max_new_rules: 10,
         },
         1,
     );
@@ -1342,7 +1342,7 @@ fn run_traversal_pure_procedural_with_library(
         ExtractConfig {
             min_shared_size: 2,
             min_matches: 2,
-            max_new_rules: 5,
+            max_new_rules: 10,
         },
         1,
     );
@@ -1396,6 +1396,183 @@ fn run_traversal_pure_procedural_with_library(
         axiomatized_rule_names: names,
         axiomatized_rules_full: full,
     }
+}
+
+#[test]
+#[ignore = "phase M6+: grand HPO sweep, ~90s, --ignored"]
+fn hpo_grand_sweep() {
+    // Full tunability exploration. Three orthogonal axes:
+    //
+    //   A. extract config (the previously-identified steering wheel)
+    //      min_shared_size × max_new_rules × min_matches
+    //   B. corpus richness
+    //      procedural_budget × max_depth
+    //   C. convergence verification
+    //      at the identified optimum, N ∈ {64, 128, 256, 512}
+    //
+    // All in-memory. Each cell = 128 seeds × ~11ms = ~1.4s. Total
+    // cells across sweeps: ~50-60. Walltime: ~60-90s.
+    //
+    // Objective: maximize modal_support subject to
+    //   mean_rule_count >= 2 (non-degenerate library)
+    //   basin_count >= 2 (non-trivially explored)
+    //
+    // Find the argmax. Compare to current default (min=2, max=5,
+    // min_matches=2). Update the suite defaults if a better config
+    // emerges — this is the gem materializing as a set of
+    // empirically-tuned knobs.
+    use mathscape_compress::extract::ExtractConfig as EC;
+    use std::time::Instant;
+
+    const N_SEEDS: u64 = 128;
+    const DEFAULT_BUDGET: usize = 15;
+    const DEFAULT_DEPTH: usize = 4;
+
+    println!("\n╔══════════════════════════════════════════════════════╗");
+    println!("║ GRAND HPO SWEEP                                      ║");
+    println!("║   Full tunability exploration of the bettyfine      ║");
+    println!("╚══════════════════════════════════════════════════════╝");
+
+    // ── Sweep A: 3D extract config ─────────────────────────────
+    let min_shared_vals = [1usize, 2, 3];
+    let max_rules_vals = [3usize, 5, 10, 20];
+    let min_matches_vals = [1usize, 2, 3];
+
+    println!("\n▶ Sweep A: extract config (min_share × max_rules × min_matches)");
+    println!("  {} × {} × {} = {} cells × {} seeds = {} runs",
+        min_shared_vals.len(), max_rules_vals.len(), min_matches_vals.len(),
+        min_shared_vals.len() * max_rules_vals.len() * min_matches_vals.len(),
+        N_SEEDS,
+        min_shared_vals.len() * max_rules_vals.len() * min_matches_vals.len() * N_SEEDS as usize);
+
+    let mut best_cell: Option<(EC, f64, usize, f64, f64)> = None;
+    let t_a = Instant::now();
+    let mut results_a: Vec<(usize, usize, usize, f64, usize, f64, f64)> = Vec::new();
+    for &ms in &min_shared_vals {
+        for &mr in &max_rules_vals {
+            for &mm in &min_matches_vals {
+                let ec = EC {
+                    min_shared_size: ms,
+                    min_matches: mm,
+                    max_new_rules: mr,
+                };
+                let (modal_frac, basins, entropy, mean_rules) =
+                    measure_bettyfine(&ec, DEFAULT_BUDGET, DEFAULT_DEPTH, N_SEEDS);
+                results_a.push((ms, mm, mr, modal_frac, basins, entropy, mean_rules));
+                if mean_rules >= 2.0 && basins >= 2 {
+                    let better = best_cell.as_ref()
+                        .map(|b| modal_frac > b.1)
+                        .unwrap_or(true);
+                    if better {
+                        best_cell = Some((ec.clone(), modal_frac, basins, entropy, mean_rules));
+                    }
+                }
+            }
+        }
+    }
+    let elapsed_a = t_a.elapsed().as_millis();
+    println!("\n  {}ms elapsed", elapsed_a);
+
+    // Print sweep A results sorted by modal support.
+    let mut sorted_a = results_a.clone();
+    sorted_a.sort_by(|a, b| b.3.partial_cmp(&a.3).unwrap_or(std::cmp::Ordering::Equal));
+    println!("\n▶ Top-10 extract-config cells by modal support");
+    println!("{:>7} {:>7} {:>7} {:>9} {:>8} {:>10} {:>8}",
+        "min_sh", "min_mt", "max_r", "modal%", "basins", "entropy", "rules");
+    println!("{}", "─".repeat(60));
+    for (ms, mm, mr, modal_frac, basins, entropy, mean_rules) in sorted_a.iter().take(10) {
+        println!("{:>7} {:>7} {:>7} {:>8.1}% {:>8} {:>10.3} {:>8.2}",
+            ms, mm, mr, modal_frac * 100.0, basins, entropy, mean_rules);
+    }
+
+    println!("\n▶ Global argmax (extract config)");
+    if let Some((ec, modal, basins, entropy, rules)) = &best_cell {
+        println!("  config  : min_shared={}, min_matches={}, max_new_rules={}",
+            ec.min_shared_size, ec.min_matches, ec.max_new_rules);
+        println!("  modal   : {:.1}%", modal * 100.0);
+        println!("  basins  : {}", basins);
+        println!("  entropy : {:.3} bits", entropy);
+        println!("  rules   : {:.2}", rules);
+    }
+
+    // ── Sweep B: corpus richness ───────────────────────────────
+    let budget_vals = [5usize, 15, 30];
+    let depth_vals = [2usize, 4, 6];
+    let ec_best = best_cell.as_ref().map(|(ec, _, _, _, _)| ec.clone())
+        .unwrap_or(EC { min_shared_size: 2, min_matches: 2, max_new_rules: 10 });
+
+    println!("\n▶ Sweep B: corpus richness (budget × depth) at best extract config");
+    println!("  {} × {} = {} cells × {} seeds = {} runs",
+        budget_vals.len(), depth_vals.len(),
+        budget_vals.len() * depth_vals.len(),
+        N_SEEDS,
+        budget_vals.len() * depth_vals.len() * N_SEEDS as usize);
+
+    let t_b = Instant::now();
+    println!("\n{:>8} {:>8} {:>9} {:>8} {:>10} {:>8}",
+        "budget", "depth", "modal%", "basins", "entropy", "rules");
+    println!("{}", "─".repeat(52));
+    for &b in &budget_vals {
+        for &d in &depth_vals {
+            let (modal_frac, basins, entropy, mean_rules) =
+                measure_bettyfine(&ec_best, b, d, N_SEEDS);
+            println!("{:>8} {:>8} {:>8.1}% {:>8} {:>10.3} {:>8.2}",
+                b, d, modal_frac * 100.0, basins, entropy, mean_rules);
+        }
+    }
+    let elapsed_b = t_b.elapsed().as_millis();
+    println!("\n  {}ms elapsed", elapsed_b);
+
+    // ── Sweep C: seed convergence at optimum ───────────────────
+    println!("\n▶ Sweep C: modal-support convergence at optimum");
+    println!("  Seed counts: 64, 128, 256, 512");
+    let seed_counts = [64u64, 128, 256, 512];
+    let t_c = Instant::now();
+    println!("\n{:>8} {:>9} {:>8} {:>10}", "seeds", "modal%", "basins", "entropy");
+    println!("{}", "─".repeat(40));
+    for &n in &seed_counts {
+        let (modal_frac, basins, entropy, _) =
+            measure_bettyfine(&ec_best, DEFAULT_BUDGET, DEFAULT_DEPTH, n);
+        println!("{:>8} {:>8.1}% {:>8} {:>10.3}",
+            n, modal_frac * 100.0, basins, entropy);
+    }
+    let elapsed_c = t_c.elapsed().as_millis();
+
+    let total = elapsed_a + elapsed_b + elapsed_c;
+    println!("\n▶ Grand total: {}ms", total);
+
+    assert!(best_cell.is_some());
+}
+
+/// Shared measurement function: for an ExtractConfig, a corpus
+/// shape, and a seed count, return bettyfine features.
+fn measure_bettyfine(
+    ec: &mathscape_compress::extract::ExtractConfig,
+    budget: usize,
+    depth: usize,
+    n_seeds: u64,
+) -> (f64, usize, f64, f64) {
+    use std::collections::HashMap;
+    let mut basin_support: HashMap<Vec<(String, String)>, usize> = HashMap::new();
+    let mut total_rules = 0usize;
+    for seed in 1..=n_seeds {
+        let report = run_traversal_pure_procedural_with_extract(seed, budget, depth, ec.clone());
+        total_rules += report.axiomatized_rules_full.len();
+        let fp = structural_fingerprint(&report.axiomatized_rules_full);
+        *basin_support.entry(fp).or_default() += 1;
+    }
+    let basins = basin_support.len();
+    let modal = basin_support.values().copied().max().unwrap_or(0);
+    let modal_frac = modal as f64 / n_seeds as f64;
+    let entropy: f64 = basin_support
+        .values()
+        .map(|&c| {
+            let p = c as f64 / n_seeds as f64;
+            if p > 0.0 { -p * p.log2() } else { 0.0 }
+        })
+        .sum();
+    let mean_rules = total_rules as f64 / n_seeds as f64;
+    (modal_frac, basins, entropy, mean_rules)
 }
 
 #[test]
@@ -2142,7 +2319,7 @@ fn run_traversal_pure_procedural(
         ExtractConfig {
             min_shared_size: 2,
             min_matches: 2,
-            max_new_rules: 5,
+            max_new_rules: 10,
         },
         1,
     );
