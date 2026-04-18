@@ -842,6 +842,302 @@ fn structural_fingerprint(rules: &[mathscape_core::eval::RewriteRule]) -> Vec<(S
     sigs
 }
 
+/// Operator-abstracted fingerprint: like structural_fingerprint but
+/// ALSO anonymizes concrete operator ids (Var id 2 = add, 3 = mul,
+/// 4 = succ, etc.). Two rules that encode the same pattern under
+/// DIFFERENT specific operators map to the same fingerprint.
+///
+/// Example:
+///   add-rule:  (?2 ?100 ?101) => S0(?2 ?100 ?101)
+///   mul-rule:  (?3 ?100 ?101) => S0(?3 ?100 ?101)
+///
+/// Under this coarser equivalence, they're the same: "binary
+/// operator applied to two args, reduces to a named symbol holding
+/// the operator and args." The finest structural level DID
+/// distinguish them; this coarser level SAYS they're the same
+/// operator-family pattern at different slots.
+///
+/// The question the user asked: "can features be condensed further
+/// without losing ability to reveal details?" This is one such
+/// condensation — the trade-off is we lose which specific operator
+/// got Axiomatized but retain the shape of what the machine
+/// discovered.
+fn operator_abstract_term(t: &Term) -> Term {
+    fn walk(
+        t: &Term,
+        all_map: &mut std::collections::HashMap<u32, u32>,
+    ) -> Term {
+        match t {
+            Term::Point(p) => Term::Point(p.clone()),
+            Term::Number(n) => Term::Number(n.clone()),
+            Term::Var(v) => {
+                // Abstract ALL vars — concrete ops and fresh vars
+                // alike — into a single canonical numbering. This
+                // is the "both operators and free variables are
+                // slots" view.
+                let next = all_map.len() as u32;
+                let id = *all_map.entry(*v).or_insert(next);
+                Term::Var(id)
+            }
+            Term::Fn(params, body) => {
+                let b = walk(body, all_map);
+                Term::Fn(params.clone(), Box::new(b))
+            }
+            Term::Apply(f, args) => {
+                let f2 = walk(f, all_map);
+                let args2 = args.iter().map(|a| walk(a, all_map)).collect();
+                Term::Apply(Box::new(f2), args2)
+            }
+            Term::Symbol(id, args) => {
+                let next = all_map.len() as u32;
+                let canonical = *all_map.entry(*id + 10_000_000).or_insert(next);
+                let args2 = args.iter().map(|a| walk(a, all_map)).collect();
+                Term::Symbol(canonical, args2)
+            }
+        }
+    }
+    let mut all_map = std::collections::HashMap::new();
+    walk(t, &mut all_map)
+}
+
+fn operator_abstract_fingerprint(
+    rules: &[mathscape_core::eval::RewriteRule],
+) -> Vec<(String, String)> {
+    let mut sigs: Vec<(String, String)> = rules
+        .iter()
+        .map(|r| {
+            let lhs = operator_abstract_term(&r.lhs);
+            let rhs = operator_abstract_term(&r.rhs);
+            (format!("{lhs}"), format!("{rhs}"))
+        })
+        .collect();
+    sigs.sort();
+    sigs
+}
+
+#[test]
+#[ignore = "phase M2+: operator-abstract basin classification, ~12s, --ignored"]
+fn oscillation_operator_abstract_basins() {
+    // One condensation level deeper: abstract concrete operators
+    // too. Two rules that encode the same pattern under different
+    // specific operators (e.g. add vs mul in same position) map to
+    // the same operator-abstract fingerprint.
+    //
+    // Question: how many DISTINCT *pattern-shapes* does the machine
+    // discover, regardless of which specific operator it happened
+    // to Axiomatize? This should collapse the top-2 basins (which
+    // differ only in add vs mul) into ONE.
+    use std::collections::HashSet;
+
+    const N_SEEDS: u64 = 1024;
+    const BUDGET: usize = 15;
+    const DEPTH: usize = 4;
+
+    let mut structural: HashSet<Vec<(String, String)>> = HashSet::new();
+    let mut op_abstract: HashSet<Vec<(String, String)>> = HashSet::new();
+    let mut op_abstract_support: std::collections::HashMap<
+        Vec<(String, String)>,
+        usize,
+    > = std::collections::HashMap::new();
+
+    for seed in 1..=N_SEEDS {
+        let report = run_traversal_pure_procedural_with_library(seed, BUDGET, DEPTH);
+        structural.insert(structural_fingerprint(&report.axiomatized_rules_full));
+        let fp = operator_abstract_fingerprint(&report.axiomatized_rules_full);
+        op_abstract.insert(fp.clone());
+        *op_abstract_support.entry(fp).or_default() += 1;
+    }
+
+    println!("\n╔══════════════════════════════════════════════════════╗");
+    println!("║ OPERATOR-ABSTRACT BASIN CLASSIFICATION               ║");
+    println!("║   Further condensation — ignore specific operator   ║");
+    println!("╚══════════════════════════════════════════════════════╝");
+    println!("\n▶ Layered basin counts (1024 seeds)");
+    println!("  nominal basins (S_NNN names)    : >500");
+    println!("  structural basins (shape)       : {}", structural.len());
+    println!("  operator-abstract basins        : {}", op_abstract.len());
+    let reduction = 1.0 - (op_abstract.len() as f64 / structural.len() as f64);
+    println!("  additional compression          : {:.1}%", reduction * 100.0);
+
+    let mut by_sup: Vec<(Vec<(String, String)>, usize)> =
+        op_abstract_support.into_iter().collect();
+    by_sup.sort_by(|a, b| b.1.cmp(&a.1));
+    println!("\n▶ Top-10 operator-abstract basins");
+    println!("{:>8} {:>10} {:>10}", "rank", "support", "fraction");
+    for (i, (_, sup)) in by_sup.iter().take(10).enumerate() {
+        println!(
+            "{:>8} {:>10} {:>10.1}%",
+            i + 1,
+            sup,
+            *sup as f64 / N_SEEDS as f64 * 100.0
+        );
+    }
+
+    let modal = by_sup.first().map(|x| x.1).unwrap_or(0);
+    let modal_frac = modal as f64 / N_SEEDS as f64;
+    println!("\n▶ Modal operator-abstract basin support: {}/{} ({:.1}%)",
+        modal, N_SEEDS, modal_frac * 100.0);
+    if modal_frac > 0.8 {
+        println!(
+            "\n  STRONG UNIFICATION — {:.0}% of seeds land in ONE\n  operator-abstract basin. At this level of abstraction the\n  machine has essentially ONE canonical discovery shape.",
+            modal_frac * 100.0,
+        );
+    } else if modal_frac > 0.5 {
+        println!(
+            "\n  DOMINANT CLASS — {:.0}% of seeds share the top\n  operator-abstract basin; the rest scatter. The machine has\n  a preferred discovery pattern with meaningful variation.",
+            modal_frac * 100.0,
+        );
+    } else {
+        println!(
+            "\n  DIVERSE — no single operator-abstract basin dominates\n  at this scale. Multiple orthogonal discovery shapes coexist."
+        );
+    }
+}
+
+#[test]
+#[ignore = "verify M2: structural basin convergence — 256→2048 seeds, ~40s, --ignored"]
+fn oscillation_structural_basin_convergence() {
+    // Verification: is the ~80 structural basin count REAL or an
+    // artifact of the 1024-seed sample? Run the stairway at 256,
+    // 512, 1024, 2048 and watch structural basin growth. If the
+    // count plateaus, we've found the ceiling. If it keeps
+    // growing, we haven't.
+    use std::collections::{HashMap, HashSet};
+    use std::time::Instant;
+
+    const BUDGET: usize = 15;
+    const DEPTH: usize = 4;
+    let scales = [256u64, 512, 1024, 2048];
+
+    let t0 = Instant::now();
+    let mut structural_set: HashSet<Vec<(String, String)>> = HashSet::new();
+    let mut structural_count_at_scale: Vec<(u64, usize, usize, usize)> = Vec::new();
+    // (seed_count, nominal_basins, structural_basins, new_structural_since_last)
+    let mut nominal_set: HashSet<Vec<String>> = HashSet::new();
+    let mut prev_struct = 0usize;
+    let mut prev_seed = 0u64;
+    for scale in scales {
+        for seed in (prev_seed + 1)..=scale {
+            let report = run_traversal_pure_procedural_with_library(seed, BUDGET, DEPTH);
+            let mut nominal: Vec<String> = report.axiomatized_rule_names.clone();
+            nominal.sort();
+            nominal_set.insert(nominal);
+            let fp = structural_fingerprint(&report.axiomatized_rules_full);
+            structural_set.insert(fp);
+        }
+        let nominal = nominal_set.len();
+        let structural = structural_set.len();
+        let new_struct = structural - prev_struct;
+        structural_count_at_scale.push((scale, nominal, structural, new_struct));
+        prev_struct = structural;
+        prev_seed = scale;
+    }
+    let elapsed = t0.elapsed().as_millis();
+
+    println!("\n╔══════════════════════════════════════════════════════╗");
+    println!("║ M2 CONVERGENCE CHECK — structural basin count        ║");
+    println!("║   stairway 256 → 512 → 1024 → 2048                  ║");
+    println!("╚══════════════════════════════════════════════════════╝");
+    println!("\n{:>8} {:>10} {:>12} {:>10}", "seeds", "nominal", "structural", "new_struct");
+    println!("{}", "─".repeat(44));
+    for (seeds, nominal, structural, new_struct) in &structural_count_at_scale {
+        println!("{seeds:>8} {nominal:>10} {structural:>12} {new_struct:>10}");
+    }
+    let last = structural_count_at_scale.last().unwrap();
+    let new_rate_first = structural_count_at_scale[0].3 as f64 / 256.0;
+    let new_rate_last = last.3 as f64 / 1024.0; // last scale added 1024 seeds
+    println!("\n▶ New-structural-basin rate");
+    println!("  @256 (per seed)  : {:.4}", new_rate_first);
+    println!("  @2048 delta rate : {:.4}", new_rate_last);
+    println!("  decay            : {:.3}×", new_rate_last / new_rate_first);
+    println!("  elapsed          : {elapsed}ms");
+
+    if new_rate_last < new_rate_first * 0.5 {
+        println!(
+            "\n  CONVERGING — new-structural-basin rate has halved or more.\n  The structural count is approaching its ceiling at this\n  machinery scale. ~{} is a reasonable empirical ceiling.",
+            last.2
+        );
+    } else {
+        println!(
+            "\n  STILL GROWING — push to 4096 or 8192 seeds to locate\n  the plateau."
+        );
+    }
+    let _ = HashMap::<(), ()>::new(); // silence unused-import
+}
+
+#[test]
+#[ignore = "M2 anatomy: inspect top-basin rule content, ~15s, --ignored"]
+fn oscillation_apex_basin_anatomy() {
+    // What rules are in the two dominant basins? If the top-2
+    // basins capture ~86% of seeds, those ARE the machine's
+    // canonical discoveries at this machinery scale. Extracting
+    // them tells us what mathscape always finds.
+    use std::collections::HashMap;
+
+    const N_SEEDS: u64 = 1024;
+    const BUDGET: usize = 15;
+    const DEPTH: usize = 4;
+
+    let mut fp_to_seeds: HashMap<Vec<(String, String)>, Vec<u64>> = HashMap::new();
+    let mut fp_to_canonical_rules: HashMap<
+        Vec<(String, String)>,
+        Vec<mathscape_core::eval::RewriteRule>,
+    > = HashMap::new();
+
+    for seed in 1..=N_SEEDS {
+        let report = run_traversal_pure_procedural_with_library(seed, BUDGET, DEPTH);
+        let fp = structural_fingerprint(&report.axiomatized_rules_full);
+        fp_to_seeds.entry(fp.clone()).or_default().push(seed);
+        fp_to_canonical_rules
+            .entry(fp)
+            .or_insert(report.axiomatized_rules_full.clone());
+    }
+
+    let mut by_support: Vec<(Vec<(String, String)>, Vec<u64>)> =
+        fp_to_seeds.into_iter().collect();
+    by_support.sort_by(|a, b| b.1.len().cmp(&a.1.len()));
+
+    println!("\n╔══════════════════════════════════════════════════════╗");
+    println!("║ APEX BASIN ANATOMY — what the dominant basins contain║");
+    println!("╚══════════════════════════════════════════════════════╝");
+    for (rank, (fp, seeds)) in by_support.iter().take(3).enumerate() {
+        println!("\n▶ Basin #{} — support {}/{} ({:.1}%)",
+            rank + 1, seeds.len(), N_SEEDS,
+            seeds.len() as f64 / N_SEEDS as f64 * 100.0);
+        println!("  seed samples: {:?}", seeds.iter().take(5).collect::<Vec<_>>());
+        if let Some(rules) = fp_to_canonical_rules.get(fp) {
+            println!("  rule count: {}", rules.len());
+            for rule in rules {
+                let lhs_anon = mathscape_core::eval::anonymize_term(&rule.lhs);
+                let rhs_anon = mathscape_core::eval::anonymize_term(&rule.rhs);
+                println!("    {:<10} :: {} => {}", rule.name, lhs_anon, rhs_anon);
+            }
+        }
+    }
+
+    // Compute basin-to-basin structural distance between top-2 to
+    // understand if they're near-basins or orthogonal.
+    if by_support.len() >= 2 {
+        let (fp_a, _) = &by_support[0];
+        let (fp_b, _) = &by_support[1];
+        let set_a: std::collections::HashSet<_> = fp_a.iter().collect();
+        let set_b: std::collections::HashSet<_> = fp_b.iter().collect();
+        let intersection = set_a.intersection(&set_b).count();
+        let union = set_a.union(&set_b).count();
+        let jaccard = intersection as f64 / union as f64;
+        println!("\n▶ Top-2 basin Jaccard similarity");
+        println!("  shared rule-fingerprints : {intersection}/{union}");
+        println!("  Jaccard coefficient      : {:.3}", jaccard);
+        if jaccard > 0.5 {
+            println!("  → top-2 basins are near-basins (most rules shared)");
+        } else if jaccard > 0.1 {
+            println!("  → top-2 basins are related but structurally distinct");
+        } else {
+            println!("  → top-2 basins are orthogonal (different canonical discoveries)");
+        }
+    }
+}
+
 #[test]
 #[ignore = "phase M2: structural basin classification — 1024 seeds, ~15s, --ignored"]
 fn oscillation_structural_basin_classification() {

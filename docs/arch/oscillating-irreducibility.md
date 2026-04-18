@@ -206,6 +206,73 @@ the test; it now happens during traversal itself.
 
 Pinned by `oscillation_structural_basin_classification`.
 
+### Phase M2+: operator-abstract condensation — GEM MATERIALIZED
+
+**The third layer of condensation, run 2026-04-18.**
+
+After structural classification (85% nominal-to-structural
+compression → 81 basins), a further layer abstracts ALSO concrete
+operator ids. The classification asks: "ignoring which SPECIFIC
+operator got Axiomatized (add vs mul vs succ), what SHAPE of rule
+did the machine discover?"
+
+Result at 1024 seeds, pure-procedural:
+
+  Layer                                       Basins
+  ────────────────────────────────────────────────────
+  Nominal (S_NNN names)                       >500
+  Structural (anonymize fresh IDs)              81
+  Operator-abstract (anonymize ops too)         69
+
+  Modal operator-abstract basin support: 911/1024 = 89.0%
+
+**At this level of abstraction, 89% of ALL seed-driven runs land
+in one canonical discovery shape.** The machine's discovery-space
+is essentially: ONE dominant pattern + a tail of 68 structural
+outliers summing to 11%.
+
+### The gem's anatomy
+
+The top-3 STRUCTURAL basins revealed what's inside the dominant
+operator-abstract basin:
+
+  Basin #1 (43.7%): (?4 ?100) + (?3 ?100 ?101) reducing to named
+                    symbols. "succ-universal + mul-universal."
+  Basin #2 (41.9%): (?4 ?100) + (?2 ?100 ?101). "succ-universal +
+                    add-universal."
+  Basin #3 ( 3.3%): (?4 ?100) + (?? ?100 ?101) where ?? is a fresh
+                    var (rank-1 meta). "succ-universal + meta-
+                    operator universal."
+
+All three share the same succ-universal rule. They differ ONLY in
+which binary operator reached Axiomatized. Under operator-abstract
+equivalence they MERGE into one canonical shape: "a unary op +
+a binary op, each reducing to a named symbol holding the op and
+its args."
+
+### What the gem tells us about the machine
+
+At current machinery scale (15-corpus pure-procedural budgets), the
+TRUE diversity of mathscape's discovery output is:
+
+- ONE canonical discovery shape holding 89% of outcomes
+- 68 rare variants (11% combined) carrying niche structural
+  differences
+- Under the classical nominal view this looks like 500+ distinct
+  "outcomes" — 85% of which was fresh-id noise
+
+This is the finite object, the amplituhedron-adjacent gem the user
+pointed at. The oscillation isn't a continuum of infinite outcomes;
+it's essentially one canonical pattern that presents itself under
+different operator-labelings, plus a measurable long tail of
+niche variants.
+
+Pinned by:
+  - `oscillation_structural_basin_classification` (phase M2)
+  - `oscillation_apex_basin_anatomy` (contents of top basins)
+  - `oscillation_operator_abstract_basins` (phase M2+ gem)
+  - `oscillation_structural_basin_convergence` (verification at 2048)
+
 ### Phase M3: transition between attractors
 
 Take two seeds s1, s2 that land in different attractors. Blend
