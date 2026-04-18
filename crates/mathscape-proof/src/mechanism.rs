@@ -445,6 +445,167 @@ impl MechanismMutation {
         new
     }
 
+    // ── M2: Lisp Sexp round-trip for mutation operators ──────
+    //
+    // Each atomic mutation serializes to `(op-name arg)`:
+    //   BumpCandidateMaxSize(1)         → (bump-candidate-max-size 1)
+    //   AddCorpusVocabOp(5)             → (add-corpus-vocab-op 5)
+    //   SetCorpusSeedFromTheorems(true) → (set-corpus-seed-from-theorems true)
+    //   Compound([a, b])                → (compound (op-a ...) (op-b ...))
+    //
+    // Discovered operators (from the ML5 pool) can thus be stored,
+    // shared across sessions, and eventually mutated by the
+    // machine's own Sexp-level process.
+
+    /// Serialize this mutation operator as a Sexp form.
+    pub fn to_sexp(&self) -> tatara_lisp::ast::Sexp {
+        use tatara_lisp::ast::Sexp;
+        let list = |head: &str, arg: Sexp| Sexp::List(vec![Sexp::symbol(head), arg]);
+        match self {
+            Self::BumpCandidateMaxSize(d) => {
+                list("bump-candidate-max-size", Sexp::int(*d as i64))
+            }
+            Self::AddCandidateVocabOp(op) => {
+                list("add-candidate-vocab-op", Sexp::int(*op as i64))
+            }
+            Self::RemoveCandidateVocabOp(op) => {
+                list("remove-candidate-vocab-op", Sexp::int(*op as i64))
+            }
+            Self::BumpCompositionCap(d) => {
+                list("bump-composition-cap", Sexp::int(*d as i64))
+            }
+            Self::AddCandidateConstant(c) => {
+                list("add-candidate-constant", Sexp::int(*c as i64))
+            }
+            Self::AddCorpusVocabOp(op) => {
+                list("add-corpus-vocab-op", Sexp::int(*op as i64))
+            }
+            Self::RemoveCorpusVocabOp(op) => {
+                list("remove-corpus-vocab-op", Sexp::int(*op as i64))
+            }
+            Self::BumpCorpusBaseDepth(d) => {
+                list("bump-corpus-base-depth", Sexp::int(*d as i64))
+            }
+            Self::SetCorpusSeedFromTheorems(b) => {
+                list("set-corpus-seed-from-theorems", Sexp::boolean(*b))
+            }
+            Self::BumpCorpusMaxValue(d) => {
+                list("bump-corpus-max-value", Sexp::int(*d as i64))
+            }
+            Self::BumpExtractMinShared(d) => {
+                list("bump-extract-min-shared", Sexp::int(*d as i64))
+            }
+            Self::BumpExtractMinMatches(d) => {
+                list("bump-extract-min-matches", Sexp::int(*d as i64))
+            }
+            Self::BumpExtractMaxNewRules(d) => {
+                list("bump-extract-max-new-rules", Sexp::int(*d as i64))
+            }
+            Self::BumpValidatorSamples(d) => {
+                list("bump-validator-samples", Sexp::int(*d as i64))
+            }
+            Self::BumpValidatorMaxValue(d) => {
+                list("bump-validator-max-value", Sexp::int(*d as i64))
+            }
+            Self::BumpValidatorStepLimit(d) => {
+                list("bump-validator-step-limit", Sexp::int(*d as i64))
+            }
+            Self::Compound(children) => {
+                let mut items = Vec::with_capacity(children.len() + 1);
+                items.push(Sexp::symbol("compound"));
+                for child in children {
+                    items.push(child.to_sexp());
+                }
+                Sexp::List(items)
+            }
+        }
+    }
+
+    /// Parse a mutation operator from a Sexp form. Returns `None`
+    /// if the form is malformed or names an unknown operator.
+    pub fn from_sexp(sexp: &tatara_lisp::ast::Sexp) -> Option<Self> {
+        use tatara_lisp::ast::{Atom, Sexp};
+        let items = sexp.as_list()?;
+        if items.is_empty() {
+            return None;
+        }
+        let head = items[0].as_symbol()?;
+        let get_i32 = |item: &Sexp| -> Option<i32> {
+            item.as_int().map(|n| n as i32)
+        };
+        let get_u32 = |item: &Sexp| -> Option<u32> {
+            item.as_int().map(|n| n as u32)
+        };
+        let get_u64 = |item: &Sexp| -> Option<u64> {
+            item.as_int().map(|n| n as u64)
+        };
+        let get_bool = |item: &Sexp| -> Option<bool> {
+            match item {
+                Sexp::Atom(Atom::Bool(b)) => Some(*b),
+                _ => None,
+            }
+        };
+        match head {
+            "bump-candidate-max-size" => {
+                Some(Self::BumpCandidateMaxSize(get_i32(&items[1])?))
+            }
+            "add-candidate-vocab-op" => {
+                Some(Self::AddCandidateVocabOp(get_u32(&items[1])?))
+            }
+            "remove-candidate-vocab-op" => {
+                Some(Self::RemoveCandidateVocabOp(get_u32(&items[1])?))
+            }
+            "bump-composition-cap" => {
+                Some(Self::BumpCompositionCap(get_i32(&items[1])?))
+            }
+            "add-candidate-constant" => {
+                Some(Self::AddCandidateConstant(get_u64(&items[1])?))
+            }
+            "add-corpus-vocab-op" => {
+                Some(Self::AddCorpusVocabOp(get_u32(&items[1])?))
+            }
+            "remove-corpus-vocab-op" => {
+                Some(Self::RemoveCorpusVocabOp(get_u32(&items[1])?))
+            }
+            "bump-corpus-base-depth" => {
+                Some(Self::BumpCorpusBaseDepth(get_i32(&items[1])?))
+            }
+            "set-corpus-seed-from-theorems" => {
+                Some(Self::SetCorpusSeedFromTheorems(get_bool(&items[1])?))
+            }
+            "bump-corpus-max-value" => {
+                Some(Self::BumpCorpusMaxValue(get_i32(&items[1])?))
+            }
+            "bump-extract-min-shared" => {
+                Some(Self::BumpExtractMinShared(get_i32(&items[1])?))
+            }
+            "bump-extract-min-matches" => {
+                Some(Self::BumpExtractMinMatches(get_i32(&items[1])?))
+            }
+            "bump-extract-max-new-rules" => {
+                Some(Self::BumpExtractMaxNewRules(get_i32(&items[1])?))
+            }
+            "bump-validator-samples" => {
+                Some(Self::BumpValidatorSamples(get_i32(&items[1])?))
+            }
+            "bump-validator-max-value" => {
+                Some(Self::BumpValidatorMaxValue(get_i32(&items[1])?))
+            }
+            "bump-validator-step-limit" => {
+                Some(Self::BumpValidatorStepLimit(get_i32(&items[1])?))
+            }
+            "compound" => {
+                let mut children = Vec::with_capacity(items.len() - 1);
+                for child in &items[1..] {
+                    children.push(Self::from_sexp(child)?);
+                }
+                Some(Self::Compound(children))
+            }
+            _ => None, // Unknown operator — caller can interpret as
+                       // a machine-synthesized operator (M5) or reject.
+        }
+    }
+
     /// Is this an atomic (single-parameter) mutation?
     #[must_use]
     pub fn is_atomic(&self) -> bool {
@@ -910,6 +1071,81 @@ mod tests {
             ever_succeeded,
             "saturation response must surface a winning mutation across 16 seeds × 32 mutations"
         );
+    }
+
+    #[test]
+    fn mutation_sexp_round_trip_every_variant() {
+        // M2 gold test: every mutation operator variant round-trips
+        // through its Sexp representation. If this fails at any
+        // variant, the Lisp port is lossy and future mutations via
+        // Sexp manipulation would corrupt the mutation pool.
+        let cases = vec![
+            MechanismMutation::BumpCandidateMaxSize(1),
+            MechanismMutation::BumpCandidateMaxSize(-2),
+            MechanismMutation::AddCandidateVocabOp(7),
+            MechanismMutation::RemoveCandidateVocabOp(3),
+            MechanismMutation::BumpCompositionCap(10),
+            MechanismMutation::AddCandidateConstant(42),
+            MechanismMutation::AddCorpusVocabOp(6),
+            MechanismMutation::RemoveCorpusVocabOp(5),
+            MechanismMutation::BumpCorpusBaseDepth(1),
+            MechanismMutation::SetCorpusSeedFromTheorems(true),
+            MechanismMutation::SetCorpusSeedFromTheorems(false),
+            MechanismMutation::BumpCorpusMaxValue(-4),
+            MechanismMutation::BumpExtractMinShared(1),
+            MechanismMutation::BumpExtractMinMatches(-1),
+            MechanismMutation::BumpExtractMaxNewRules(4),
+            MechanismMutation::BumpValidatorSamples(8),
+            MechanismMutation::BumpValidatorMaxValue(-2),
+            MechanismMutation::BumpValidatorStepLimit(32),
+        ];
+        for m in cases {
+            let sexp = m.to_sexp();
+            let reparsed = MechanismMutation::from_sexp(&sexp)
+                .unwrap_or_else(|| panic!("round-trip failed for {m:?}"));
+            assert_eq!(m, reparsed, "round-trip not identity for {m:?}");
+        }
+    }
+
+    #[test]
+    fn compound_mutation_sexp_round_trip() {
+        let compound = MechanismMutation::Compound(vec![
+            MechanismMutation::BumpCandidateMaxSize(1),
+            MechanismMutation::BumpCompositionCap(10),
+            MechanismMutation::SetCorpusSeedFromTheorems(true),
+        ]);
+        let sexp = compound.to_sexp();
+        let reparsed = MechanismMutation::from_sexp(&sexp)
+            .expect("compound round-trips");
+        assert_eq!(compound, reparsed);
+    }
+
+    #[test]
+    fn nested_compound_sexp_round_trip() {
+        let nested = MechanismMutation::Compound(vec![
+            MechanismMutation::BumpCandidateMaxSize(1),
+            MechanismMutation::Compound(vec![
+                MechanismMutation::BumpCompositionCap(5),
+                MechanismMutation::BumpCorpusBaseDepth(1),
+            ]),
+        ]);
+        let sexp = nested.to_sexp();
+        let reparsed = MechanismMutation::from_sexp(&sexp).unwrap();
+        assert_eq!(nested, reparsed);
+    }
+
+    #[test]
+    fn unknown_operator_returns_none() {
+        use tatara_lisp::ast::Sexp;
+        // A Sexp naming an operator we don't know about — e.g.,
+        // one that a future M5 machine-synthesized pass might
+        // produce. Returning None lets the caller decide how to
+        // handle it.
+        let unknown = Sexp::List(vec![
+            Sexp::symbol("future-operator"),
+            Sexp::int(42),
+        ]);
+        assert!(MechanismMutation::from_sexp(&unknown).is_none());
     }
 
     #[test]
