@@ -104,6 +104,76 @@ fn compositional_corpus() -> Vec<Term> {
     v
 }
 
+// ── Corpus zoo ──────────────────────────────────────────────────
+//
+// A collection of differently-shaped synthetic corpora. Each one
+// exercises a different kind of structure: left-identity vs
+// right-identity, doubling, successor-chains, two-operator mixing.
+// Running the pipeline across all of them and cross-referencing
+// discovered primitives is how we map "what mathscape currently
+// sees" as an empirical question, rather than guessing at it.
+
+/// Left-identity corpus: `add(0, x)` and `mul(1, x)`. Mirror of the
+/// right-identity case. Should discover the same operator-identity
+/// abstraction with the constant on arg[0] instead of arg[1].
+fn left_identity_corpus() -> Vec<Term> {
+    let mut v = Vec::new();
+    for n in 1..=8 {
+        v.push(apply(var(2), vec![nat(0), nat(n)]));
+        v.push(apply(var(3), vec![nat(1), nat(n)]));
+    }
+    v
+}
+
+/// Doubling corpus: `add(x, x)`. Anti-unification should produce
+/// `add(?x, ?x)` as the shared pattern — the same-variable-twice
+/// pattern (self-application).
+fn doubling_corpus() -> Vec<Term> {
+    (1..=10)
+        .map(|n| apply(var(2), vec![nat(n), nat(n)]))
+        .collect()
+}
+
+/// Successor-chain corpus: `succ(x)`, `succ(succ(x))`,
+/// `succ(succ(succ(x)))`. Different depths of the same unary
+/// wrapper. Tests the extractor's ability to find a fixed-point
+/// pattern when every term is a different depth of the same op.
+fn successor_chain_corpus() -> Vec<Term> {
+    let mut v = Vec::new();
+    for base in 0..=3u64 {
+        for depth in 1..=4usize {
+            let mut t = nat(base);
+            for _ in 0..depth {
+                t = apply(var(4), vec![t]); // var(4) = "succ"
+            }
+            v.push(t);
+        }
+    }
+    v
+}
+
+/// Two-operator compositional corpus: terms that mix add and mul
+/// in non-identity ways. `add(mul(x, 2), 0)`, `mul(add(x, 0), 3)`.
+/// After flat-add-identity and flat-mul-identity are discovered,
+/// library-reduction should strip the identities away, exposing
+/// the pure mul/add residue for meta-pattern extraction.
+fn cross_op_corpus() -> Vec<Term> {
+    let mut v = Vec::new();
+    for n in 1..=6u64 {
+        // add(mul(n, 2), 0)  — add-identity strips to mul(n, 2)
+        v.push(apply(
+            var(2),
+            vec![apply(var(3), vec![nat(n), nat(2)]), nat(0)],
+        ));
+        // mul(add(n, 0), 3)  — add-identity strips to mul(n, 3)
+        v.push(apply(
+            var(3),
+            vec![apply(var(2), vec![nat(n), nat(0)]), nat(3)],
+        ));
+    }
+    v
+}
+
 // ── Helpers ─────────────────────────────────────────────────────
 
 fn build_epoch() -> Epoch<CompressionGenerator, StatisticalProver, RuleEmitter, InMemoryRegistry>
@@ -473,6 +543,281 @@ fn flex_discovery_forest_end_to_end() {
     assert!(
         final_saving > 0.0,
         "scheduler should save at least some traversal as the forest stabilizes; got {final_saving}"
+    );
+}
+
+#[test]
+fn flex_cross_corpus_convergence_with_shared_forest() {
+    // The game: run the discovery pipeline across a zoo of
+    // differently-shaped synthetic corpora, but thread ONE shared
+    // DiscoveryForest through all runs. Every corpus's terms live
+    // in the same forest. Every rule any corpus produces fires
+    // retroactively against every other corpus's nodes. The forest
+    // becomes the composition substrate — a single convergence
+    // checkpoint that every corpus run attests into.
+    //
+    // What this exercises:
+    //   - Forest retroactive-reduction across heterogeneous inputs
+    //   - Cross-corpus gate 5 with REAL evidence (not a hook fake):
+    //     primitives that reduce terms in ≥ 2 corpora earn genuine
+    //     cross-corpus support
+    //   - Propose-cache fires because the library state stabilizes
+    //     between corpora
+    //   - Memory profile of a multi-corpus forest at modest scale
+    //     (we have 48GB; this is a cheap probe)
+    //
+    // What it teaches:
+    //   - Which primitives are corpus-universal vs corpus-specific
+    //   - How many corpora are needed to surface meta-laws
+    //   - Whether the scheduler savings compound across corpora
+    use std::collections::HashMap;
+    use std::time::Instant;
+
+    let zoo: Vec<(&str, Vec<Term>)> = vec![
+        ("arith-right-id", arith_corpus()),
+        ("mult-right-id", multiplicative_corpus()),
+        ("compositional", compositional_corpus()),
+        ("left-identity", left_identity_corpus()),
+        ("doubling", doubling_corpus()),
+        ("successor-chain", successor_chain_corpus()),
+        ("cross-op", cross_op_corpus()),
+    ];
+
+    // Shared forest substrate. Every corpus's terms go in, every
+    // rule retroactively applied across the whole.
+    let mut forest = DiscoveryForest::new();
+    // Shared epoch: keeps a single registry so rules discovered
+    // from one corpus are available to the next. This is the
+    // convergence-composition move: each corpus is a checkpoint,
+    // and subsequent corpora start from the cumulative library.
+    let base = CompressionGenerator::new(
+        ExtractConfig {
+            min_shared_size: 2,
+            min_matches: 2,
+            max_new_rules: 5,
+        },
+        1,
+    );
+    let meta = MetaPatternGenerator::new(
+        ExtractConfig {
+            min_shared_size: 1,
+            min_matches: 2,
+            max_new_rules: 12,
+        },
+        10_000,
+    );
+    let mut epoch = mathscape_core::epoch::Epoch::new(
+        CompositeGenerator::new(base, meta),
+        mathscape_reward::StatisticalProver::new(
+            mathscape_reward::reward::RewardConfig::default(),
+            0.0,
+        ),
+        mathscape_core::epoch::RuleEmitter,
+        mathscape_core::epoch::InMemoryRegistry::new(),
+    );
+
+    // Per-corpus → rule set map: which rules were accepted while
+    // processing THIS corpus. Cross-reference at the end to find
+    // primitives that appeared in multiple corpora.
+    let mut per_corpus_rules: HashMap<String, Vec<TermRef>> = HashMap::new();
+    // Forest-level observation: for each rule, which corpora did
+    // its retroactive application reduce nodes in?
+    let mut rule_to_reducing_corpora: HashMap<TermRef, std::collections::HashSet<String>> =
+        HashMap::new();
+
+    println!("\n╔══════════════════════════════════════════════════════╗");
+    println!("║ CROSS-CORPUS CONVERGENCE — shared forest substrate   ║");
+    println!("╚══════════════════════════════════════════════════════╝");
+    println!(
+        "\n{:>6} {:<18} {:>6} {:>6} {:>6} {:>6} {:>8}",
+        "#", "corpus", "terms", "fresh", "accept", "fwd", "ms"
+    );
+    println!("{}", "─".repeat(72));
+
+    let t_start = Instant::now();
+    let mut global_epoch = 0u64;
+
+    for (corpus_idx, (name, corpus)) in zoo.iter().enumerate() {
+        // Tick forest epoch to separate this corpus's insertions.
+        global_epoch += 1;
+        forest.set_epoch(global_epoch);
+
+        // Insert corpus terms (idempotent across overlap).
+        let pre_size = forest.len();
+        for t in corpus {
+            forest.insert(t.clone());
+        }
+        let fresh_inserted = forest.len() - pre_size;
+
+        // Run 3 Discover + 1 Reinforce on this corpus.
+        let pre_accept = epoch.registry.all().len();
+        let t0 = Instant::now();
+        for _ in 0..3 {
+            let _ = epoch.step_with_action(
+                corpus,
+                mathscape_core::control::EpochAction::Discover,
+            );
+        }
+        let _ = epoch.step_with_action(
+            corpus,
+            mathscape_core::control::EpochAction::Reinforce,
+        );
+        let ms = t0.elapsed().as_millis();
+        let post_accept = epoch.registry.all().len();
+        let new_rule_count = post_accept - pre_accept;
+
+        // The rules accepted during this corpus's run are the LAST
+        // new_rule_count rules in the registry. Collect them.
+        let new_rule_hashes: Vec<TermRef> = epoch
+            .registry
+            .all()
+            .iter()
+            .skip(pre_accept)
+            .map(|a| a.content_hash)
+            .collect();
+        per_corpus_rules.insert(name.to_string(), new_rule_hashes.clone());
+
+        // Retroactively apply the WHOLE library as a batch to the
+        // shared forest. Batch form so every due node is tried
+        // against every rule — no rule starvation due to earlier
+        // rules consuming the due set. Then read the morphism edges
+        // produced in this pass and credit each rule by name.
+        global_epoch += 1;
+        forest.set_epoch(global_epoch);
+        let library_rules: Vec<_> = epoch
+            .registry
+            .all()
+            .iter()
+            .map(|a| (a.content_hash, a.rule.clone()))
+            .collect();
+        let name_to_hash: HashMap<String, TermRef> = library_rules
+            .iter()
+            .map(|(h, r)| (r.name.clone(), *h))
+            .collect();
+        let edges_before = forest.edges.len();
+        let rule_refs: Vec<&mathscape_core::eval::RewriteRule> =
+            library_rules.iter().map(|(_, r)| r).collect();
+        let _ = forest.apply_rules_retroactively(&rule_refs);
+        // Every new edge tells us which rule reduced which node.
+        for edge in &forest.edges[edges_before..] {
+            if let Some(h) = name_to_hash.get(&edge.rule_name) {
+                rule_to_reducing_corpora
+                    .entry(*h)
+                    .or_default()
+                    .insert(name.to_string());
+            }
+        }
+
+        let fwd_edge_delta = forest.edges.len();
+        println!(
+            "{:>6} {:<18} {:>6} {:>6} {:>6} {:>6} {:>8}",
+            corpus_idx + 1,
+            name,
+            corpus.len(),
+            fresh_inserted,
+            new_rule_count,
+            fwd_edge_delta,
+            ms,
+        );
+    }
+    let total_ms = t_start.elapsed().as_millis();
+
+    // ── Cross-corpus attestation ────────────────────────────────
+    // For every rule in the final library, tabulate how many
+    // distinct corpora it retroactively reduced at least one node in.
+    let mut cross_counts: Vec<(TermRef, usize, String)> = Vec::new();
+    for artifact in epoch.registry.all() {
+        let n_corpora = rule_to_reducing_corpora
+            .get(&artifact.content_hash)
+            .map(|s| s.len())
+            .unwrap_or(0);
+        cross_counts.push((
+            artifact.content_hash,
+            n_corpora,
+            artifact.rule.name.clone(),
+        ));
+    }
+    cross_counts.sort_by(|a, b| b.1.cmp(&a.1));
+
+    println!("\n▶ Rule cross-corpus support (retroactively reduced ≥1 node in how many corpora?)");
+    println!(
+        "\n{:>18} {:>10} {:>6}",
+        "rule", "hash", "corpora"
+    );
+    println!("{}", "─".repeat(40));
+    for (hash, n, name) in &cross_counts {
+        println!(
+            "{:>18} {:>10} {:>6}",
+            name,
+            format!("{hash}").chars().take(8).collect::<String>(),
+            n,
+        );
+    }
+
+    let universal_rules: Vec<_> = cross_counts.iter().filter(|(_, n, _)| *n >= 3).collect();
+    let pair_rules: Vec<_> = cross_counts.iter().filter(|(_, n, _)| *n == 2).collect();
+    let singleton_rules: Vec<_> = cross_counts.iter().filter(|(_, n, _)| *n == 1).collect();
+    let inert_rules: Vec<_> = cross_counts.iter().filter(|(_, n, _)| *n == 0).collect();
+
+    println!("\n▶ Cross-corpus census");
+    println!("  ≥3 corpora (universal)  : {}", universal_rules.len());
+    println!("  = 2 corpora (pairwise)  : {}", pair_rules.len());
+    println!("  = 1 corpus (specific)   : {}", singleton_rules.len());
+    println!("  = 0 corpora (inert)     : {}", inert_rules.len());
+
+    println!("\n▶ Forest final state");
+    println!("  total nodes        : {}", forest.len());
+    println!("  total edges        : {}", forest.edges.len());
+    println!("  retroactive edges  : {}", forest.retroactive_edge_count());
+    println!("  stable leaves      : {}", forest.stable_leaf_count());
+    println!("  elapsed (all corpora): {total_ms}ms");
+    println!(
+        "  library final size : {}",
+        epoch.registry.all().len()
+    );
+
+    // Empirically-pinned invariants. With 7 corpora and the current
+    // generator/prover settings we observe: every discovered rule
+    // earns some cross-corpus support, and at least one meta-rule
+    // reaches near-universal reach. Assertions reflect that.
+    assert!(
+        epoch.registry.all().len() >= 4,
+        "expected ≥4 rules total across the zoo; got {}",
+        epoch.registry.all().len()
+    );
+    assert!(
+        inert_rules.is_empty(),
+        "every rule should reduce at least one node somewhere; \
+         inert rules are corpus artifacts that shouldn't survive. \
+         Inert count: {}",
+        inert_rules.len()
+    );
+    assert!(
+        !universal_rules.is_empty(),
+        "expected at least one rule with ≥3 corpus retroactive support \
+         — the mark of a genuinely universal discovered primitive. \
+         Got {} universals, {} pair-rules.",
+        universal_rules.len(),
+        pair_rules.len()
+    );
+    // Meta-rules should earn cross-corpus support — they're the
+    // dimensional-discovery primitives, and by construction they
+    // generalize multiple concrete LHS shapes. Check at least one
+    // meta-rule (id ≥ 10000) earns ≥2 corpora.
+    let meta_with_cross_corpus_support = cross_counts
+        .iter()
+        .filter(|(_, n, name)| *n >= 2 && name.starts_with("S_") && {
+            name.strip_prefix("S_")
+                .and_then(|s| s.parse::<u32>().ok())
+                .map(|id| id >= 10_000)
+                .unwrap_or(false)
+        })
+        .count();
+    assert!(
+        meta_with_cross_corpus_support >= 1,
+        "expected at least one meta-rule (id ≥ 10000) with ≥2 corpus \
+         retroactive support — this is where dimensional-discovery earns \
+         its name."
     );
 }
 
