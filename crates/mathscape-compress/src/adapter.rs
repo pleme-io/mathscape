@@ -6,7 +6,9 @@
 //! library as a `Vec<RewriteRule>`, asks `extract_rules` for new
 //! patterns, and wraps each as a `Candidate`.
 
+use crate::egraph::{check_rule_equivalence, MathscapeLang};
 use crate::extract::ExtractConfig;
+use egg::Rewrite;
 use mathscape_core::{
     epoch::{Artifact, Candidate, Generator},
     eval::{pattern_equivalent, pattern_match, RewriteRule},
@@ -89,6 +91,17 @@ pub struct CompressionGenerator {
     /// patterns invisible to root-only AU. Off by default to
     /// preserve the established bettyfine.
     pub subterm_au: bool,
+    /// Phase K3: opt-in e-graph probes for rule-level dedup. Empty
+    /// = syntactic dedup only (the established default). With a
+    /// probe set supplied (e.g. `commutativity_probe()`), the
+    /// generator additionally rejects candidates that are
+    /// e-graph-equivalent to existing library entries or already-
+    /// kept candidates under those probes. Kept off the default
+    /// path to preserve the milestone fingerprint.
+    pub egraph_probes: Vec<Rewrite<MathscapeLang, ()>>,
+    /// Iteration limit for e-graph saturation during dedup. Only
+    /// consulted when `egraph_probes` is non-empty.
+    pub egraph_step_limit: usize,
 }
 
 impl CompressionGenerator {
@@ -99,6 +112,8 @@ impl CompressionGenerator {
             next_symbol_id,
             origin: "compress/antiunify".into(),
             subterm_au: false,
+            egraph_probes: Vec::new(),
+            egraph_step_limit: 30,
         }
     }
 
@@ -109,6 +124,45 @@ impl CompressionGenerator {
         self.subterm_au = true;
         self.origin = "compress/subterm-antiunify".into();
         self
+    }
+
+    /// Phase K3: builder that enables e-graph-based dedup under
+    /// the supplied probe set. Canonical probes live on `egraph`:
+    /// `commutativity_probe()`, `associativity_probe()`. Pass the
+    /// concatenation to test both simultaneously.
+    #[must_use]
+    pub fn with_egraph_probes(mut self, probes: Vec<Rewrite<MathscapeLang, ()>>) -> Self {
+        self.egraph_probes = probes;
+        self.origin = "compress/egraph-dedup".into();
+        self
+    }
+
+    /// Customize the e-graph saturation step budget. Default 30.
+    #[must_use]
+    pub fn with_egraph_step_limit(mut self, step_limit: usize) -> Self {
+        self.egraph_step_limit = step_limit;
+        self
+    }
+
+    /// Internal: true iff `candidate` is e-graph-equivalent to any
+    /// rule in `against` under the generator's probe set. Returns
+    /// false when probes are disabled or saturation is uncertain —
+    /// the syntactic check stays authoritative in ambiguous cases.
+    fn egraph_duplicate(&self, candidate: &RewriteRule, against: &[RewriteRule]) -> bool {
+        if self.egraph_probes.is_empty() {
+            return false;
+        }
+        against.iter().any(|existing| {
+            matches!(
+                check_rule_equivalence(
+                    candidate,
+                    existing,
+                    &self.egraph_probes,
+                    self.egraph_step_limit,
+                ),
+                Some(true)
+            )
+        })
     }
 }
 
@@ -175,6 +229,16 @@ impl Generator for CompressionGenerator {
             if kept.iter().any(|k| pattern_equivalent(&rule.lhs, &k.lhs)) {
                 continue;
             }
+            // Phase K3: opt-in e-graph dedup. Only runs when probes
+            // are supplied via `.with_egraph_probes(...)`. Catches
+            // commutative/associative variants that the syntactic
+            // `pattern_equivalent` pass misses.
+            if self.egraph_duplicate(&rule, &existing) {
+                continue;
+            }
+            if self.egraph_duplicate(&rule, &kept) {
+                continue;
+            }
             kept.push(rule);
         }
         kept.into_iter()
@@ -224,5 +288,67 @@ mod tests {
         let second = g.propose(1, &corpus, registry.all());
         // No panic; symbol counter advanced; second call completed successfully.
         assert!(g.next_symbol_id > 1 || second.is_empty());
+    }
+
+    #[test]
+    fn egraph_dedup_builder_stamps_origin_and_probes() {
+        let g = CompressionGenerator::new(ExtractConfig::default(), 1)
+            .with_egraph_probes(crate::egraph::commutativity_probe());
+        assert_eq!(g.origin, "compress/egraph-dedup");
+        assert_eq!(g.egraph_probes.len(), 1);
+    }
+
+    #[test]
+    fn egraph_dedup_rejects_commutatively_equivalent_existing() {
+        // Existing library holds a rule matching add(?a, ?b). A
+        // candidate matching add(?b, ?a) is commutatively
+        // equivalent — the e-graph dedup must reject it on the
+        // inter-batch pass.
+        let existing = vec![RewriteRule {
+            name: "R_existing".into(),
+            lhs: apply(var(2), vec![var(100), var(101)]),
+            rhs: Term::Symbol(42, vec![var(100), var(101)]),
+        }];
+        let candidate = RewriteRule {
+            name: "R_cand".into(),
+            lhs: apply(var(2), vec![var(101), var(100)]),
+            rhs: Term::Symbol(42, vec![var(100), var(101)]),
+        };
+        // Without probes: the two LHSs are NOT pattern_equivalent
+        // (arg order differs) so syntactic dedup would let the
+        // candidate through.
+        let g_bare = CompressionGenerator::new(ExtractConfig::default(), 1);
+        assert!(
+            !g_bare.egraph_duplicate(&candidate, &existing),
+            "probes disabled → egraph_duplicate must say no (falls back to syntactic dedup elsewhere)"
+        );
+        // With commutativity probes: caught.
+        let g_probe = CompressionGenerator::new(ExtractConfig::default(), 1)
+            .with_egraph_probes(crate::egraph::commutativity_probe());
+        assert!(
+            g_probe.egraph_duplicate(&candidate, &existing),
+            "commutativity probe must collapse arg-swapped variants"
+        );
+    }
+
+    #[test]
+    fn egraph_dedup_default_path_preserves_milestone_behavior() {
+        // Without probes, propose() behavior is IDENTICAL to pre-K3.
+        // Regression sentinel for the autonomous-traversal milestone.
+        let corpus = vec![
+            apply(var(2), vec![nat(5), nat(0)]),
+            apply(var(2), vec![nat(3), nat(0)]),
+            apply(var(2), vec![nat(7), nat(0)]),
+        ];
+        let mut g_legacy = CompressionGenerator::new(ExtractConfig::default(), 1);
+        let mut g_explicit_empty = CompressionGenerator::new(ExtractConfig::default(), 1)
+            .with_egraph_probes(vec![]);
+        let legacy = g_legacy.propose(0, &corpus, &[]);
+        let explicit = g_explicit_empty.propose(0, &corpus, &[]);
+        assert_eq!(
+            legacy.len(),
+            explicit.len(),
+            "empty probe set must not change candidate count",
+        );
     }
 }
