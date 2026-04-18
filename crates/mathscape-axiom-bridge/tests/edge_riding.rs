@@ -38,6 +38,9 @@ mod common;
 use common::experiment::{
     adaptive_corpus, format_term, run_probe_fast_with_substrate, CorpusFamily,
 };
+use mathscape_compress::egraph::{
+    associativity_probe, commutativity_probe, is_semantically_novel, MathscapeRewrite,
+};
 use mathscape_compress::extract::ExtractConfig;
 use mathscape_core::eval::{anonymize_term, RewriteRule};
 use mathscape_core::term::Term;
@@ -440,6 +443,15 @@ fn edge_riding_loop() {
     // session.has_stalled() / session.stalled_cycles().
     let mut session = DiscoverySession::new();
 
+    // Phase K probes for semantic-novelty dedup. Applied BEFORE
+    // each theorem enters the ledger, so the ledger grows by
+    // equivalence-class-count, not by structural-form-count.
+    let probes: Vec<MathscapeRewrite> = {
+        let mut v = commutativity_probe();
+        v.extend(associativity_probe());
+        v
+    };
+
     let start = std::time::Instant::now();
 
     for cycle in 0..cycles {
@@ -492,11 +504,32 @@ fn edge_riding_loop() {
             );
         }
 
-        // 3. Promote each new theorem. Session handles the
-        //    reducing-vs-equivalence split automatically.
+        // 3. Promote each new theorem. Two-stage filter:
+        //    (a) Phase K SEMANTIC-NOVELTY check. Reject theorems
+        //        e-graph-equivalent to any ledger entry under
+        //        commutativity + associativity probes. This tightens
+        //        the loop's novelty signal from STRUCTURAL
+        //        ("different LHS+RHS literal") to SEMANTIC
+        //        ("different equivalence class"). The 50-cycle
+        //        findings (docs/arch/edge-50cycle-findings.md)
+        //        showed that without this check, the machine
+        //        rediscovered the same ~15 theorems as 800
+        //        alternative expressions.
+        //    (b) Session promote — handles the reducing-vs-
+        //        equivalence split (substrate vs ledger-only).
         let mut added_to_substrate = 0usize;
         let mut ledger_only = 0usize;
+        let mut rejected_semantic = 0usize;
         for t in new_theorems.iter().cloned() {
+            if !is_semantically_novel(
+                &t,
+                session.ledger.rules(),
+                &probes,
+                24, // step limit for e-graph saturation
+            ) {
+                rejected_semantic += 1;
+                continue;
+            }
             let (added_ledger, added_substrate) = session.promote(t);
             if added_substrate {
                 added_to_substrate += 1;
@@ -505,7 +538,7 @@ fn edge_riding_loop() {
             }
         }
         println!(
-            "  rustified: {added_to_substrate} reducing → substrate | {ledger_only} equivalence → ledger only"
+            "  rustified: {added_to_substrate} reducing → substrate | {ledger_only} equivalence → ledger only | {rejected_semantic} semantic duplicates rejected"
         );
 
         // 4. Evolve apparatus pool.
@@ -533,10 +566,15 @@ fn edge_riding_loop() {
         );
 
         let cycle_elapsed = cycle_start.elapsed().as_secs_f64();
+        // Record the ACTUAL admission count (reducing + equivalence,
+        // after semantic-dedup rejection). This is the real novelty
+        // signal — if it hits zero post-bootstrap, the correctness
+        // criterion fires and we've found a mechanism gap.
+        let admitted = added_to_substrate + ledger_only;
         session.record_cycle(
             cycle,
             provenance.len(),
-            new_theorems.len(),
+            admitted,
             cycle_elapsed,
         );
         println!("  cycle elapsed: {cycle_elapsed:.1}s");
