@@ -63,7 +63,8 @@
 //! material to work with.
 
 use crate::builtin::{
-    ADD, INT_ADD, INT_MUL, INT_SUCC, INT_ZERO, MUL, NEG, SUCC, ZERO,
+    ADD, INT_ADD, INT_MUL, INT_SUCC, INT_ZERO, MUL, NEG, SUCC, TENSOR_ADD,
+    TENSOR_DOT, TENSOR_MUL, TENSOR_NEG, TENSOR_SCALE, TENSOR_SUM, ZERO,
 };
 use crate::term::Term;
 use crate::value::Value;
@@ -151,10 +152,156 @@ fn derive_apply(head_id: u32, args: &[Term], var_id: u32) -> Term {
         }
         // Zero / int_zero: nullary constant.
         ZERO | INT_ZERO => Term::Number(Value::Int(0)),
-        // Unknown builtin or not-yet-supported (e.g., tensor ops,
-        // dot, sum). Return 0; future work adds specific rules.
+        // R17: Gradient through tensor ops.
+        // Tensor-add is linear: d(A+B)/dx = dA/dx + dB/dx.
+        TENSOR_ADD => {
+            if args.len() != 2 {
+                return Term::Number(Value::Int(0));
+            }
+            let da = symbolic_derivative(&args[0], var_id);
+            let db = symbolic_derivative(&args[1], var_id);
+            // Wrap in tensor_add if both derivatives are tensors;
+            // else use scalar add since the derivative of a
+            // tensor expression w.r.t. a scalar var that doesn't
+            // appear reduces to 0 (the Int zero we emit as
+            // default for constants).
+            simplify_tensor_add(da, db)
+        }
+        // Tensor-mul is element-wise product; each element uses
+        // the product rule: d(A*B)/dx = dA/dx * B + A * dB/dx.
+        // Only valid when d/dx produces a tensor-shaped
+        // derivative; for scalar vars that don't appear in A or
+        // B, this collapses to 0.
+        TENSOR_MUL => {
+            if args.len() != 2 {
+                return Term::Number(Value::Int(0));
+            }
+            let da = symbolic_derivative(&args[0], var_id);
+            let db = symbolic_derivative(&args[1], var_id);
+            let term_1 = simplify_tensor_mul(da, args[1].clone());
+            let term_2 = simplify_tensor_mul(args[0].clone(), db);
+            simplify_tensor_add(term_1, term_2)
+        }
+        // Tensor-neg is linear: d(-T)/dx = -(dT/dx).
+        TENSOR_NEG => {
+            if args.len() != 1 {
+                return Term::Number(Value::Int(0));
+            }
+            let da = symbolic_derivative(&args[0], var_id);
+            simplify_tensor_neg(da)
+        }
+        // Tensor-scale: d(c*T)/dx = c * dT/dx + dc/dx * T.
+        // When c is a scalar and doesn't depend on x, dc/dx=0
+        // and the second term vanishes. When c IS x (the var),
+        // d(c*T)/dx = T (treating T as constant w.r.t. x).
+        TENSOR_SCALE => {
+            if args.len() != 2 {
+                return Term::Number(Value::Int(0));
+            }
+            let dc = symbolic_derivative(&args[0], var_id);
+            let dt = symbolic_derivative(&args[1], var_id);
+            // scale(c, dT) + scale(dc, T)
+            //    where the first requires dT be tensor-shaped
+            //    (skip if dt == 0)
+            //    where the second requires dc be a scalar Int
+            let first = if is_int_zero(&dt) {
+                Term::Number(Value::Int(0))
+            } else {
+                Term::Apply(
+                    Box::new(Term::Var(TENSOR_SCALE)),
+                    vec![args[0].clone(), dt],
+                )
+            };
+            let second = if is_int_zero(&dc) {
+                Term::Number(Value::Int(0))
+            } else {
+                Term::Apply(
+                    Box::new(Term::Var(TENSOR_SCALE)),
+                    vec![dc, args[1].clone()],
+                )
+            };
+            simplify_tensor_add(first, second)
+        }
+        // Tensor-sum is linear reduction: d(sum(T))/dx = sum(dT/dx).
+        TENSOR_SUM => {
+            if args.len() != 1 {
+                return Term::Number(Value::Int(0));
+            }
+            let dt = symbolic_derivative(&args[0], var_id);
+            if is_int_zero(&dt) {
+                return Term::Number(Value::Int(0));
+            }
+            Term::Apply(Box::new(Term::Var(TENSOR_SUM)), vec![dt])
+        }
+        // Tensor-dot: d(a·b)/dx = (da/dx)·b + a·(db/dx)
+        // — standard chain rule on inner product, returns
+        // scalar. If both args are independent of x, collapses.
+        TENSOR_DOT => {
+            if args.len() != 2 {
+                return Term::Number(Value::Int(0));
+            }
+            let da = symbolic_derivative(&args[0], var_id);
+            let db = symbolic_derivative(&args[1], var_id);
+            let first = if is_int_zero(&da) {
+                Term::Number(Value::Int(0))
+            } else {
+                Term::Apply(
+                    Box::new(Term::Var(TENSOR_DOT)),
+                    vec![da, args[1].clone()],
+                )
+            };
+            let second = if is_int_zero(&db) {
+                Term::Number(Value::Int(0))
+            } else {
+                Term::Apply(
+                    Box::new(Term::Var(TENSOR_DOT)),
+                    vec![args[0].clone(), db],
+                )
+            };
+            simplify_add(first, second)
+        }
+        // Unknown builtin or not-yet-supported. Return 0; future
+        // work adds specific rules.
         _ => Term::Number(Value::Int(0)),
     }
+}
+
+/// Simplify `tensor_add(a, b)` — fall back to scalar add when both
+/// derivatives are scalar 0, otherwise wrap in tensor_add.
+fn simplify_tensor_add(a: Term, b: Term) -> Term {
+    if is_int_zero(&a) {
+        return b;
+    }
+    if is_int_zero(&b) {
+        return a;
+    }
+    // Both non-zero: wrap as tensor_add. If the inputs aren't
+    // tensors, evaluation will fail at runtime — same as with
+    // the scalar path. This is fine: the caller must use
+    // tensor-differentiating ops consistently.
+    Term::Apply(Box::new(Term::Var(TENSOR_ADD)), vec![a, b])
+}
+
+fn simplify_tensor_mul(a: Term, b: Term) -> Term {
+    if is_int_zero(&a) || is_int_zero(&b) {
+        return Term::Number(Value::Int(0));
+    }
+    Term::Apply(Box::new(Term::Var(TENSOR_MUL)), vec![a, b])
+}
+
+fn simplify_tensor_neg(a: Term) -> Term {
+    if is_int_zero(&a) {
+        return Term::Number(Value::Int(0));
+    }
+    // Double-negation: tensor_neg(tensor_neg(x)) = x
+    if let Term::Apply(head, inner) = &a {
+        if let Term::Var(TENSOR_NEG) = head.as_ref() {
+            if inner.len() == 1 {
+                return inner[0].clone();
+            }
+        }
+    }
+    Term::Apply(Box::new(Term::Var(TENSOR_NEG)), vec![a])
 }
 
 /// Simplify `add(a, b)` during derivative construction:
@@ -401,6 +548,147 @@ mod tests {
         let grounded = d2.substitute(100, &int_(2));
         let v = eval(&grounded, &[], 200).unwrap();
         assert_eq!(v, int_(12));
+    }
+
+    // ── R17: gradient flow through tensor ops ────────────────────
+
+    fn t_val(shape: Vec<usize>, data: Vec<i64>) -> Term {
+        Term::Number(Value::tensor(shape, data).unwrap())
+    }
+
+    #[test]
+    fn tensor_add_constant_has_zero_gradient() {
+        // d(tensor_add(T1, T2))/dx where x doesn't appear in
+        // either tensor — gradient is 0.
+        let expr = apply(
+            Term::Var(crate::builtin::TENSOR_ADD),
+            vec![
+                t_val(vec![2], vec![1, 2]),
+                t_val(vec![2], vec![3, 4]),
+            ],
+        );
+        let d = symbolic_derivative(&expr, 100);
+        assert_eq!(d, int_(0));
+    }
+
+    #[test]
+    fn tensor_sum_is_linear_over_gradient() {
+        // f(x) = tensor_sum(tensor_scale(x, T)) where T is constant.
+        // df/dx = tensor_sum(T)  (gradient passes through sum linearly)
+        //
+        // For T = [1, 2, 3]:
+        //   f(x) = x*1 + x*2 + x*3 = 6x
+        //   df/dx = 6 = sum([1, 2, 3])
+        use crate::eval::eval;
+        let x = var(100);
+        let t_const = t_val(vec![3], vec![1, 2, 3]);
+        let scaled = apply(
+            Term::Var(crate::builtin::TENSOR_SCALE),
+            vec![x, t_const],
+        );
+        let summed = apply(
+            Term::Var(crate::builtin::TENSOR_SUM),
+            vec![scaled],
+        );
+
+        let d = symbolic_derivative(&summed, 100);
+        // Evaluate the gradient expression.
+        let v = eval(&d, &[], 100).unwrap();
+        assert_eq!(v, int_(6));
+    }
+
+    #[test]
+    fn tensor_dot_product_rule() {
+        // f(x) = tensor_dot(tensor_scale(x, A), B)
+        // With A=[1,2,3], B=[4,5,6]: f(x) = x*(1*4+2*5+3*6) = 32x
+        // df/dx = 32
+        use crate::eval::eval;
+        let x = var(100);
+        let a = t_val(vec![3], vec![1, 2, 3]);
+        let b = t_val(vec![3], vec![4, 5, 6]);
+        let scaled_a = apply(
+            Term::Var(crate::builtin::TENSOR_SCALE),
+            vec![x, a],
+        );
+        let dot_expr = apply(
+            Term::Var(crate::builtin::TENSOR_DOT),
+            vec![scaled_a, b],
+        );
+
+        let d = symbolic_derivative(&dot_expr, 100);
+        let v = eval(&d, &[], 100).unwrap();
+        assert_eq!(v, int_(32));
+    }
+
+    #[test]
+    fn proof_linear_regression_gradient_via_tensor_dot() {
+        // Model: y_hat = dot(w, x)  where w is a learnable
+        // weight tensor, x is input, both 1D with length 3.
+        //
+        // Even though w is a tensor, we're taking gradient w.r.t.
+        // the SCALAR elements we've modeled via composition.
+        //
+        // Actually for this test: use f(s) = dot(scale(s, w), x)
+        // which is s * dot(w, x). With w=[1,2,3], x=[4,5,6]:
+        //   f(s) = s * 32
+        //   df/ds = 32
+        //
+        // Proves: gradient flows through both scale and dot.
+        use crate::eval::eval;
+        let s = var(100);
+        let w = t_val(vec![3], vec![1, 2, 3]);
+        let x = t_val(vec![3], vec![4, 5, 6]);
+        let scaled_w = apply(
+            Term::Var(crate::builtin::TENSOR_SCALE),
+            vec![s, w],
+        );
+        let y_hat = apply(
+            Term::Var(crate::builtin::TENSOR_DOT),
+            vec![scaled_w, x],
+        );
+
+        let dy_ds = symbolic_derivative(&y_hat, 100);
+        let v = eval(&dy_ds, &[], 100).unwrap();
+        assert_eq!(v, int_(32));
+    }
+
+    #[test]
+    fn proof_mse_gradient_through_tensor_ops() {
+        // Loss function style: sum((a*v + b)²) where v is a
+        // constant tensor and a, b are scalars.
+        //
+        // With v=[1,2,3], at a=0, b=1:
+        //   a*v + b = [0+1, 0+1, 0+1] using broadcast... but we
+        //   don't have scalar-tensor broadcast. So let's use a
+        //   form that works with our primitives:
+        //
+        // f(a) = sum(scale(a, v) * scale(a, v))
+        //      = sum(a² v²) = a² * sum(v²)
+        //      = a² * (1 + 4 + 9) = 14 a²
+        // df/da = 28a
+        // At a=3: df/da = 84
+        use crate::eval::eval;
+        let a = var(100);
+        let v = t_val(vec![3], vec![1, 2, 3]);
+        let av = apply(
+            Term::Var(crate::builtin::TENSOR_SCALE),
+            vec![a.clone(), v.clone()],
+        );
+        let av2 = apply(
+            Term::Var(crate::builtin::TENSOR_MUL),
+            vec![av.clone(), av],
+        );
+        let loss = apply(
+            Term::Var(crate::builtin::TENSOR_SUM),
+            vec![av2],
+        );
+
+        // Symbolic gradient w.r.t. a.
+        let grad = symbolic_derivative(&loss, 100);
+        // Substitute a=3 and evaluate.
+        let g = grad.substitute(100, &int_(3));
+        let v_eval = eval(&g, &[], 200).unwrap();
+        assert_eq!(v_eval, int_(84));
     }
 
     #[test]
