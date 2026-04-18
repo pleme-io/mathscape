@@ -6,6 +6,7 @@ pub mod builtin;
 pub mod control;
 pub mod corpus;
 pub mod demotion;
+pub mod environment;
 pub mod epoch;
 pub mod eval;
 pub mod event;
@@ -34,6 +35,10 @@ pub use control::{
 };
 pub use corpus::{CorpusLog, CorpusSnapshot};
 pub use demotion::{demote_artifact, DemotionCandidate, DemotionGate, UsageFloorGate};
+pub use environment::{
+    canonical_deployment_suite, policy_distance, ConvergenceTracker, CorpusShape,
+    Environment, MechanismSnapshot,
+};
 pub use epoch::{
     AcceptanceCertificate, Artifact, Candidate, Emitter, Epoch, EpochTrace, Generator,
     InMemoryRegistry, Prover, Registry, Rejection, RuleEmitter, Verdict,
