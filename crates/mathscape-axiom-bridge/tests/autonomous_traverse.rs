@@ -3693,3 +3693,168 @@ fn phase_k_egraph_dedup_probe() {
     println!("monotonicity across 4 seeds: OK (probes never grow the library)");
     println!("per-seed A/B/C/D totals: {seed_totals:?}");
 }
+
+#[test]
+#[ignore = "phase K4b: asymmetric corpora — does commutativity probe bite when we GIVE it asymmetric pairs? ~5s, --ignored"]
+fn phase_k_asymmetric_corpora() {
+    // Phase K4b: the activation probe (K4) showed today's default
+    // bettyfine is already closed under commutativity. The natural
+    // follow-up: does the probe bite *at all*, or is the K3 wiring
+    // theoretically correct but practically inert?
+    //
+    // Construction: hand-craft a corpus that contains BOTH shapes
+    // of an asymmetric pattern — add(N, 0) AND add(0, N) for
+    // several N. Anti-unification over same-shape pairs should
+    // produce TWO candidate rules:
+    //
+    //   R1: add(?x, 0) → ?x    (from left-zero pairs)
+    //   R2: add(0, ?x) → ?x    (from right-zero pairs)
+    //
+    // These are syntactically distinct (arg order differs) but
+    // commutatively equivalent. The K3 wiring SHOULD collapse
+    // them under the commutativity probe.
+    //
+    // If the bare path emits both R1 and R2 AND the probe path
+    // emits only one, phase K has teeth — we've shown the wiring
+    // bites given the right inputs. If the bare path already only
+    // emits one (AU picks a canonical form), or if even the probe
+    // path emits both, we've falsified the asymmetric-corpus
+    // hypothesis and need a different angle (K6 reinforcement, or
+    // phase L adaptive corpora).
+    use mathscape_compress::egraph::commutativity_probe;
+    use mathscape_compress::extract::ExtractConfig as EC;
+    use mathscape_core::epoch::Generator;
+    use mathscape_core::test_helpers::{apply, nat, var};
+
+    // 8 paired terms: (add(n, 0), add(0, n)) for n ∈ 1..=8.
+    let mut corpus: Vec<mathscape_core::term::Term> = Vec::new();
+    for n in 1..=8u64 {
+        corpus.push(apply(var(2), vec![nat(n), nat(0)]));
+        corpus.push(apply(var(2), vec![nat(0), nat(n)]));
+    }
+
+    // Loose config: accept small patterns, many candidates.
+    let config = EC {
+        min_shared_size: 2,
+        min_matches: 2,
+        max_new_rules: 12,
+    };
+
+    let mut g_bare = CompressionGenerator::new(config.clone(), 1);
+    let mut g_probe = CompressionGenerator::new(config.clone(), 1)
+        .with_egraph_probes(commutativity_probe());
+
+    let bare = g_bare.propose(0, &corpus, &[]);
+    let probed = g_probe.propose(0, &corpus, &[]);
+
+    println!();
+    println!("phase K4b: asymmetric-corpus probe");
+    println!("──────────────────────────────────────");
+    println!("  corpus size        : {}", corpus.len());
+    println!();
+    println!("  candidates (bare)   : {}", bare.len());
+    for (i, c) in bare.iter().enumerate() {
+        println!("    [{i}] {} → {}", format_term(&c.rule.lhs), format_term(&c.rule.rhs));
+    }
+    println!();
+    println!("  candidates (probe)  : {}", probed.len());
+    for (i, c) in probed.iter().enumerate() {
+        println!("    [{i}] {} → {}", format_term(&c.rule.lhs), format_term(&c.rule.rhs));
+    }
+
+    // Classification: count candidates with 0 in first arg vs
+    // second arg slot. Both forms present = AU produces both;
+    // only one = AU collapses by itself.
+    let (bare_left_zero, bare_right_zero) = count_zero_positions(&bare);
+    let (probe_left_zero, probe_right_zero) = count_zero_positions(&probed);
+
+    println!();
+    println!(
+        "  bare LHS shape count: (add(?x, 0): {bare_left_zero}, add(0, ?x): {bare_right_zero})"
+    );
+    println!(
+        "  probe LHS shape count: (add(?x, 0): {probe_left_zero}, add(0, ?x): {probe_right_zero})"
+    );
+
+    // Assertion 1: probe path never grows the library (monotonicity).
+    assert!(
+        probed.len() <= bare.len(),
+        "probe must not add candidates (bare={}, probe={})",
+        bare.len(),
+        probed.len()
+    );
+
+    // Narration verdict: did the probe bite?
+    println!();
+    if bare.len() > probed.len() {
+        let collapsed = bare.len() - probed.len();
+        println!(
+            "  ✓ VERDICT: probe COLLAPSED {collapsed} candidate(s) via commutativity."
+        );
+        println!("    phase K wiring is active and bites when given asymmetric inputs.");
+    } else if bare_left_zero > 0 && bare_right_zero > 0 {
+        println!(
+            "  ? VERDICT: bare path emits both asymmetric shapes, but probe didn't collapse."
+        );
+        println!("    possible cause: RHS variants differ post-anonymization in a way the");
+        println!("    probe doesn't normalize; worth investigating check_rule_equivalence.");
+    } else {
+        println!(
+            "  ✗ VERDICT: bare path emits only {} of 2 asymmetric shapes — AU already",
+            if bare_left_zero > 0 { "add(?x, 0)" } else { "add(0, ?x)" }
+        );
+        println!("    picks a canonical form. The asymmetric-corpus hypothesis is falsified:");
+        println!("    even crafted asymmetric inputs don't expose commutative duplicates to");
+        println!("    phase K. Real leverage is in reinforcement (K6) or adaptive corpora (L).");
+    }
+}
+
+/// Pretty-print a Term in s-expression form for the probe narration.
+fn format_term(t: &mathscape_core::term::Term) -> String {
+    use mathscape_core::term::Term;
+    use mathscape_core::value::Value;
+    match t {
+        Term::Var(v) => format!("?v{v}"),
+        Term::Number(Value::Nat(n)) => n.to_string(),
+        Term::Apply(f, args) => {
+            let f_str = format_term(f);
+            let args_str: Vec<String> = args.iter().map(format_term).collect();
+            format!("({} {})", f_str, args_str.join(" "))
+        }
+        Term::Symbol(id, args) => {
+            let args_str: Vec<String> = args.iter().map(format_term).collect();
+            if args_str.is_empty() {
+                format!("S_{id}")
+            } else {
+                format!("(S_{id} {})", args_str.join(" "))
+            }
+        }
+        Term::Point(p) => format!("P_{p:?}"),
+        Term::Fn(params, body) => format!("(fn {:?} → {})", params, format_term(body)),
+    }
+}
+
+/// Count how many Candidates have LHS shape `apply(?op, 0, ?x)`
+/// vs. `apply(?op, ?x, 0)`. Returns (left_zero_count, right_zero_count).
+fn count_zero_positions(
+    candidates: &[mathscape_core::epoch::Candidate],
+) -> (usize, usize) {
+    use mathscape_core::term::Term;
+    use mathscape_core::value::Value;
+    let mut left = 0;
+    let mut right = 0;
+    for c in candidates {
+        if let Term::Apply(_f, args) = &c.rule.lhs {
+            if args.len() == 2 {
+                let a0_is_zero = matches!(&args[0], Term::Number(Value::Nat(0)));
+                let a1_is_zero = matches!(&args[1], Term::Number(Value::Nat(0)));
+                if a0_is_zero && !a1_is_zero {
+                    left += 1;
+                } else if a1_is_zero && !a0_is_zero {
+                    right += 1;
+                }
+            }
+        }
+    }
+    (left, right)
+}
