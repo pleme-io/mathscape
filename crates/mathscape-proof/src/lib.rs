@@ -1,8 +1,19 @@
 //! Proof construction, verification, composition, and Lean 4 export.
+//!
+//! Phase J (semantic validation) lives in `semantic` — empirical
+//! projection discovery that turns structural patterns into
+//! SemanticallyValidated equations the machine can compose and
+//! Rustify with confidence.
 
 pub mod lean_export;
+pub mod semantic;
 
 pub use lean_export::{export_rule_as_lean, LeanExportOptions};
+pub use semantic::{
+    discover_semantic_projections, generate_semantic_candidates,
+    validate_semantically, CandidateKind, SemanticCandidate, SemanticVerdict,
+    ValidationConfig,
+};
 
 use mathscape_core::eval::RewriteRule;
 use mathscape_core::term::Term;
