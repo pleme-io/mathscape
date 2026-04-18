@@ -220,7 +220,7 @@ pub struct ExperimentReport {
 
 /// Single-traversal runner — one apparatus, one seed, one corpus
 /// instance. Returns (total_rules, axiomatized_count, full_rules).
-fn run_one(
+pub fn run_one(
     apparatus_src: &str,
     corpus: &[(String, Vec<Term>)],
     extract_config: &ExtractConfig,
@@ -295,7 +295,7 @@ fn collect_axiomatized(
     (total_lib, axiom, rules)
 }
 
-fn format_term(t: &Term) -> String {
+pub fn format_term(t: &Term) -> String {
     use mathscape_core::value::Value;
     match t {
         Term::Var(v) => format!("?v{v}"),
@@ -318,7 +318,7 @@ fn format_term(t: &Term) -> String {
     }
 }
 
-fn rule_key(r: &RewriteRule) -> String {
+pub fn rule_key(r: &RewriteRule) -> String {
     format!(
         "{}→{}",
         format_term(&anonymize_term(&r.lhs)),
