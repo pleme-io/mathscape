@@ -12,7 +12,9 @@
 //! it mints, and where the theory meets reality.
 
 use mathscape_axiom_bridge::{run_promotion, BridgeConfig};
-use mathscape_compress::{extract::ExtractConfig, CompressionGenerator};
+use mathscape_compress::{
+    extract::ExtractConfig, CompositeGenerator, CompressionGenerator, MetaPatternGenerator,
+};
 use mathscape_core::{
     control::{Allocator, RealizationPolicy, RewardEstimator},
     epoch::{Epoch, InMemoryRegistry, Registry, RuleEmitter},
@@ -471,6 +473,141 @@ fn flex_discovery_forest_end_to_end() {
     assert!(
         final_saving > 0.0,
         "scheduler should save at least some traversal as the forest stabilizes; got {final_saving}"
+    );
+}
+
+#[test]
+fn flex_dimensional_discovery_emerges() {
+    // The big one: after the base generator mints concrete
+    // identity laws (add-identity + mul-identity), the meta-
+    // generator should propose a higher-order pattern that
+    // generalizes BOTH — the "identity-element" abstraction with
+    // operator-variable and identity-value-variable. This is
+    // dimensional discovery per docs/arch/machine-synthesis.md:
+    // a compression of the library itself, not just the corpus.
+    //
+    // Observational assertions:
+    //   - composite generator produces both base + meta candidates
+    //   - at least one meta-origin candidate is accepted by the
+    //     statistical prover (its marginal meta_compression is
+    //     positive because the meta-rule reduces the library-as-
+    //     corpus)
+    //   - final library includes at least one rule with operator-
+    //     variable structure (a meta-rule)
+    let corpus = compositional_corpus();
+    let base = CompressionGenerator::new(
+        ExtractConfig {
+            min_shared_size: 2,
+            min_matches: 2,
+            max_new_rules: 5,
+        },
+        1,
+    );
+    let meta = MetaPatternGenerator::new(
+        ExtractConfig {
+            // Lower min_shared_size for meta: library LHSs are
+            // already small, and we want the meta generator to fire
+            // even on minimally-shared structure (just the Apply
+            // node itself).
+            min_shared_size: 1,
+            min_matches: 2,
+            max_new_rules: 3,
+        },
+        1000, // high id range to keep meta symbols distinct
+    );
+    let composite = CompositeGenerator::new(base, meta);
+
+    // We can't use MultiLayerRunner here because it delegates to
+    // step_auto, which after the first accepts switches to
+    // Reinforce indefinitely and never calls propose again — so
+    // the meta-generator would never see the grown library.
+    // Instead drive the epoch manually with explicit Discover
+    // actions, and invoke reinforcement only after enough
+    // discovery passes have happened to populate the library.
+    let mut epoch = mathscape_core::epoch::Epoch::new(
+        composite,
+        mathscape_reward::StatisticalProver::new(
+            mathscape_reward::reward::RewardConfig::default(),
+            0.0,
+        ),
+        mathscape_core::epoch::RuleEmitter,
+        mathscape_core::epoch::InMemoryRegistry::new(),
+    );
+
+    // Three Discover epochs back-to-back:
+    //  - Epoch 0: library is empty; base generator mints concrete
+    //    rules; meta emits nothing (lib < 2).
+    //  - Epoch 1: library has concrete rules; meta generator can
+    //    now anti-unify across them and propose higher-order
+    //    patterns; base may continue finding corpus-level rules.
+    //  - Epoch 2: any meta-rules accepted in epoch 1 are now
+    //    themselves part of the library; chain continues.
+    // Then one Reinforce to let subsumption collapse redundants.
+    for _ in 0..3 {
+        let _ = epoch.step_with_action(
+            &corpus,
+            mathscape_core::control::EpochAction::Discover,
+        );
+    }
+    let _ = epoch.step_with_action(
+        &corpus,
+        mathscape_core::control::EpochAction::Reinforce,
+    );
+
+    let library = epoch.registry.all();
+    println!("\n╔══════════════════════════════════════════════════════╗");
+    println!("║ DIMENSIONAL DISCOVERY — META-PATTERN EMERGENCE       ║");
+    println!("╚══════════════════════════════════════════════════════╝");
+    println!("\n▶ Library at trajectory end ({} entries)", library.len());
+    for a in library {
+        let status = epoch.registry.status_of(a.content_hash).unwrap();
+        println!(
+            "  [{}] {} :: {} => {}  [{:?}]",
+            a.content_hash, a.rule.name, a.rule.lhs, a.rule.rhs, status,
+        );
+    }
+
+    // Detect meta-rules by their structural signature: the LHS
+    // top-level function position is a Var (operator-variable)
+    // that falls in the meta-id range OR is ANY Var that isn't
+    // var(2) or var(3) (the concrete add/mul tags).
+    let meta_rules: Vec<_> = library
+        .iter()
+        .filter(|a| {
+            if let Term::Apply(f, _) = &a.rule.lhs {
+                if let Term::Var(v) = **f {
+                    // Concrete ops in our corpus are var(2) and var(3).
+                    // Anything else in the function slot signals meta.
+                    return v != 2 && v != 3;
+                }
+            }
+            false
+        })
+        .collect();
+
+    println!(
+        "\n▶ Meta-rules (operator-variable LHS) : {}",
+        meta_rules.len()
+    );
+    for mr in &meta_rules {
+        println!(
+            "    {} :: {} => {}",
+            mr.rule.name, mr.rule.lhs, mr.rule.rhs
+        );
+    }
+
+    // Hard assertion: at least one meta-rule should have landed.
+    // This is the test's purpose — prove the machine reached the
+    // dimensional-discovery regime.
+    assert!(
+        !meta_rules.is_empty(),
+        "dimensional discovery FAILED: no operator-variable meta-rule in library. \
+         Either meta-generator produced no candidates, prover rejected them all, \
+         or reinforcement collapsed them. Library was: {:?}",
+        library
+            .iter()
+            .map(|a| &a.rule.name)
+            .collect::<Vec<_>>()
     );
 }
 

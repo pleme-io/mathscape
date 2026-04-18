@@ -76,11 +76,13 @@ impl Prover for StatisticalProver {
             reward: marginal_reward,
             compression_ratio: marginal_cr,
             meta_compression: marginal_meta,
-            // Novelty and DL fields are already marginal-by-construction
-            // in compute_reward (new_rules scopes novelty to candidate).
+            // Novelty, DL, and subsumption fields are already marginal-
+            // by-construction in compute_reward (new_rules scopes each
+            // to the candidate only).
             novelty_total: with_cand.novelty_total,
             description_length: with_cand.description_length,
             raw_length: with_cand.raw_length,
+            lhs_subsumption_count: with_cand.lhs_subsumption_count,
         };
 
         if result.reward >= self.min_score {

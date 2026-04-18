@@ -6,5 +6,7 @@
 pub mod adapter;
 pub mod antiunify;
 pub mod extract;
+pub mod meta_gen;
 
 pub use adapter::CompressionGenerator;
+pub use meta_gen::{CompositeGenerator, MetaPatternGenerator};

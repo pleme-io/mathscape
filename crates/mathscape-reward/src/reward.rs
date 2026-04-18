@@ -1,8 +1,9 @@
-//! Combined reward function: alpha * CR + beta * novelty + gamma * meta_compression.
+//! Combined reward function: alpha * CR + beta * novelty + gamma * meta_compression
+//! + delta * lhs_subsumption.
 
 use crate::compress_score;
 use crate::novelty;
-use mathscape_core::eval::RewriteRule;
+use mathscape_core::eval::{subsumes, RewriteRule};
 use mathscape_core::term::Term;
 
 /// Configuration for the reward function weights.
@@ -12,8 +13,15 @@ pub struct RewardConfig {
     pub alpha: f64,
     /// Weight for novelty (exploration).
     pub beta: f64,
-    /// Weight for meta-compression (recursive compression).
+    /// Weight for meta-compression (library reduces itself).
     pub gamma: f64,
+    /// Weight for library-LHS subsumption: each existing library
+    /// rule whose LHS the candidate subsumes earns `delta` bits.
+    /// This is the signal that drives dimensional discovery — a
+    /// meta-rule that generalizes multiple concrete rules gets
+    /// scored for the library shortening it enables, even when its
+    /// marginal ΔCR over the corpus is zero.
+    pub delta: f64,
 }
 
 impl Default for RewardConfig {
@@ -22,6 +30,7 @@ impl Default for RewardConfig {
             alpha: 0.6,
             beta: 0.3,
             gamma: 0.1,
+            delta: 0.5,
         }
     }
 }
@@ -39,8 +48,14 @@ pub struct RewardResult {
     pub raw_length: usize,
     /// Total novelty from new symbols.
     pub novelty_total: f64,
-    /// Meta-compression score (compression of the library itself).
+    /// Meta-compression score (compression of the library RHSs).
     pub meta_compression: f64,
+    /// Count of existing library rules whose LHS the new rules
+    /// subsume. Multiplied by `delta` in the composite reward.
+    /// This captures dimensional-discovery value: a meta-rule that
+    /// generalizes many concrete rules gets rewarded even if its
+    /// marginal ΔCR on the corpus is zero.
+    pub lhs_subsumption_count: f64,
 }
 
 /// Compute the reward for an epoch.
@@ -90,7 +105,24 @@ pub fn compute_reward(
         0.0
     };
 
-    let reward = config.alpha * cr + config.beta * novelty_total + config.gamma * meta_compression;
+    // LHS subsumption: how many existing library rules does each
+    // new rule subsume? Sum across new rules. The reinforcement pass
+    // will collapse each subsumed rule, so this is a direct measure
+    // of library shortening.
+    let lhs_subsumption_count: f64 = new_rules
+        .iter()
+        .map(|nr| {
+            existing
+                .iter()
+                .filter(|e| subsumes(&nr.lhs, &e.lhs))
+                .count() as f64
+        })
+        .sum();
+
+    let reward = config.alpha * cr
+        + config.beta * novelty_total
+        + config.gamma * meta_compression
+        + config.delta * lhs_subsumption_count;
 
     RewardResult {
         reward,
@@ -99,6 +131,7 @@ pub fn compute_reward(
         raw_length: raw,
         novelty_total,
         meta_compression,
+        lhs_subsumption_count,
     }
 }
 

@@ -23,8 +23,19 @@ pub struct AntiUnifyResult {
 }
 
 /// Anti-unify two terms: find their most specific common generalization.
+///
+/// Fresh-var counter starts above the maximum var id present in either
+/// input term, so the generated generalization variables don't collide
+/// with pattern variables already inside the terms. Without this, anti-
+/// unifying two rule LHSs from `CompressionGenerator` (which uses
+/// Var(200) as its default pattern variable) would produce a pattern
+/// where the fresh operator-variable *equals* the shared pattern
+/// variable at Var(200) — a semantic bug that silently causes
+/// pattern_match to fail on meta-level anti-unification.
 pub fn anti_unify(t1: &Term, t2: &Term) -> AntiUnifyResult {
-    let mut next_var = 200u32; // start above builtin + user var range
+    let floor = 200u32;
+    let max_in_inputs = max_var_id(t1).max(max_var_id(t2));
+    let mut next_var = floor.max(max_in_inputs.saturating_add(1));
     let mut var_pairs: HashMap<(TermKey, TermKey), u32> = HashMap::new();
     let mut shared_size = 0;
     let mut var_count = 0;
@@ -35,6 +46,29 @@ pub fn anti_unify(t1: &Term, t2: &Term) -> AntiUnifyResult {
         pattern,
         shared_size,
         var_count,
+    }
+}
+
+/// Maximum var id appearing anywhere in a term (0 if none).
+fn max_var_id(t: &Term) -> u32 {
+    match t {
+        Term::Var(v) => *v,
+        Term::Apply(f, args) => {
+            let mut m = max_var_id(f);
+            for a in args {
+                m = m.max(max_var_id(a));
+            }
+            m
+        }
+        Term::Fn(_, body) => max_var_id(body),
+        Term::Symbol(_, args) => {
+            let mut m = 0u32;
+            for a in args {
+                m = m.max(max_var_id(a));
+            }
+            m
+        }
+        Term::Point(_) | Term::Number(_) => 0,
     }
 }
 
