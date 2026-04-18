@@ -79,7 +79,6 @@
 //! (ML4.2 level) — we rely on saturations that actually occur to
 //! tell us which diagnostics matter, rather than speculating.
 
-use mathscape_core::eval::RewriteRule;
 use std::collections::HashSet;
 
 // ── MechanismConfig ──────────────────────────────────────────────
@@ -1009,7 +1008,6 @@ pub fn product_fitness_form() -> tatara_lisp::ast::Sexp {
 /// we've hit ML5 territory.
 pub fn respond_to_saturation<F>(
     pool: &mut MechanismPool,
-    existing_ledger: &[RewriteRule],
     trial_fn: F,
     mutations_per_round: usize,
     escalation_budget: usize,
@@ -1024,7 +1022,6 @@ where
     let form = canonical_fitness_form();
     respond_to_saturation_with_fitness(
         pool,
-        existing_ledger,
         trial_fn,
         &form,
         mutations_per_round,
@@ -1038,9 +1035,15 @@ where
 /// a score; the highest score wins (ties broken by mutation
 /// order). A score of 0 means the mutation failed the fitness
 /// check and is skipped (added to graveyard).
+///
+/// Hack eliminated (2026-04-18): previously took an
+/// `existing_ledger: &[RewriteRule]` parameter that was never
+/// read inside the function — its use was entirely via closure
+/// in the caller's `trial_fn`. The parameter added cognitive
+/// load for no behavioral effect. Removed; callers inline the
+/// ledger capture in their closure.
 pub fn respond_to_saturation_with_fitness<F>(
     pool: &mut MechanismPool,
-    existing_ledger: &[RewriteRule],
     mut trial_fn: F,
     fitness_form: &tatara_lisp::ast::Sexp,
     mutations_per_round: usize,
@@ -1051,7 +1054,6 @@ where
     F: FnMut(&MechanismConfig) -> TrialResult,
 {
     let mut rng = seed.max(1);
-    let _ = existing_ledger; // referenced by trial_fn's caller, not here.
 
     // ML5 escalation schedule:
     //   round 0: atomic mutations only (arity=1)
@@ -1273,7 +1275,7 @@ mod tests {
         let mut ever_succeeded = false;
         for seed in 1..=16u64 {
             let mut pool = MechanismPool::new();
-            let result = respond_to_saturation(&mut pool, &[], trial_fn, 32, 2, seed);
+            let result = respond_to_saturation(&mut pool, trial_fn, 32, 2, seed);
             if result.is_some() {
                 let (_, new_config) = result.unwrap();
                 assert!(new_config.candidate_max_size > 5);
@@ -1471,7 +1473,6 @@ mod tests {
             let mut pool = MechanismPool::new();
             let result = respond_to_saturation_with_fitness(
                 &mut pool,
-                &[],
                 trial_fn,
                 &canonical_fitness_form(),
                 32,
@@ -1535,7 +1536,7 @@ mod tests {
         let mut ever_succeeded = false;
         for seed in 1..=32u64 {
             let mut pool = MechanismPool::new();
-            let result = respond_to_saturation(&mut pool, &[], trial_fn, 24, 3, seed);
+            let result = respond_to_saturation(&mut pool, trial_fn, 24, 3, seed);
             if let Some((mutation, new_config)) = result {
                 assert!(new_config.candidate_max_size > 5);
                 assert!(new_config.corpus_seed_from_theorems);
@@ -1562,7 +1563,7 @@ mod tests {
             delta_novelty: 0,
             total_theorems_found: 0,
         };
-        let result = respond_to_saturation(&mut pool, &[], trial_fn, 5, 1, 42);
+        let result = respond_to_saturation(&mut pool, trial_fn, 5, 1, 42);
         assert!(
             result.is_none(),
             "saturation response must return None when no mutation breaks saturation"

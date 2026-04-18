@@ -845,7 +845,6 @@ fn edge_riding_loop() {
             };
             match respond_to_saturation(
                 &mut mech_pool,
-                session.ledger.rules(),
                 trial_fn,
                 MECH_MUTATIONS_PER_ROUND,
                 MECH_ESCALATION_BUDGET,

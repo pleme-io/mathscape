@@ -1,11 +1,12 @@
 //! Core types: Point, Number, Fn, Term enum, hash-consing, evaluation,
 //! substitution, s-expression parser/printer.
 
+pub mod bettyfine;
+pub mod builtin;
 pub mod control;
 pub mod corpus;
 pub mod demotion;
 pub mod epoch;
-pub mod bettyfine;
 pub mod eval;
 pub mod event;
 pub mod form_tree;

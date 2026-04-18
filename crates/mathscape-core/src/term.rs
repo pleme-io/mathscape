@@ -209,20 +209,10 @@ impl Term {
 // canonicalize to the same term. The evaluator still sees binary
 // add, so no downstream changes required.
 
-/// Built-in operator ids that are both commutative AND
-/// associative. Canonicalization sorts their arguments.
-///
-/// If adding a new builtin, mirror in `crate::eval::BUILTIN_*`
-/// and decide: is it AC? If yes, add here.
-const AC_BUILTIN_ADD: u32 = 2;
-const AC_BUILTIN_MUL: u32 = 3;
-
-fn is_commutative_op(head: &Term) -> bool {
-    matches!(
-        head,
-        Term::Var(AC_BUILTIN_ADD) | Term::Var(AC_BUILTIN_MUL)
-    )
-}
+// R5: canonicalization's notion of "commutative operator" comes
+// from the central registry in `crate::builtin`, not from a
+// duplicate list of magic constants. One source of truth.
+use crate::builtin::is_commutative as is_commutative_op;
 
 impl Term {
     /// Produce a canonical form — structurally equal representations

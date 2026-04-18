@@ -6,11 +6,11 @@ use crate::value::Value;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
-/// Built-in operations available in the base evaluator.
-const BUILTIN_ZERO: u32 = 0;
-const BUILTIN_SUCC: u32 = 1;
-const BUILTIN_ADD: u32 = 2;
-const BUILTIN_MUL: u32 = 3;
+// R5: builtin operator ids come from the central registry in
+// `crate::builtin`. Re-exported for backward compat with code
+// and tests that used the old `BUILTIN_*` constants.
+pub use crate::builtin::{ADD as BUILTIN_ADD, MUL as BUILTIN_MUL,
+    SUCC as BUILTIN_SUCC, ZERO as BUILTIN_ZERO};
 
 /// A rewrite rule: lhs pattern => rhs template.
 /// Pattern variables (Var) in lhs are matched and substituted into rhs.
@@ -119,41 +119,23 @@ fn step(term: &Term, library: &[RewriteRule]) -> EvalResult {
     }
 }
 
-/// Try to evaluate as a built-in Peano arithmetic operation.
+/// Try to evaluate using the builtin registry (R5).
+///
+/// Dispatches on `Term::Var(id)` — looks up the builtin by id and
+/// calls its eval function. Returns None when the operator isn't a
+/// builtin, or when args aren't reduced to a shape the builtin
+/// accepts (e.g., still an Apply instead of a Number).
 fn try_builtin(func: &Term, args: &[Term]) -> Result<Option<Term>, EvalError> {
-    match func {
-        Term::Var(BUILTIN_ZERO) if args.is_empty() => Ok(Some(Term::Number(Value::zero()))),
-
-        Term::Var(BUILTIN_SUCC) if args.len() == 1 => {
-            if let Term::Number(v) = &args[0] {
-                Ok(Some(Term::Number(v.succ())))
-            } else {
-                Ok(None) // arg not yet reduced to a number
-            }
-        }
-
-        Term::Var(BUILTIN_ADD) if args.len() == 2 => {
-            if let (Term::Number(Value::Nat(a)), Term::Number(Value::Nat(b))) =
-                (&args[0], &args[1])
-            {
-                Ok(Some(Term::Number(Value::Nat(a + b))))
-            } else {
-                Ok(None)
-            }
-        }
-
-        Term::Var(BUILTIN_MUL) if args.len() == 2 => {
-            if let (Term::Number(Value::Nat(a)), Term::Number(Value::Nat(b))) =
-                (&args[0], &args[1])
-            {
-                Ok(Some(Term::Number(Value::Nat(a * b))))
-            } else {
-                Ok(None)
-            }
-        }
-
-        _ => Ok(None),
+    let Term::Var(id) = func else {
+        return Ok(None);
+    };
+    let Some(builtin) = crate::builtin::lookup(*id) else {
+        return Ok(None);
+    };
+    if args.len() != builtin.arity {
+        return Ok(None);
     }
+    Ok((builtin.eval)(args))
 }
 
 /// Classical subsumption: `subsumer.lhs` pattern-matches
