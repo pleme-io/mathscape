@@ -1,0 +1,1257 @@
+warning: field `corpora` is never read
+   --> crates/mathscape-axiom-bridge/tests/edge_riding.rs:207:5
+    |
+204 | struct Provenance {
+    |        ---------- field in this struct
+...
+207 |     corpora: BTreeSet<&'static str>,
+    |     ^^^^^^^
+    |
+    = note: `Provenance` has a derived impl for the trait `Clone`, but this is intentionally ignored during dead code analysis
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `mathscape-axiom-bridge` (test "edge_riding") generated 1 warning
+    Finished `release` profile [optimized] target(s) in 0.30s
+     Running tests/edge_riding.rs (target/release/deps/edge_riding-82ffe584809ab77c)
+
+running 1 test
+
+╔══════════════════════════════════════════════════════════════════════╗
+║ PHASE L5 — EDGE-RIDING LOOP (perpetual discovery)                    ║
+║ cycles=50  probes/cycle=4000  keep_top=6  mutants=3             ║
+║ correctness criterion: nonzero novelty rate across every cycle       ║
+╚══════════════════════════════════════════════════════════════════════╝
+
+── cycle 1 / 50 ─────  pool size: 8  substrate size: 0  ledger size: 0
+  sub-campaign: 4000 probes, 520 structural rules, 8 apparatuses with yield
+  new theorems discovered: 16
+    + (?v3 1 ?v100) → ?v100
+    + (?v3 1 ?v100) → (?v2 ?v100 0)
+    + (?v3 1 ?v100) → (?v3 ?v100 1)
+    + (?v3 1 ?v100) → (?v2 0 ?v100)
+    + (?v3 1 ?v100) → (?v3 1 ?v100)
+    + (?v3 1 ?v100) → (?v3 ?v100 (?v1 0))
+    + (?v3 1 ?v100) → (?v3 (?v1 0) ?v100)
+    + (?v3 1 ?v100) → (?v2 ?v100 (?v3 ?v100 0))
+    + (?v3 1 ?v100) → (?v2 ?v100 (?v3 0 ?v100))
+    + (?v3 1 ?v100) → (?v2 ?v100 (?v2 0 0))
+    + (?v3 1 ?v100) → (?v2 ?v100 (?v3 0 0))
+    + (?v3 1 ?v100) → (?v3 ?v100 (?v2 0 1))
+    + (?v3 1 ?v100) → (?v2 ?v100 (?v3 0 1))
+    + (?v3 1 ?v100) → (?v3 ?v100 (?v2 1 0))
+    + (?v3 1 ?v100) → (?v2 ?v100 (?v3 1 0))
+    + (?v3 1 ?v100) → (?v3 ?v100 (?v3 1 1))
+  rustified: 1 reducing → substrate | 15 equivalence → ledger only
+  top apparatuses (by theorem yield): ["max-pair=41", "novelty-only=40", "canonical=39", "clamped=39", "meta-heavy=36", "cr+nov=35"]
+  cycle elapsed: 3.9s
+
+── cycle 2 / 50 ─────  pool size: 24  substrate size: 1  ledger size: 16
+  sub-campaign: 4000 probes, 441 structural rules, 24 apparatuses with yield
+  new theorems discovered: 16
+    + (?v2 0 ?v100) → ?v100
+    + (?v2 0 ?v100) → (?v2 ?v100 0)
+    + (?v2 0 ?v100) → (?v3 ?v100 1)
+    + (?v2 0 ?v100) → (?v2 0 ?v100)
+    + (?v2 0 ?v100) → (?v3 1 ?v100)
+    + (?v2 0 ?v100) → (?v3 ?v100 (?v1 0))
+    + (?v2 0 ?v100) → (?v3 (?v1 0) ?v100)
+    + (?v2 0 ?v100) → (?v2 ?v100 (?v3 ?v100 0))
+    + (?v2 0 ?v100) → (?v2 ?v100 (?v3 0 ?v100))
+    + (?v2 0 ?v100) → (?v2 ?v100 (?v2 0 0))
+    + (?v2 0 ?v100) → (?v2 ?v100 (?v3 0 0))
+    + (?v2 0 ?v100) → (?v3 ?v100 (?v2 0 1))
+    + (?v2 0 ?v100) → (?v2 ?v100 (?v3 0 1))
+    + (?v2 0 ?v100) → (?v3 ?v100 (?v2 1 0))
+    + (?v2 0 ?v100) → (?v2 ?v100 (?v3 1 0))
+    + (?v2 0 ?v100) → (?v3 ?v100 (?v3 1 1))
+  rustified: 1 reducing → substrate | 15 equivalence → ledger only
+  top apparatuses (by theorem yield): ["max-pair-meta+-0=25", "meta-heavy-crgate-2=25", "novelty-only=23", "novelty-only-crgate-1=23", "clamped-meta+-0=23", "meta-heavy-crgate-0=23"]
+  cycle elapsed: 3.4s
+
+── cycle 3 / 50 ─────  pool size: 24  substrate size: 2  ledger size: 32
+  sub-campaign: 4000 probes, 531 structural rules, 24 apparatuses with yield
+  new theorems discovered: 16
+    + (?v3 ?v100 ?v101) → (?v3 ?v100 ?v101)
+    + (?v3 ?v100 ?v101) → (?v3 ?v101 ?v100)
+    + (?v3 ?v100 ?v101) → (?v3 ?v100 (?v2 ?v101 0))
+    + (?v3 ?v100 ?v101) → (?v3 ?v100 (?v3 ?v101 1))
+    + (?v3 ?v100 ?v101) → (?v3 ?v100 (?v2 0 ?v101))
+    + (?v3 ?v100 ?v101) → (?v3 ?v100 (?v3 1 ?v101))
+    + (?v3 ?v100 ?v101) → (?v3 ?v101 (?v2 ?v100 0))
+    + (?v3 ?v100 ?v101) → (?v3 ?v101 (?v3 ?v100 1))
+    + (?v3 ?v100 ?v101) → (?v3 ?v101 (?v2 0 ?v100))
+    + (?v3 ?v100 ?v101) → (?v3 ?v101 (?v3 1 ?v100))
+    + (?v3 ?v100 ?v101) → (?v2 0 (?v3 ?v100 ?v101))
+    + (?v3 ?v100 ?v101) → (?v2 0 (?v3 ?v101 ?v100))
+    + (?v3 ?v100 ?v101) → (?v3 1 (?v3 ?v100 ?v101))
+    + (?v3 ?v100 ?v101) → (?v3 1 (?v3 ?v101 ?v100))
+    + (?v3 ?v100 ?v101) → (?v2 (?v3 ?v100 ?v101) 0)
+    + (?v3 ?v100 ?v101) → (?v3 (?v3 ?v100 ?v101) 1)
+  rustified: 0 reducing → substrate | 16 equivalence → ledger only
+  top apparatuses (by theorem yield): ["max-pair-meta+-0-maxzero-0=24", "novelty-only-x2-2=23", "meta-heavy-crgate-2=22", "max-pair-meta+-0-maxzero-1=22", "novelty-only-crgate-1-x2-0=22", "max-pair-meta+-0=21"]
+  cycle elapsed: 3.2s
+
+── cycle 4 / 50 ─────  pool size: 24  substrate size: 2  ledger size: 48
+  sub-campaign: 4000 probes, 589 structural rules, 24 apparatuses with yield
+  new theorems discovered: 16
+    + (?v2 ?v100 0) → ?v100
+    + (?v2 ?v100 0) → (?v2 ?v100 0)
+    + (?v2 ?v100 0) → (?v3 ?v100 1)
+    + (?v2 ?v100 0) → (?v2 0 ?v100)
+    + (?v2 ?v100 0) → (?v3 1 ?v100)
+    + (?v2 ?v100 0) → (?v3 ?v100 (?v1 0))
+    + (?v2 ?v100 0) → (?v3 (?v1 0) ?v100)
+    + (?v2 ?v100 0) → (?v2 ?v100 (?v3 ?v100 0))
+    + (?v2 ?v100 0) → (?v2 ?v100 (?v3 0 ?v100))
+    + (?v2 ?v100 0) → (?v2 ?v100 (?v2 0 0))
+    + (?v2 ?v100 0) → (?v2 ?v100 (?v3 0 0))
+    + (?v2 ?v100 0) → (?v3 ?v100 (?v2 0 1))
+    + (?v2 ?v100 0) → (?v2 ?v100 (?v3 0 1))
+    + (?v2 ?v100 0) → (?v3 ?v100 (?v2 1 0))
+    + (?v2 ?v100 0) → (?v2 ?v100 (?v3 1 0))
+    + (?v2 ?v100 0) → (?v3 ?v100 (?v3 1 1))
+  rustified: 1 reducing → substrate | 15 equivalence → ledger only
+  top apparatuses (by theorem yield): ["max-pair-meta+-0-maxzero-0-x2-0=24", "max-pair-meta+-0-maxzero-1-x05-0=23", "novelty-only-crgate-1-x2-0-meta+-2=23", "novelty-only-x2-2=22", "meta-heavy-crgate-2=22", "novelty-only-crgate-1-x2-0-meta+-0=22"]
+  cycle elapsed: 6.2s
+
+── cycle 5 / 50 ─────  pool size: 24  substrate size: 3  ledger size: 64
+  sub-campaign: 4000 probes, 533 structural rules, 24 apparatuses with yield
+  new theorems discovered: 16
+    + (?v2 ?v100 ?v101) → (?v2 ?v100 ?v101)
+    + (?v2 ?v100 ?v101) → (?v2 ?v101 ?v100)
+    + (?v2 ?v100 ?v101) → (?v2 ?v100 (?v2 ?v101 0))
+    + (?v2 ?v100 ?v101) → (?v2 ?v100 (?v3 ?v101 1))
+    + (?v2 ?v100 ?v101) → (?v2 ?v100 (?v2 0 ?v101))
+    + (?v2 ?v100 ?v101) → (?v2 ?v100 (?v3 1 ?v101))
+    + (?v2 ?v100 ?v101) → (?v2 ?v101 (?v2 ?v100 0))
+    + (?v2 ?v100 ?v101) → (?v2 ?v101 (?v3 ?v100 1))
+    + (?v2 ?v100 ?v101) → (?v2 ?v101 (?v2 0 ?v100))
+    + (?v2 ?v100 ?v101) → (?v2 ?v101 (?v3 1 ?v100))
+    + (?v2 ?v100 ?v101) → (?v2 0 (?v2 ?v100 ?v101))
+    + (?v2 ?v100 ?v101) → (?v2 0 (?v2 ?v101 ?v100))
+    + (?v2 ?v100 ?v101) → (?v3 1 (?v2 ?v100 ?v101))
+    + (?v2 ?v100 ?v101) → (?v3 1 (?v2 ?v101 ?v100))
+    + (?v2 ?v100 ?v101) → (?v2 (?v2 ?v100 ?v101) 0)
+    + (?v2 ?v100 ?v101) → (?v3 (?v2 ?v100 ?v101) 1)
+  rustified: 0 reducing → substrate | 16 equivalence → ledger only
+  top apparatuses (by theorem yield): ["meta-heavy-crgate-2-nov+-2=23", "max-pair-meta+-0-maxzero-0-x2-0-x2-1=22", "max-pair-meta+-0-maxzero-0-x2-0=21", "max-pair-meta+-0-maxzero-0-x2-0-x05-0=21", "novelty-only-x2-2-clamp-0=21", "max-pair-meta+-0-maxzero-1-x05-0=20"]
+  cycle elapsed: 4.6s
+
+── cycle 6 / 50 ─────  pool size: 24  substrate size: 3  ledger size: 80
+  sub-campaign: 4000 probes, 501 structural rules, 24 apparatuses with yield
+  new theorems discovered: 16
+    + (?v3 ?v100 ?v101) → (?v3 (?v2 ?v100 0) ?v101)
+    + (?v3 ?v100 ?v101) → (?v3 (?v3 ?v100 1) ?v101)
+    + (?v3 ?v100 ?v101) → (?v2 (?v3 ?v101 ?v100) 0)
+    + (?v3 ?v100 ?v101) → (?v3 (?v3 ?v101 ?v100) 1)
+    + (?v3 ?v100 ?v101) → (?v3 (?v2 ?v101 0) ?v100)
+    + (?v3 ?v100 ?v101) → (?v3 (?v3 ?v101 1) ?v100)
+    + (?v3 ?v100 ?v101) → (?v3 (?v2 0 ?v100) ?v101)
+    + (?v3 ?v100 ?v101) → (?v3 (?v2 0 ?v101) ?v100)
+    + (?v3 ?v100 ?v101) → (?v3 (?v3 1 ?v100) ?v101)
+    + (?v3 ?v100 ?v101) → (?v3 (?v3 1 ?v101) ?v100)
+    + (?v2 (?v3 ?v100 1) (?v3 ?v101 1)) → (?v2 ?v100 ?v101)
+    + (?v2 (?v3 ?v100 1) (?v3 ?v101 1)) → (?v2 ?v101 ?v100)
+    + (?v2 (?v3 ?v100 1) (?v3 ?v101 1)) → (?v2 ?v100 (?v2 ?v101 0))
+    + (?v2 (?v3 ?v100 1) (?v3 ?v101 1)) → (?v2 ?v100 (?v3 ?v101 1))
+    + (?v2 (?v3 ?v100 1) (?v3 ?v101 1)) → (?v2 ?v100 (?v2 0 ?v101))
+    + (?v2 (?v3 ?v100 1) (?v3 ?v101 1)) → (?v2 ?v100 (?v3 1 ?v101))
+  rustified: 6 reducing → substrate | 10 equivalence → ledger only
+  top apparatuses (by theorem yield): ["max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0=22", "novelty-only-x2-2-clamp-0-x05-2=22", "meta-heavy-crgate-2-nov+-2=21", "novelty-only-x2-2-clamp-0-nov+-1=21", "max-pair-meta+-0-maxzero-0-x2-0-x2-1=20", "max-pair-meta+-0-maxzero-0-x2-0-crgate-2=20"]
+  cycle elapsed: 4.7s
+
+── cycle 7 / 50 ─────  pool size: 24  substrate size: 9  ledger size: 96
+  sub-campaign: 4000 probes, 495 structural rules, 24 apparatuses with yield
+  new theorems discovered: 16
+    + (?v3 ?v100 1) → ?v100
+    + (?v3 ?v100 1) → (?v2 ?v100 0)
+    + (?v3 ?v100 1) → (?v3 ?v100 1)
+    + (?v3 ?v100 1) → (?v2 0 ?v100)
+    + (?v3 ?v100 1) → (?v3 1 ?v100)
+    + (?v3 ?v100 1) → (?v3 ?v100 (?v1 0))
+    + (?v3 ?v100 1) → (?v3 (?v1 0) ?v100)
+    + (?v3 ?v100 1) → (?v2 ?v100 (?v3 ?v100 0))
+    + (?v3 ?v100 1) → (?v2 ?v100 (?v3 0 ?v100))
+    + (?v3 ?v100 1) → (?v2 ?v100 (?v2 0 0))
+    + (?v3 ?v100 1) → (?v2 ?v100 (?v3 0 0))
+    + (?v3 ?v100 1) → (?v3 ?v100 (?v2 0 1))
+    + (?v3 ?v100 1) → (?v2 ?v100 (?v3 0 1))
+    + (?v3 ?v100 1) → (?v3 ?v100 (?v2 1 0))
+    + (?v3 ?v100 1) → (?v2 ?v100 (?v3 1 0))
+    + (?v3 ?v100 1) → (?v3 ?v100 (?v3 1 1))
+  rustified: 1 reducing → substrate | 15 equivalence → ledger only
+  top apparatuses (by theorem yield): ["novelty-only-x2-2-clamp-0-x05-2-crgate-1=20", "max-pair-meta+-0-maxzero-0-x2-0-x2-1-meta+-1=20", "max-pair-meta+-0-maxzero-0-x2-0-x2-1-x2-2=20", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0=19", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-crgate-1=19", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0=18"]
+  cycle elapsed: 6.3s
+
+── cycle 8 / 50 ─────  pool size: 24  substrate size: 10  ledger size: 112
+  sub-campaign: 4000 probes, 436 structural rules, 24 apparatuses with yield
+  new theorems discovered: 16
+    + (?v2 ?v100 ?v101) → (?v2 (?v2 ?v100 0) ?v101)
+    + (?v2 ?v100 ?v101) → (?v2 (?v3 ?v100 1) ?v101)
+    + (?v2 ?v100 ?v101) → (?v2 (?v2 ?v101 ?v100) 0)
+    + (?v2 ?v100 ?v101) → (?v3 (?v2 ?v101 ?v100) 1)
+    + (?v2 ?v100 ?v101) → (?v2 (?v2 ?v101 0) ?v100)
+    + (?v2 ?v100 ?v101) → (?v2 (?v3 ?v101 1) ?v100)
+    + (?v2 ?v100 ?v101) → (?v2 (?v2 0 ?v100) ?v101)
+    + (?v2 ?v100 ?v101) → (?v2 (?v2 0 ?v101) ?v100)
+    + (?v2 ?v100 ?v101) → (?v2 (?v3 1 ?v100) ?v101)
+    + (?v2 ?v100 ?v101) → (?v2 (?v3 1 ?v101) ?v100)
+    + (?v2 ?v100 2) → (?v1 (?v1 ?v100))
+    + (?v2 ?v100 2) → (?v1 (?v2 ?v100 1))
+    + (?v2 ?v100 2) → (?v1 (?v2 1 ?v100))
+    + (?v2 ?v100 2) → (?v2 ?v100 (?v1 1))
+    + (?v2 ?v100 2) → (?v2 1 (?v1 ?v100))
+    + (?v2 ?v100 2) → (?v2 (?v1 ?v100) 1)
+  rustified: 0 reducing → substrate | 16 equivalence → ledger only
+  top apparatuses (by theorem yield): ["max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0=20", "novelty-only-x2-2-clamp-0-x05-2-crgate-1-meta+-1=19", "max-pair-meta+-0-maxzero-0-x2-0-x2-1-x2-2-maxzero-0=19", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-crgate-1-maxzero-2=19", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0=17", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-1=17"]
+  cycle elapsed: 4.6s
+
+── cycle 9 / 50 ─────  pool size: 24  substrate size: 10  ledger size: 128
+  sub-campaign: 4000 probes, 433 structural rules, 24 apparatuses with yield
+  new theorems discovered: 16
+    + (?v2 ?v100 2) → (?v2 (?v1 1) ?v100)
+    + (?v2 ?v100 2) → (?v1 (?v1 (?v2 ?v100 0)))
+    + (?v2 ?v100 2) → (?v1 (?v1 (?v3 ?v100 1)))
+    + (?v2 ?v100 2) → (?v1 (?v1 (?v2 0 ?v100)))
+    + (?v2 ?v100 2) → (?v1 (?v1 (?v3 1 ?v100)))
+    + (?v2 ?v100 2) → (?v1 (?v2 ?v100 (?v1 0)))
+    + (?v2 ?v100 2) → (?v1 (?v2 0 (?v1 ?v100)))
+    + (?v2 ?v100 2) → (?v1 (?v3 1 (?v1 ?v100)))
+    + (?v2 ?v100 2) → (?v1 (?v2 (?v1 ?v100) 0))
+    + (?v2 ?v100 2) → (?v1 (?v3 (?v1 ?v100) 1))
+    + (?v2 ?v100 2) → (?v1 (?v2 (?v1 0) ?v100))
+    + (?v2 ?v100 2) → (?v2 ?v100 (?v1 (?v1 0)))
+    + (?v2 ?v100 2) → (?v2 ?v100 (?v2 1 1))
+    + (?v2 ?v100 2) → (?v2 0 (?v1 (?v1 ?v100)))
+    + (?v2 ?v100 2) → (?v3 1 (?v1 (?v1 ?v100)))
+    + (?v2 ?v100 2) → (?v2 1 (?v2 ?v100 1))
+  rustified: 0 reducing → substrate | 16 equivalence → ledger only
+  top apparatuses (by theorem yield): ["max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0=18", "max-pair-meta+-0-maxzero-0-x2-0-x2-1-x2-2-maxzero-0-clamp-0=18", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-crgate-1-maxzero-2-nov+-0=18", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-crgate-1-maxzero-2=17", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1=17", "novelty-only-x2-2-clamp-0-x05-2-crgate-1-meta+-1-x2-1=17"]
+  cycle elapsed: 4.8s
+
+── cycle 10 / 50 ─────  pool size: 24  substrate size: 10  ledger size: 144
+  sub-campaign: 4000 probes, 444 structural rules, 24 apparatuses with yield
+  new theorems discovered: 16
+    + (?v2 ?v100 2) → (?v2 1 (?v2 1 ?v100))
+    + (?v2 ?v100 2) → (?v2 (?v1 ?v100) (?v1 0))
+    + (?v2 ?v100 2) → (?v2 (?v1 0) (?v1 ?v100))
+    + (?v2 ?v100 2) → (?v2 (?v1 (?v1 ?v100)) 0)
+    + (?v2 ?v100 2) → (?v3 (?v1 (?v1 ?v100)) 1)
+    + (?v2 ?v100 2) → (?v2 (?v1 (?v1 0)) ?v100)
+    + (?v2 ?v100 2) → (?v2 (?v2 ?v100 1) 1)
+    + (?v2 ?v100 2) → (?v2 (?v2 1 ?v100) 1)
+    + (?v2 ?v100 2) → (?v2 (?v2 1 1) ?v100)
+    + (?v2 (?v3 ?v100 ?v101) ?v102) → (?v2 ?v102 (?v3 ?v100 ?v101))
+    + (?v2 (?v3 ?v100 ?v101) ?v102) → (?v2 ?v102 (?v3 ?v101 ?v100))
+    + (?v2 (?v3 ?v100 ?v101) ?v102) → (?v2 (?v3 ?v100 ?v101) ?v102)
+    + (?v2 (?v3 ?v100 ?v101) ?v102) → (?v2 (?v3 ?v101 ?v100) ?v102)
+    + (?v3 2 ?v100) → (?v2 ?v100 ?v100)
+    + (?v3 2 ?v100) → (?v3 ?v100 (?v1 1))
+    + (?v3 2 ?v100) → (?v3 (?v1 1) ?v100)
+  rustified: 0 reducing → substrate | 16 equivalence → ledger only
+  top apparatuses (by theorem yield): ["max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-nov+-1=21", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-crgate-2=21", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-crgate-1-maxzero-2-meta+-0=19", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1=19", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-crgate-1-maxzero-2=17", "max-pair-meta+-0-maxzero-0-x2-0-x2-1-x2-2-maxzero-0-clamp-0-x05-1=17"]
+  cycle elapsed: 5.2s
+
+── cycle 11 / 50 ─────  pool size: 24  substrate size: 10  ledger size: 160
+  sub-campaign: 4000 probes, 443 structural rules, 24 apparatuses with yield
+  new theorems discovered: 16
+    + (?v3 2 ?v100) → (?v3 ?v100 (?v1 (?v1 0)))
+    + (?v3 2 ?v100) → (?v2 ?v100 (?v2 ?v100 0))
+    + (?v3 2 ?v100) → (?v2 ?v100 (?v3 ?v100 1))
+    + (?v3 2 ?v100) → (?v2 ?v100 (?v2 0 ?v100))
+    + (?v3 2 ?v100) → (?v2 ?v100 (?v3 1 ?v100))
+    + (?v3 2 ?v100) → (?v3 ?v100 (?v2 1 1))
+    + (?v3 2 ?v100) → (?v2 0 (?v2 ?v100 ?v100))
+    + (?v3 2 ?v100) → (?v3 1 (?v2 ?v100 ?v100))
+    + (?v3 2 ?v100) → (?v3 (?v1 (?v1 0)) ?v100)
+    + (?v3 2 ?v100) → (?v2 (?v2 ?v100 ?v100) 0)
+    + (?v3 2 ?v100) → (?v3 (?v2 ?v100 ?v100) 1)
+    + (?v3 2 ?v100) → (?v2 (?v2 ?v100 0) ?v100)
+    + (?v3 2 ?v100) → (?v2 (?v3 ?v100 1) ?v100)
+    + (?v3 2 ?v100) → (?v2 (?v2 0 ?v100) ?v100)
+    + (?v3 2 ?v100) → (?v2 (?v3 1 ?v100) ?v100)
+    + (?v3 2 ?v100) → (?v3 (?v2 1 1) ?v100)
+  rustified: 0 reducing → substrate | 16 equivalence → ledger only
+  top apparatuses (by theorem yield): ["max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-x2-0=23", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-nov+-1-meta+-1=21", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1=18", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-crgate-1-maxzero-2-meta+-0-x2-0=18", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1=18", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-crgate-2-maxzero-1=17"]
+  cycle elapsed: 5.3s
+
+── cycle 12 / 50 ─────  pool size: 24  substrate size: 10  ledger size: 176
+  sub-campaign: 4000 probes, 441 structural rules, 24 apparatuses with yield
+  new theorems discovered: 16
+    + (?v3 2 ?v100) → (?v2 ?v100 (?v3 ?v100 (?v1 0)))
+    + (?v3 2 ?v100) → (?v2 ?v100 (?v3 (?v1 0) ?v100))
+    + (?v3 2 ?v100) → (?v2 ?v100 (?v2 ?v100 (?v3 ?v100 0)))
+    + (?v3 2 ?v100) → (?v2 ?v100 (?v2 ?v100 (?v3 0 ?v100)))
+    + (?v3 2 ?v100) → (?v2 ?v100 (?v2 ?v100 (?v2 0 0)))
+    + (?v3 2 ?v100) → (?v2 ?v100 (?v2 ?v100 (?v3 0 0)))
+    + (?v3 2 ?v100) → (?v2 ?v100 (?v3 ?v100 (?v2 0 1)))
+    + (?v3 2 ?v100) → (?v2 ?v100 (?v2 ?v100 (?v3 0 1)))
+    + (?v3 2 ?v100) → (?v2 ?v100 (?v3 ?v100 (?v2 1 0)))
+    + (?v3 2 ?v100) → (?v2 ?v100 (?v2 ?v100 (?v3 1 0)))
+    + (?v3 2 ?v100) → (?v2 ?v100 (?v3 ?v100 (?v3 1 1)))
+    + (?v3 2 ?v100) → (?v2 (?v2 ?v100 0) (?v2 ?v100 0))
+    + (?v3 2 ?v100) → (?v2 (?v2 ?v100 0) (?v3 ?v100 1))
+    + (?v3 2 ?v100) → (?v2 (?v2 ?v100 0) (?v2 0 ?v100))
+    + (?v3 2 ?v100) → (?v2 (?v2 ?v100 0) (?v3 1 ?v100))
+    + (?v3 2 ?v100) → (?v2 (?v2 ?v100 0) (?v3 ?v100 (?v1 0)))
+  rustified: 0 reducing → substrate | 16 equivalence → ledger only
+  top apparatuses (by theorem yield): ["max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-x2-0-crgate-1=20", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-crgate-1-maxzero-2-meta+-0-x2-0-x05-0=20", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-meta+-0=19", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1=19", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-crgate-1-maxzero-2-meta+-0-x2-0=17", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1=17"]
+  cycle elapsed: 5.4s
+
+── cycle 13 / 50 ─────  pool size: 24  substrate size: 10  ledger size: 192
+test edge_riding_loop has been running for over 60 seconds
+  sub-campaign: 4000 probes, 452 structural rules, 24 apparatuses with yield
+  new theorems discovered: 16
+    + (?v3 ?v100 (?v2 ?v101 2)) → (?v3 ?v100 (?v1 (?v1 ?v101)))
+    + (?v3 ?v100 (?v2 ?v101 2)) → (?v3 (?v1 (?v1 ?v101)) ?v100)
+    + (?v3 ?v100 2) → (?v2 ?v100 ?v100)
+    + (?v3 ?v100 2) → (?v3 ?v100 (?v1 1))
+    + (?v3 ?v100 2) → (?v3 (?v1 1) ?v100)
+    + (?v3 ?v100 2) → (?v3 ?v100 (?v1 (?v1 0)))
+    + (?v3 ?v100 2) → (?v2 ?v100 (?v2 ?v100 0))
+    + (?v3 ?v100 2) → (?v2 ?v100 (?v3 ?v100 1))
+    + (?v3 ?v100 2) → (?v2 ?v100 (?v2 0 ?v100))
+    + (?v3 ?v100 2) → (?v2 ?v100 (?v3 1 ?v100))
+    + (?v3 ?v100 2) → (?v3 ?v100 (?v2 1 1))
+    + (?v3 ?v100 2) → (?v2 0 (?v2 ?v100 ?v100))
+    + (?v3 ?v100 2) → (?v3 1 (?v2 ?v100 ?v100))
+    + (?v3 ?v100 2) → (?v3 (?v1 (?v1 0)) ?v100)
+    + (?v3 ?v100 2) → (?v2 (?v2 ?v100 ?v100) 0)
+    + (?v3 ?v100 2) → (?v3 (?v2 ?v100 ?v100) 1)
+  rustified: 0 reducing → substrate | 16 equivalence → ledger only
+  top apparatuses (by theorem yield): ["max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-clamp-0=23", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-meta+-0-nov+-0=18", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-crgate-1-maxzero-2-meta+-0-x2-0-nov+-2=18", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1=17", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-crgate-1-maxzero-2-meta+-0-x2-0-x05-0-clamp-1=17", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-crgate-1=17"]
+  cycle elapsed: 5.1s
+
+── cycle 14 / 50 ─────  pool size: 24  substrate size: 10  ledger size: 208
+  sub-campaign: 4000 probes, 454 structural rules, 24 apparatuses with yield
+  new theorems discovered: 16
+    + (?v3 2 ?v100) → (?v2 (?v2 ?v100 0) (?v3 (?v1 0) ?v100))
+    + (?v3 2 ?v100) → (?v2 (?v2 ?v100 0) (?v2 ?v100 (?v3 ?v100 0)))
+    + (?v3 2 ?v100) → (?v2 (?v2 ?v100 0) (?v2 ?v100 (?v3 0 ?v100)))
+    + (?v3 2 ?v100) → (?v2 (?v2 ?v100 0) (?v2 ?v100 (?v2 0 0)))
+    + (?v3 2 ?v100) → (?v2 (?v2 ?v100 0) (?v2 ?v100 (?v3 0 0)))
+    + (?v3 2 ?v100) → (?v2 (?v2 ?v100 0) (?v3 ?v100 (?v2 0 1)))
+    + (?v3 2 ?v100) → (?v2 (?v2 ?v100 0) (?v2 ?v100 (?v3 0 1)))
+    + (?v3 2 ?v100) → (?v2 (?v2 ?v100 0) (?v3 ?v100 (?v2 1 0)))
+    + (?v3 2 ?v100) → (?v2 (?v2 ?v100 0) (?v2 ?v100 (?v3 1 0)))
+    + (?v3 2 ?v100) → (?v2 (?v2 ?v100 0) (?v3 ?v100 (?v3 1 1)))
+    + (?v3 2 ?v100) → (?v2 (?v3 ?v100 1) (?v2 ?v100 0))
+    + (?v3 2 ?v100) → (?v2 (?v3 ?v100 1) (?v3 ?v100 1))
+    + (?v3 2 ?v100) → (?v2 (?v3 ?v100 1) (?v2 0 ?v100))
+    + (?v3 2 ?v100) → (?v2 (?v3 ?v100 1) (?v3 1 ?v100))
+    + (?v3 2 ?v100) → (?v2 (?v3 ?v100 1) (?v3 ?v100 (?v1 0)))
+    + (?v3 2 ?v100) → (?v2 (?v3 ?v100 1) (?v3 (?v1 0) ?v100))
+  rustified: 0 reducing → substrate | 16 equivalence → ledger only
+  top apparatuses (by theorem yield): ["max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-maxzero-0=23", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-clamp-0-x2-1=21", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-crgate-1-maxzero-2-meta+-0-x2-0-x05-0-clamp-1-x05-2=20", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-crgate-1-maxzero-2-meta+-0-x2-0-nov+-2-crgate-0=18", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1=17", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-meta+-0-nov+-0-maxzero-1=17"]
+  cycle elapsed: 5.3s
+
+── cycle 15 / 50 ─────  pool size: 24  substrate size: 10  ledger size: 224
+  sub-campaign: 4000 probes, 448 structural rules, 24 apparatuses with yield
+  new theorems discovered: 16
+    + (?v3 2 ?v100) → (?v2 (?v3 ?v100 1) (?v2 ?v100 (?v3 ?v100 0)))
+    + (?v3 2 ?v100) → (?v2 (?v3 ?v100 1) (?v2 ?v100 (?v3 0 ?v100)))
+    + (?v3 2 ?v100) → (?v2 (?v3 ?v100 1) (?v2 ?v100 (?v2 0 0)))
+    + (?v3 2 ?v100) → (?v2 (?v3 ?v100 1) (?v2 ?v100 (?v3 0 0)))
+    + (?v3 2 ?v100) → (?v2 (?v3 ?v100 1) (?v3 ?v100 (?v2 0 1)))
+    + (?v3 2 ?v100) → (?v2 (?v3 ?v100 1) (?v2 ?v100 (?v3 0 1)))
+    + (?v3 2 ?v100) → (?v2 (?v3 ?v100 1) (?v3 ?v100 (?v2 1 0)))
+    + (?v3 2 ?v100) → (?v2 (?v3 ?v100 1) (?v2 ?v100 (?v3 1 0)))
+    + (?v3 2 ?v100) → (?v2 (?v3 ?v100 1) (?v3 ?v100 (?v3 1 1)))
+    + (?v3 2 ?v100) → (?v2 (?v2 0 ?v100) (?v2 ?v100 0))
+    + (?v3 2 ?v100) → (?v2 (?v2 0 ?v100) (?v3 ?v100 1))
+    + (?v3 2 ?v100) → (?v2 (?v2 0 ?v100) (?v2 0 ?v100))
+    + (?v3 2 ?v100) → (?v2 (?v2 0 ?v100) (?v3 1 ?v100))
+    + (?v3 2 ?v100) → (?v2 (?v2 0 ?v100) (?v3 ?v100 (?v1 0)))
+    + (?v3 2 ?v100) → (?v2 (?v2 0 ?v100) (?v3 (?v1 0) ?v100))
+    + (?v3 2 ?v100) → (?v2 (?v2 0 ?v100) (?v2 ?v100 (?v3 ?v100 0)))
+  rustified: 0 reducing → substrate | 16 equivalence → ledger only
+  top apparatuses (by theorem yield): ["max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-maxzero-0-x05-1=20", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-maxzero-1=19", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x2-2=18", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-crgate-1-maxzero-2-meta+-0-x2-0-nov+-2-crgate-0=17", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1=17", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-clamp-0-x2-1-x05-1=17"]
+  cycle elapsed: 5.2s
+
+── cycle 16 / 50 ─────  pool size: 24  substrate size: 10  ledger size: 240
+  sub-campaign: 4000 probes, 460 structural rules, 24 apparatuses with yield
+  new theorems discovered: 16
+    + (?v3 2 ?v100) → (?v2 (?v2 0 ?v100) (?v2 ?v100 (?v3 0 ?v100)))
+    + (?v3 2 ?v100) → (?v2 (?v2 0 ?v100) (?v2 ?v100 (?v2 0 0)))
+    + (?v3 2 ?v100) → (?v2 (?v2 0 ?v100) (?v2 ?v100 (?v3 0 0)))
+    + (?v3 2 ?v100) → (?v2 (?v2 0 ?v100) (?v3 ?v100 (?v2 0 1)))
+    + (?v3 2 ?v100) → (?v2 (?v2 0 ?v100) (?v2 ?v100 (?v3 0 1)))
+    + (?v3 2 ?v100) → (?v2 (?v2 0 ?v100) (?v3 ?v100 (?v2 1 0)))
+    + (?v3 2 ?v100) → (?v2 (?v2 0 ?v100) (?v2 ?v100 (?v3 1 0)))
+    + (?v3 2 ?v100) → (?v2 (?v2 0 ?v100) (?v3 ?v100 (?v3 1 1)))
+    + (?v3 2 ?v100) → (?v2 (?v3 1 ?v100) (?v2 ?v100 0))
+    + (?v3 2 ?v100) → (?v2 (?v3 1 ?v100) (?v3 ?v100 1))
+    + (?v3 2 ?v100) → (?v2 (?v3 1 ?v100) (?v2 0 ?v100))
+    + (?v3 2 ?v100) → (?v2 (?v3 1 ?v100) (?v3 1 ?v100))
+    + (?v3 2 ?v100) → (?v2 (?v3 1 ?v100) (?v3 ?v100 (?v1 0)))
+    + (?v3 2 ?v100) → (?v2 (?v3 1 ?v100) (?v3 (?v1 0) ?v100))
+    + (?v3 2 ?v100) → (?v2 (?v3 1 ?v100) (?v2 ?v100 (?v3 ?v100 0)))
+    + (?v3 2 ?v100) → (?v2 (?v3 1 ?v100) (?v2 ?v100 (?v3 0 ?v100)))
+  rustified: 0 reducing → substrate | 16 equivalence → ledger only
+  top apparatuses (by theorem yield): ["max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-maxzero-0-x05-1-maxzero-1=20", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-crgate-1-maxzero-2-meta+-0-x2-0-nov+-2-crgate-0-crgate-0=19", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x2-2-maxzero-0=18", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1=18", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-crgate-1-maxzero-2-meta+-0-x2-0-nov+-2-crgate-0=17", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1=17"]
+  cycle elapsed: 5.3s
+
+── cycle 17 / 50 ─────  pool size: 24  substrate size: 10  ledger size: 256
+  sub-campaign: 4000 probes, 447 structural rules, 24 apparatuses with yield
+  new theorems discovered: 16
+    + (?v3 2 ?v100) → (?v2 (?v3 1 ?v100) (?v2 ?v100 (?v2 0 0)))
+    + (?v3 2 ?v100) → (?v2 (?v3 1 ?v100) (?v2 ?v100 (?v3 0 0)))
+    + (?v3 2 ?v100) → (?v2 (?v3 1 ?v100) (?v3 ?v100 (?v2 0 1)))
+    + (?v3 2 ?v100) → (?v2 (?v3 1 ?v100) (?v2 ?v100 (?v3 0 1)))
+    + (?v3 2 ?v100) → (?v2 (?v3 1 ?v100) (?v3 ?v100 (?v2 1 0)))
+    + (?v3 2 ?v100) → (?v2 (?v3 1 ?v100) (?v2 ?v100 (?v3 1 0)))
+    + (?v3 2 ?v100) → (?v2 (?v3 1 ?v100) (?v3 ?v100 (?v3 1 1)))
+    + (?v3 2 ?v100) → (?v2 (?v3 ?v100 (?v1 0)) ?v100)
+    + (?v3 2 ?v100) → (?v2 (?v3 ?v100 (?v1 0)) (?v2 ?v100 0))
+    + (?v3 2 ?v100) → (?v2 (?v3 ?v100 (?v1 0)) (?v3 ?v100 1))
+    + (?v3 2 ?v100) → (?v2 (?v3 ?v100 (?v1 0)) (?v2 0 ?v100))
+    + (?v3 2 ?v100) → (?v2 (?v3 ?v100 (?v1 0)) (?v3 1 ?v100))
+    + (?v3 2 ?v100) → (?v2 (?v3 ?v100 (?v1 0)) (?v3 ?v100 (?v1 0)))
+    + (?v3 2 ?v100) → (?v2 (?v3 ?v100 (?v1 0)) (?v3 (?v1 0) ?v100))
+    + (?v3 2 ?v100) → (?v2 (?v3 ?v100 (?v1 0)) (?v2 ?v100 (?v3 ?v100 0)))
+    + (?v3 2 ?v100) → (?v2 (?v3 ?v100 (?v1 0)) (?v2 ?v100 (?v3 0 ?v100)))
+  rustified: 0 reducing → substrate | 16 equivalence → ledger only
+  top apparatuses (by theorem yield): ["max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-nov+-0=23", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-maxzero-0-x05-1-maxzero-1-clamp-1=20", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-crgate-1-maxzero-2-meta+-0-x2-0-nov+-2-crgate-0-clamp-2=20", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1=19", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x2-2-maxzero-0-clamp-0=18", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-maxzero-1=18"]
+  cycle elapsed: 5.2s
+
+── cycle 18 / 50 ─────  pool size: 24  substrate size: 10  ledger size: 272
+  sub-campaign: 4000 probes, 441 structural rules, 24 apparatuses with yield
+  new theorems discovered: 16
+    + (?v3 2 ?v100) → (?v2 (?v3 ?v100 (?v1 0)) (?v2 ?v100 (?v2 0 0)))
+    + (?v3 2 ?v100) → (?v2 (?v3 ?v100 (?v1 0)) (?v2 ?v100 (?v3 0 0)))
+    + (?v3 2 ?v100) → (?v2 (?v3 ?v100 (?v1 0)) (?v3 ?v100 (?v2 0 1)))
+    + (?v3 2 ?v100) → (?v2 (?v3 ?v100 (?v1 0)) (?v2 ?v100 (?v3 0 1)))
+    + (?v3 2 ?v100) → (?v2 (?v3 ?v100 (?v1 0)) (?v3 ?v100 (?v2 1 0)))
+    + (?v3 2 ?v100) → (?v2 (?v3 ?v100 (?v1 0)) (?v2 ?v100 (?v3 1 0)))
+    + (?v3 2 ?v100) → (?v2 (?v3 ?v100 (?v1 0)) (?v3 ?v100 (?v3 1 1)))
+    + (?v3 2 ?v100) → (?v2 (?v3 (?v1 0) ?v100) ?v100)
+    + (?v3 2 ?v100) → (?v2 (?v3 (?v1 0) ?v100) (?v2 ?v100 0))
+    + (?v3 2 ?v100) → (?v2 (?v3 (?v1 0) ?v100) (?v3 ?v100 1))
+    + (?v3 2 ?v100) → (?v2 (?v3 (?v1 0) ?v100) (?v2 0 ?v100))
+    + (?v3 2 ?v100) → (?v2 (?v3 (?v1 0) ?v100) (?v3 1 ?v100))
+    + (?v3 2 ?v100) → (?v2 (?v3 (?v1 0) ?v100) (?v3 ?v100 (?v1 0)))
+    + (?v3 2 ?v100) → (?v2 (?v3 (?v1 0) ?v100) (?v3 (?v1 0) ?v100))
+    + (?v3 2 ?v100) → (?v2 (?v3 (?v1 0) ?v100) (?v2 ?v100 (?v3 ?v100 0)))
+    + (?v3 2 ?v100) → (?v2 (?v3 (?v1 0) ?v100) (?v2 ?v100 (?v3 0 ?v100)))
+  rustified: 0 reducing → substrate | 16 equivalence → ledger only
+  top apparatuses (by theorem yield): ["max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-nov+-0-clamp-1=21", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-meta+-0=20", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x2-2-maxzero-0-clamp-0-crgate-2=20", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1=19", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x2-2-maxzero-0-clamp-0=18", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1=18"]
+  cycle elapsed: 5.1s
+
+── cycle 19 / 50 ─────  pool size: 24  substrate size: 10  ledger size: 288
+  sub-campaign: 4000 probes, 444 structural rules, 23 apparatuses with yield
+  new theorems discovered: 16
+    + (?v3 ?v100 2) → (?v2 (?v2 ?v100 0) ?v100)
+    + (?v3 ?v100 2) → (?v2 (?v3 ?v100 1) ?v100)
+    + (?v3 ?v100 2) → (?v2 (?v2 0 ?v100) ?v100)
+    + (?v3 ?v100 2) → (?v2 (?v3 1 ?v100) ?v100)
+    + (?v3 ?v100 2) → (?v3 (?v2 1 1) ?v100)
+    + (?v3 ?v100 2) → (?v2 ?v100 (?v3 ?v100 (?v1 0)))
+    + (?v3 ?v100 2) → (?v2 ?v100 (?v3 (?v1 0) ?v100))
+    + (?v3 ?v100 2) → (?v2 ?v100 (?v2 ?v100 (?v3 ?v100 0)))
+    + (?v3 ?v100 2) → (?v2 ?v100 (?v2 ?v100 (?v3 0 ?v100)))
+    + (?v3 ?v100 2) → (?v2 ?v100 (?v2 ?v100 (?v2 0 0)))
+    + (?v3 ?v100 2) → (?v2 ?v100 (?v2 ?v100 (?v3 0 0)))
+    + (?v3 ?v100 2) → (?v2 ?v100 (?v3 ?v100 (?v2 0 1)))
+    + (?v3 ?v100 2) → (?v2 ?v100 (?v2 ?v100 (?v3 0 1)))
+    + (?v3 ?v100 2) → (?v2 ?v100 (?v3 ?v100 (?v2 1 0)))
+    + (?v3 ?v100 2) → (?v2 ?v100 (?v2 ?v100 (?v3 1 0)))
+    + (?v3 ?v100 2) → (?v2 ?v100 (?v3 ?v100 (?v3 1 1)))
+  rustified: 0 reducing → substrate | 16 equivalence → ledger only
+  top apparatuses (by theorem yield): ["max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-x2-0=23", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1=21", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-nov+-0-clamp-1-maxzero-1=21", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1=21", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1=19", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x2-2-maxzero-0-clamp-0=18"]
+  cycle elapsed: 5.1s
+
+── cycle 20 / 50 ─────  pool size: 24  substrate size: 10  ledger size: 304
+  sub-campaign: 4000 probes, 451 structural rules, 23 apparatuses with yield
+  new theorems discovered: 16
+    + (?v3 2 ?v100) → (?v2 (?v3 (?v1 0) ?v100) (?v2 ?v100 (?v2 0 0)))
+    + (?v3 2 ?v100) → (?v2 (?v3 (?v1 0) ?v100) (?v2 ?v100 (?v3 0 0)))
+    + (?v3 2 ?v100) → (?v2 (?v3 (?v1 0) ?v100) (?v3 ?v100 (?v2 0 1)))
+    + (?v3 2 ?v100) → (?v2 (?v3 (?v1 0) ?v100) (?v2 ?v100 (?v3 0 1)))
+    + (?v3 2 ?v100) → (?v2 (?v3 (?v1 0) ?v100) (?v3 ?v100 (?v2 1 0)))
+    + (?v3 2 ?v100) → (?v2 (?v3 (?v1 0) ?v100) (?v2 ?v100 (?v3 1 0)))
+    + (?v3 2 ?v100) → (?v2 (?v3 (?v1 0) ?v100) (?v3 ?v100 (?v3 1 1)))
+    + (?v3 2 ?v100) → (?v2 (?v2 ?v100 (?v3 ?v100 0)) ?v100)
+    + (?v3 2 ?v100) → (?v2 (?v2 ?v100 (?v3 ?v100 0)) (?v2 ?v100 0))
+    + (?v3 2 ?v100) → (?v2 (?v2 ?v100 (?v3 ?v100 0)) (?v3 ?v100 1))
+    + (?v3 2 ?v100) → (?v2 (?v2 ?v100 (?v3 ?v100 0)) (?v2 0 ?v100))
+    + (?v3 2 ?v100) → (?v2 (?v2 ?v100 (?v3 ?v100 0)) (?v3 1 ?v100))
+    + (?v3 2 ?v100) → (?v2 (?v2 ?v100 (?v3 ?v100 0)) (?v3 ?v100 (?v1 0)))
+    + (?v3 2 ?v100) → (?v2 (?v2 ?v100 (?v3 ?v100 0)) (?v3 (?v1 0) ?v100))
+    + (?v3 2 ?v100) → (?v2 (?v2 ?v100 (?v3 ?v100 0)) (?v2 ?v100 (?v3 ?v100 0)))
+    + (?v3 2 ?v100) → (?v2 (?v2 ?v100 (?v3 ?v100 0)) (?v2 ?v100 (?v3 0 ?v100)))
+  rustified: 0 reducing → substrate | 16 equivalence → ledger only
+  top apparatuses (by theorem yield): ["max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1=21", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1=21", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-x2-0-x05-1=20", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-nov+-0-clamp-1-maxzero-1-meta+-0=18", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-maxzero-1=18", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-meta+-1=18"]
+  cycle elapsed: 5.0s
+
+── cycle 21 / 50 ─────  pool size: 24  substrate size: 10  ledger size: 320
+  sub-campaign: 4000 probes, 456 structural rules, 23 apparatuses with yield
+  new theorems discovered: 16
+    + (?v3 2 ?v100) → (?v2 (?v2 ?v100 (?v3 ?v100 0)) (?v2 ?v100 (?v2 0 0)))
+    + (?v3 2 ?v100) → (?v2 (?v2 ?v100 (?v3 ?v100 0)) (?v2 ?v100 (?v3 0 0)))
+    + (?v3 2 ?v100) → (?v2 (?v2 ?v100 (?v3 ?v100 0)) (?v3 ?v100 (?v2 0 1)))
+    + (?v3 2 ?v100) → (?v2 (?v2 ?v100 (?v3 ?v100 0)) (?v2 ?v100 (?v3 0 1)))
+    + (?v3 2 ?v100) → (?v2 (?v2 ?v100 (?v3 ?v100 0)) (?v3 ?v100 (?v2 1 0)))
+    + (?v3 2 ?v100) → (?v2 (?v2 ?v100 (?v3 ?v100 0)) (?v2 ?v100 (?v3 1 0)))
+    + (?v3 2 ?v100) → (?v2 (?v2 ?v100 (?v3 ?v100 0)) (?v3 ?v100 (?v3 1 1)))
+    + (?v3 2 ?v100) → (?v2 (?v2 ?v100 (?v3 0 ?v100)) ?v100)
+    + (?v3 2 ?v100) → (?v2 (?v2 ?v100 (?v3 0 ?v100)) (?v2 ?v100 0))
+    + (?v3 2 ?v100) → (?v2 (?v2 ?v100 (?v3 0 ?v100)) (?v3 ?v100 1))
+    + (?v3 2 ?v100) → (?v2 (?v2 ?v100 (?v3 0 ?v100)) (?v2 0 ?v100))
+    + (?v3 2 ?v100) → (?v2 (?v2 ?v100 (?v3 0 ?v100)) (?v3 1 ?v100))
+    + (?v3 2 ?v100) → (?v2 (?v2 ?v100 (?v3 0 ?v100)) (?v3 ?v100 (?v1 0)))
+    + (?v3 2 ?v100) → (?v2 (?v2 ?v100 (?v3 0 ?v100)) (?v3 (?v1 0) ?v100))
+    + (?v3 2 ?v100) → (?v2 (?v2 ?v100 (?v3 0 ?v100)) (?v2 ?v100 (?v3 ?v100 0)))
+    + (?v3 2 ?v100) → (?v2 (?v2 ?v100 (?v3 0 ?v100)) (?v2 ?v100 (?v3 0 ?v100)))
+  rustified: 0 reducing → substrate | 16 equivalence → ledger only
+  top apparatuses (by theorem yield): ["max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-nov+-0-clamp-1-maxzero-1-meta+-0-clamp-0=23", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-x2-1=21", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-x2-0-x05-1-nov+-0=19", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-maxzero-1-nov+-1=19", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1=18", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1=18"]
+  cycle elapsed: 5.2s
+
+── cycle 22 / 50 ─────  pool size: 24  substrate size: 10  ledger size: 336
+  sub-campaign: 4000 probes, 459 structural rules, 23 apparatuses with yield
+  new theorems discovered: 16
+    + (?v2 ?v100 3) → (?v1 (?v1 (?v1 ?v100)))
+    + (?v2 ?v100 3) → (?v1 (?v1 (?v2 ?v100 1)))
+    + (?v2 ?v100 3) → (?v1 (?v1 (?v2 1 ?v100)))
+    + (?v2 ?v100 3) → (?v1 (?v2 ?v100 (?v1 1)))
+    + (?v2 ?v100 3) → (?v1 (?v2 1 (?v1 ?v100)))
+    + (?v2 ?v100 3) → (?v1 (?v2 (?v1 ?v100) 1))
+    + (?v2 ?v100 3) → (?v1 (?v2 (?v1 1) ?v100))
+    + (?v2 ?v100 3) → (?v2 ?v100 (?v1 (?v1 1)))
+    + (?v2 ?v100 3) → (?v2 1 (?v1 (?v1 ?v100)))
+    + (?v2 ?v100 3) → (?v2 (?v1 ?v100) (?v1 1))
+    + (?v2 ?v100 3) → (?v2 (?v1 1) (?v1 ?v100))
+    + (?v2 ?v100 3) → (?v2 (?v1 (?v1 ?v100)) 1)
+    + (?v2 ?v100 3) → (?v2 (?v1 (?v1 1)) ?v100)
+    + (?v2 ?v100 3) → (?v1 (?v1 (?v1 (?v2 ?v100 0))))
+    + (?v2 ?v100 3) → (?v1 (?v1 (?v1 (?v3 ?v100 1))))
+    + (?v2 ?v100 3) → (?v1 (?v1 (?v1 (?v2 0 ?v100))))
+  rustified: 0 reducing → substrate | 16 equivalence → ledger only
+  top apparatuses (by theorem yield): ["max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-maxzero-1-nov+-1-maxzero-0=23", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1=20", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1=20", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-maxzero-1-nov+-1-x2-1=19", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-nov+-1=19", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-x05-2=18"]
+  cycle elapsed: 5.4s
+
+── cycle 23 / 50 ─────  pool size: 24  substrate size: 10  ledger size: 352
+  sub-campaign: 4000 probes, 452 structural rules, 23 apparatuses with yield
+  new theorems discovered: 16
+    + (?v3 2 ?v100) → (?v2 (?v2 ?v100 (?v3 0 ?v100)) (?v2 ?v100 (?v2 0 0)))
+    + (?v3 2 ?v100) → (?v2 (?v2 ?v100 (?v3 0 ?v100)) (?v2 ?v100 (?v3 0 0)))
+    + (?v3 2 ?v100) → (?v2 (?v2 ?v100 (?v3 0 ?v100)) (?v3 ?v100 (?v2 0 1)))
+    + (?v3 2 ?v100) → (?v2 (?v2 ?v100 (?v3 0 ?v100)) (?v2 ?v100 (?v3 0 1)))
+    + (?v3 2 ?v100) → (?v2 (?v2 ?v100 (?v3 0 ?v100)) (?v3 ?v100 (?v2 1 0)))
+    + (?v3 2 ?v100) → (?v2 (?v2 ?v100 (?v3 0 ?v100)) (?v2 ?v100 (?v3 1 0)))
+    + (?v3 2 ?v100) → (?v2 (?v2 ?v100 (?v3 0 ?v100)) (?v3 ?v100 (?v3 1 1)))
+    + (?v3 2 ?v100) → (?v2 (?v2 ?v100 (?v2 0 0)) ?v100)
+    + (?v3 2 ?v100) → (?v2 (?v2 ?v100 (?v2 0 0)) (?v2 ?v100 0))
+    + (?v3 2 ?v100) → (?v2 (?v2 ?v100 (?v2 0 0)) (?v3 ?v100 1))
+    + (?v3 2 ?v100) → (?v2 (?v2 ?v100 (?v2 0 0)) (?v2 0 ?v100))
+    + (?v3 2 ?v100) → (?v2 (?v2 ?v100 (?v2 0 0)) (?v3 1 ?v100))
+    + (?v3 2 ?v100) → (?v2 (?v2 ?v100 (?v2 0 0)) (?v3 ?v100 (?v1 0)))
+    + (?v3 2 ?v100) → (?v2 (?v2 ?v100 (?v2 0 0)) (?v3 (?v1 0) ?v100))
+    + (?v3 2 ?v100) → (?v2 (?v2 ?v100 (?v2 0 0)) (?v2 ?v100 (?v3 ?v100 0)))
+    + (?v3 2 ?v100) → (?v2 (?v2 ?v100 (?v2 0 0)) (?v2 ?v100 (?v3 0 ?v100)))
+  rustified: 0 reducing → substrate | 16 equivalence → ledger only
+  top apparatuses (by theorem yield): ["max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1=22", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1=22", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-nov+-1-meta+-1=20", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-maxzero-1-nov+-1-maxzero-0-crgate-1=19", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-maxzero-1-nov+-1-x2-1=18", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-nov+-1-x2-2=18"]
+  cycle elapsed: 5.3s
+
+── cycle 24 / 50 ─────  pool size: 24  substrate size: 10  ledger size: 368
+  sub-campaign: 4000 probes, 442 structural rules, 23 apparatuses with yield
+  new theorems discovered: 16
+    + (?v3 2 ?v100) → (?v2 (?v2 ?v100 (?v2 0 0)) (?v2 ?v100 (?v2 0 0)))
+    + (?v3 2 ?v100) → (?v2 (?v2 ?v100 (?v2 0 0)) (?v2 ?v100 (?v3 0 0)))
+    + (?v3 2 ?v100) → (?v2 (?v2 ?v100 (?v2 0 0)) (?v3 ?v100 (?v2 0 1)))
+    + (?v3 2 ?v100) → (?v2 (?v2 ?v100 (?v2 0 0)) (?v2 ?v100 (?v3 0 1)))
+    + (?v3 2 ?v100) → (?v2 (?v2 ?v100 (?v2 0 0)) (?v3 ?v100 (?v2 1 0)))
+    + (?v3 2 ?v100) → (?v2 (?v2 ?v100 (?v2 0 0)) (?v2 ?v100 (?v3 1 0)))
+    + (?v3 2 ?v100) → (?v2 (?v2 ?v100 (?v2 0 0)) (?v3 ?v100 (?v3 1 1)))
+    + (?v3 2 ?v100) → (?v2 (?v2 ?v100 (?v3 0 0)) ?v100)
+    + (?v3 2 ?v100) → (?v2 (?v2 ?v100 (?v3 0 0)) (?v2 ?v100 0))
+    + (?v3 2 ?v100) → (?v2 (?v2 ?v100 (?v3 0 0)) (?v3 ?v100 1))
+    + (?v3 2 ?v100) → (?v2 (?v2 ?v100 (?v3 0 0)) (?v2 0 ?v100))
+    + (?v3 2 ?v100) → (?v2 (?v2 ?v100 (?v3 0 0)) (?v3 1 ?v100))
+    + (?v3 2 ?v100) → (?v2 (?v2 ?v100 (?v3 0 0)) (?v3 ?v100 (?v1 0)))
+    + (?v3 2 ?v100) → (?v2 (?v2 ?v100 (?v3 0 0)) (?v3 (?v1 0) ?v100))
+    + (?v3 2 ?v100) → (?v2 (?v2 ?v100 (?v3 0 0)) (?v2 ?v100 (?v3 ?v100 0)))
+    + (?v3 2 ?v100) → (?v2 (?v2 ?v100 (?v3 0 0)) (?v2 ?v100 (?v3 0 ?v100)))
+  rustified: 0 reducing → substrate | 16 equivalence → ledger only
+  top apparatuses (by theorem yield): ["max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-maxzero-1-nov+-1-maxzero-0-crgate-1-crgate-0=20", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1=19", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1=18", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1=18", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-maxzero-1-nov+-1-x2-1=18", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-nov+-1-meta+-1-maxzero-0=18"]
+  cycle elapsed: 5.2s
+
+── cycle 25 / 50 ─────  pool size: 24  substrate size: 10  ledger size: 384
+  sub-campaign: 4000 probes, 469 structural rules, 22 apparatuses with yield
+  new theorems discovered: 16
+    + (?v3 2 ?v100) → (?v2 (?v2 ?v100 (?v3 0 0)) (?v2 ?v100 (?v2 0 0)))
+    + (?v3 2 ?v100) → (?v2 (?v2 ?v100 (?v3 0 0)) (?v2 ?v100 (?v3 0 0)))
+    + (?v3 2 ?v100) → (?v2 (?v2 ?v100 (?v3 0 0)) (?v3 ?v100 (?v2 0 1)))
+    + (?v3 2 ?v100) → (?v2 (?v2 ?v100 (?v3 0 0)) (?v2 ?v100 (?v3 0 1)))
+    + (?v3 2 ?v100) → (?v2 (?v2 ?v100 (?v3 0 0)) (?v3 ?v100 (?v2 1 0)))
+    + (?v3 2 ?v100) → (?v2 (?v2 ?v100 (?v3 0 0)) (?v2 ?v100 (?v3 1 0)))
+    + (?v3 2 ?v100) → (?v2 (?v2 ?v100 (?v3 0 0)) (?v3 ?v100 (?v3 1 1)))
+    + (?v3 2 ?v100) → (?v2 (?v3 ?v100 (?v2 0 1)) ?v100)
+    + (?v3 2 ?v100) → (?v2 (?v3 ?v100 (?v2 0 1)) (?v2 ?v100 0))
+    + (?v3 2 ?v100) → (?v2 (?v3 ?v100 (?v2 0 1)) (?v3 ?v100 1))
+    + (?v3 2 ?v100) → (?v2 (?v3 ?v100 (?v2 0 1)) (?v2 0 ?v100))
+    + (?v3 2 ?v100) → (?v2 (?v3 ?v100 (?v2 0 1)) (?v3 1 ?v100))
+    + (?v3 2 ?v100) → (?v2 (?v3 ?v100 (?v2 0 1)) (?v3 ?v100 (?v1 0)))
+    + (?v3 2 ?v100) → (?v2 (?v3 ?v100 (?v2 0 1)) (?v3 (?v1 0) ?v100))
+    + (?v3 2 ?v100) → (?v2 (?v3 ?v100 (?v2 0 1)) (?v2 ?v100 (?v3 ?v100 0)))
+    + (?v3 2 ?v100) → (?v2 (?v3 ?v100 (?v2 0 1)) (?v2 ?v100 (?v3 0 ?v100)))
+  rustified: 0 reducing → substrate | 16 equivalence → ledger only
+  top apparatuses (by theorem yield): ["max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-nov+-0=23", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1=22", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1=22", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1=21", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1=21", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-maxzero-1-nov+-1-x2-1=18"]
+  cycle elapsed: 5.2s
+
+── cycle 26 / 50 ─────  pool size: 24  substrate size: 10  ledger size: 400
+  sub-campaign: 4000 probes, 458 structural rules, 21 apparatuses with yield
+  new theorems discovered: 16
+    + (?v3 2 ?v100) → (?v2 (?v3 ?v100 (?v2 0 1)) (?v2 ?v100 (?v2 0 0)))
+    + (?v3 2 ?v100) → (?v2 (?v3 ?v100 (?v2 0 1)) (?v2 ?v100 (?v3 0 0)))
+    + (?v3 2 ?v100) → (?v2 (?v3 ?v100 (?v2 0 1)) (?v3 ?v100 (?v2 0 1)))
+    + (?v3 2 ?v100) → (?v2 (?v3 ?v100 (?v2 0 1)) (?v2 ?v100 (?v3 0 1)))
+    + (?v3 2 ?v100) → (?v2 (?v3 ?v100 (?v2 0 1)) (?v3 ?v100 (?v2 1 0)))
+    + (?v3 2 ?v100) → (?v2 (?v3 ?v100 (?v2 0 1)) (?v2 ?v100 (?v3 1 0)))
+    + (?v3 2 ?v100) → (?v2 (?v3 ?v100 (?v2 0 1)) (?v3 ?v100 (?v3 1 1)))
+    + (?v3 2 ?v100) → (?v2 (?v2 ?v100 (?v3 0 1)) ?v100)
+    + (?v3 2 ?v100) → (?v2 (?v2 ?v100 (?v3 0 1)) (?v2 ?v100 0))
+    + (?v3 2 ?v100) → (?v2 (?v2 ?v100 (?v3 0 1)) (?v3 ?v100 1))
+    + (?v3 2 ?v100) → (?v2 (?v2 ?v100 (?v3 0 1)) (?v2 0 ?v100))
+    + (?v3 2 ?v100) → (?v2 (?v2 ?v100 (?v3 0 1)) (?v3 1 ?v100))
+    + (?v3 2 ?v100) → (?v2 (?v2 ?v100 (?v3 0 1)) (?v3 ?v100 (?v1 0)))
+    + (?v3 2 ?v100) → (?v2 (?v2 ?v100 (?v3 0 1)) (?v3 (?v1 0) ?v100))
+    + (?v3 2 ?v100) → (?v2 (?v2 ?v100 (?v3 0 1)) (?v2 ?v100 (?v3 ?v100 0)))
+    + (?v3 2 ?v100) → (?v2 (?v2 ?v100 (?v3 0 1)) (?v2 ?v100 (?v3 0 ?v100)))
+  rustified: 0 reducing → substrate | 16 equivalence → ledger only
+  top apparatuses (by theorem yield): ["max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1=22", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1=22", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1=21", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1=21", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-nov+-0-nov+-1=21", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-meta+-0=20"]
+  cycle elapsed: 5.2s
+
+── cycle 27 / 50 ─────  pool size: 24  substrate size: 10  ledger size: 416
+  sub-campaign: 4000 probes, 451 structural rules, 19 apparatuses with yield
+  new theorems discovered: 16
+    + (?v3 2 ?v100) → (?v2 (?v2 ?v100 (?v3 0 1)) (?v2 ?v100 (?v2 0 0)))
+    + (?v3 2 ?v100) → (?v2 (?v2 ?v100 (?v3 0 1)) (?v2 ?v100 (?v3 0 0)))
+    + (?v3 2 ?v100) → (?v2 (?v2 ?v100 (?v3 0 1)) (?v3 ?v100 (?v2 0 1)))
+    + (?v3 2 ?v100) → (?v2 (?v2 ?v100 (?v3 0 1)) (?v2 ?v100 (?v3 0 1)))
+    + (?v3 2 ?v100) → (?v2 (?v2 ?v100 (?v3 0 1)) (?v3 ?v100 (?v2 1 0)))
+    + (?v3 2 ?v100) → (?v2 (?v2 ?v100 (?v3 0 1)) (?v2 ?v100 (?v3 1 0)))
+    + (?v3 2 ?v100) → (?v2 (?v2 ?v100 (?v3 0 1)) (?v3 ?v100 (?v3 1 1)))
+    + (?v3 2 ?v100) → (?v2 (?v3 ?v100 (?v2 1 0)) ?v100)
+    + (?v3 2 ?v100) → (?v2 (?v3 ?v100 (?v2 1 0)) (?v2 ?v100 0))
+    + (?v3 2 ?v100) → (?v2 (?v3 ?v100 (?v2 1 0)) (?v3 ?v100 1))
+    + (?v3 2 ?v100) → (?v2 (?v3 ?v100 (?v2 1 0)) (?v2 0 ?v100))
+    + (?v3 2 ?v100) → (?v2 (?v3 ?v100 (?v2 1 0)) (?v3 1 ?v100))
+    + (?v3 2 ?v100) → (?v2 (?v3 ?v100 (?v2 1 0)) (?v3 ?v100 (?v1 0)))
+    + (?v3 2 ?v100) → (?v2 (?v3 ?v100 (?v2 1 0)) (?v3 (?v1 0) ?v100))
+    + (?v3 2 ?v100) → (?v2 (?v3 ?v100 (?v2 1 0)) (?v2 ?v100 (?v3 ?v100 0)))
+    + (?v3 2 ?v100) → (?v2 (?v3 ?v100 (?v2 1 0)) (?v2 ?v100 (?v3 0 ?v100)))
+  rustified: 0 reducing → substrate | 16 equivalence → ledger only
+  top apparatuses (by theorem yield): ["max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1=25", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1=25", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1=25", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-x2-0=25", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-x2-0=25", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-nov+-0-nov+-1-x05-1=19"]
+  cycle elapsed: 5.2s
+
+── cycle 28 / 50 ─────  pool size: 24  substrate size: 10  ledger size: 432
+  sub-campaign: 4000 probes, 459 structural rules, 20 apparatuses with yield
+  new theorems discovered: 16
+    + (?v3 2 ?v100) → (?v2 (?v3 ?v100 (?v2 1 0)) (?v2 ?v100 (?v2 0 0)))
+    + (?v3 2 ?v100) → (?v2 (?v3 ?v100 (?v2 1 0)) (?v2 ?v100 (?v3 0 0)))
+    + (?v3 2 ?v100) → (?v2 (?v3 ?v100 (?v2 1 0)) (?v3 ?v100 (?v2 0 1)))
+    + (?v3 2 ?v100) → (?v2 (?v3 ?v100 (?v2 1 0)) (?v2 ?v100 (?v3 0 1)))
+    + (?v3 2 ?v100) → (?v2 (?v3 ?v100 (?v2 1 0)) (?v3 ?v100 (?v2 1 0)))
+    + (?v3 2 ?v100) → (?v2 (?v3 ?v100 (?v2 1 0)) (?v2 ?v100 (?v3 1 0)))
+    + (?v3 2 ?v100) → (?v2 (?v3 ?v100 (?v2 1 0)) (?v3 ?v100 (?v3 1 1)))
+    + (?v3 2 ?v100) → (?v2 (?v2 ?v100 (?v3 1 0)) ?v100)
+    + (?v3 2 ?v100) → (?v2 (?v2 ?v100 (?v3 1 0)) (?v2 ?v100 0))
+    + (?v3 2 ?v100) → (?v2 (?v2 ?v100 (?v3 1 0)) (?v3 ?v100 1))
+    + (?v3 2 ?v100) → (?v2 (?v2 ?v100 (?v3 1 0)) (?v2 0 ?v100))
+    + (?v3 2 ?v100) → (?v2 (?v2 ?v100 (?v3 1 0)) (?v3 1 ?v100))
+    + (?v3 2 ?v100) → (?v2 (?v2 ?v100 (?v3 1 0)) (?v3 ?v100 (?v1 0)))
+    + (?v3 2 ?v100) → (?v2 (?v2 ?v100 (?v3 1 0)) (?v3 (?v1 0) ?v100))
+    + (?v3 2 ?v100) → (?v2 (?v2 ?v100 (?v3 1 0)) (?v2 ?v100 (?v3 ?v100 0)))
+    + (?v3 2 ?v100) → (?v2 (?v2 ?v100 (?v3 1 0)) (?v2 ?v100 (?v3 0 ?v100)))
+  rustified: 0 reducing → substrate | 16 equivalence → ledger only
+  top apparatuses (by theorem yield): ["max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-x2-0=24", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-x2-0=24", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-x2-0=24", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1=23", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1=23", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1=23"]
+  cycle elapsed: 5.2s
+
+── cycle 29 / 50 ─────  pool size: 24  substrate size: 10  ledger size: 448
+  sub-campaign: 4000 probes, 456 structural rules, 18 apparatuses with yield
+  new theorems discovered: 16
+    + (?v2 2 ?v100) → (?v1 (?v1 ?v100))
+    + (?v2 2 ?v100) → (?v1 (?v2 ?v100 1))
+    + (?v2 2 ?v100) → (?v1 (?v2 1 ?v100))
+    + (?v2 2 ?v100) → (?v2 ?v100 (?v1 1))
+    + (?v2 2 ?v100) → (?v2 1 (?v1 ?v100))
+    + (?v2 2 ?v100) → (?v2 (?v1 ?v100) 1)
+    + (?v2 2 ?v100) → (?v2 (?v1 1) ?v100)
+    + (?v2 2 ?v100) → (?v1 (?v1 (?v2 ?v100 0)))
+    + (?v2 2 ?v100) → (?v1 (?v1 (?v3 ?v100 1)))
+    + (?v2 2 ?v100) → (?v1 (?v1 (?v2 0 ?v100)))
+    + (?v2 2 ?v100) → (?v1 (?v1 (?v3 1 ?v100)))
+    + (?v2 2 ?v100) → (?v1 (?v2 ?v100 (?v1 0)))
+    + (?v2 2 ?v100) → (?v1 (?v2 0 (?v1 ?v100)))
+    + (?v2 2 ?v100) → (?v1 (?v3 1 (?v1 ?v100)))
+    + (?v2 2 ?v100) → (?v1 (?v2 (?v1 ?v100) 0))
+    + (?v2 2 ?v100) → (?v1 (?v3 (?v1 ?v100) 1))
+  rustified: 0 reducing → substrate | 16 equivalence → ledger only
+  top apparatuses (by theorem yield): ["max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1=24", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1=24", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1=24", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-x2-0=23", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-x2-0=23", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-x2-0=23"]
+  cycle elapsed: 5.4s
+
+── cycle 30 / 50 ─────  pool size: 24  substrate size: 10  ledger size: 464
+  sub-campaign: 4000 probes, 456 structural rules, 18 apparatuses with yield
+  new theorems discovered: 16
+    + (?v2 ?v100 3) → (?v1 (?v1 (?v1 (?v3 1 ?v100))))
+    + (?v2 ?v100 3) → (?v1 (?v1 (?v2 ?v100 (?v1 0))))
+    + (?v2 ?v100 3) → (?v1 (?v1 (?v2 0 (?v1 ?v100))))
+    + (?v2 ?v100 3) → (?v1 (?v1 (?v3 1 (?v1 ?v100))))
+    + (?v2 2 ?v100) → (?v1 (?v2 (?v1 0) ?v100))
+    + (?v2 2 ?v100) → (?v2 ?v100 (?v1 (?v1 0)))
+    + (?v2 2 ?v100) → (?v2 ?v100 (?v2 1 1))
+    + (?v2 2 ?v100) → (?v2 0 (?v1 (?v1 ?v100)))
+    + (?v2 2 ?v100) → (?v3 1 (?v1 (?v1 ?v100)))
+    + (?v2 2 ?v100) → (?v2 1 (?v2 ?v100 1))
+    + (?v2 2 ?v100) → (?v2 1 (?v2 1 ?v100))
+    + (?v2 2 ?v100) → (?v2 (?v1 ?v100) (?v1 0))
+    + (?v2 2 ?v100) → (?v2 (?v1 0) (?v1 ?v100))
+    + (?v2 2 ?v100) → (?v2 (?v1 (?v1 ?v100)) 0)
+    + (?v2 2 ?v100) → (?v3 (?v1 (?v1 ?v100)) 1)
+    + (?v2 2 ?v100) → (?v2 (?v1 (?v1 0)) ?v100)
+  rustified: 0 reducing → substrate | 16 equivalence → ledger only
+  top apparatuses (by theorem yield): ["max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-x2-0=24", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-x2-0=24", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-x2-0=24", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-x2-0-maxzero-0=24", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-x2-0-maxzero-0=24", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1=23"]
+  cycle elapsed: 5.7s
+
+── cycle 31 / 50 ─────  pool size: 24  substrate size: 10  ledger size: 480
+  sub-campaign: 4000 probes, 458 structural rules, 19 apparatuses with yield
+  new theorems discovered: 16
+    + (?v2 3 ?v100) → (?v1 (?v1 (?v1 ?v100)))
+    + (?v2 3 ?v100) → (?v1 (?v1 (?v2 ?v100 1)))
+    + (?v2 3 ?v100) → (?v1 (?v1 (?v2 1 ?v100)))
+    + (?v2 3 ?v100) → (?v1 (?v2 ?v100 (?v1 1)))
+    + (?v2 3 ?v100) → (?v1 (?v2 1 (?v1 ?v100)))
+    + (?v2 3 ?v100) → (?v1 (?v2 (?v1 ?v100) 1))
+    + (?v2 3 ?v100) → (?v1 (?v2 (?v1 1) ?v100))
+    + (?v2 3 ?v100) → (?v2 ?v100 (?v1 (?v1 1)))
+    + (?v2 3 ?v100) → (?v2 1 (?v1 (?v1 ?v100)))
+    + (?v2 3 ?v100) → (?v2 (?v1 ?v100) (?v1 1))
+    + (?v2 3 ?v100) → (?v2 (?v1 1) (?v1 ?v100))
+    + (?v2 3 ?v100) → (?v2 (?v1 (?v1 ?v100)) 1)
+    + (?v2 3 ?v100) → (?v2 (?v1 (?v1 1)) ?v100)
+    + (?v2 3 ?v100) → (?v1 (?v1 (?v1 (?v2 ?v100 0))))
+    + (?v2 3 ?v100) → (?v1 (?v1 (?v1 (?v3 ?v100 1))))
+    + (?v2 3 ?v100) → (?v1 (?v1 (?v1 (?v2 0 ?v100))))
+  rustified: 0 reducing → substrate | 16 equivalence → ledger only
+  top apparatuses (by theorem yield): ["max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-x2-0=27", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-x2-0=27", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-x2-0=27", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-x2-0=27", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-x2-0-x05-1=23", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-x2-0-x05-1=23"]
+  cycle elapsed: 5.5s
+
+── cycle 32 / 50 ─────  pool size: 24  substrate size: 10  ledger size: 496
+  sub-campaign: 4000 probes, 448 structural rules, 19 apparatuses with yield
+  new theorems discovered: 16
+    + (?v2 4 ?v100) → (?v1 (?v1 (?v1 (?v1 ?v100))))
+    + (?v3 2 ?v100) → (?v2 (?v2 ?v100 (?v3 1 0)) (?v2 ?v100 (?v2 0 0)))
+    + (?v3 2 ?v100) → (?v2 (?v2 ?v100 (?v3 1 0)) (?v2 ?v100 (?v3 0 0)))
+    + (?v3 2 ?v100) → (?v2 (?v2 ?v100 (?v3 1 0)) (?v3 ?v100 (?v2 0 1)))
+    + (?v3 2 ?v100) → (?v2 (?v2 ?v100 (?v3 1 0)) (?v2 ?v100 (?v3 0 1)))
+    + (?v3 2 ?v100) → (?v2 (?v2 ?v100 (?v3 1 0)) (?v3 ?v100 (?v2 1 0)))
+    + (?v3 2 ?v100) → (?v2 (?v2 ?v100 (?v3 1 0)) (?v2 ?v100 (?v3 1 0)))
+    + (?v3 2 ?v100) → (?v2 (?v2 ?v100 (?v3 1 0)) (?v3 ?v100 (?v3 1 1)))
+    + (?v3 2 ?v100) → (?v2 (?v3 ?v100 (?v3 1 1)) ?v100)
+    + (?v3 2 ?v100) → (?v2 (?v3 ?v100 (?v3 1 1)) (?v2 ?v100 0))
+    + (?v3 2 ?v100) → (?v2 (?v3 ?v100 (?v3 1 1)) (?v3 ?v100 1))
+    + (?v3 2 ?v100) → (?v2 (?v3 ?v100 (?v3 1 1)) (?v2 0 ?v100))
+    + (?v3 2 ?v100) → (?v2 (?v3 ?v100 (?v3 1 1)) (?v3 1 ?v100))
+    + (?v3 2 ?v100) → (?v2 (?v3 ?v100 (?v3 1 1)) (?v3 ?v100 (?v1 0)))
+    + (?v3 2 ?v100) → (?v2 (?v3 ?v100 (?v3 1 1)) (?v3 (?v1 0) ?v100))
+    + (?v3 2 ?v100) → (?v2 (?v3 ?v100 (?v3 1 1)) (?v2 ?v100 (?v3 ?v100 0)))
+  rustified: 0 reducing → substrate | 16 equivalence → ledger only
+  top apparatuses (by theorem yield): ["max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-x2-0=26", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-x2-0=26", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-x2-0=26", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-x2-0=26", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-x2-0-x05-1=26", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-x2-0-x05-1=26"]
+  cycle elapsed: 5.2s
+
+── cycle 33 / 50 ─────  pool size: 24  substrate size: 10  ledger size: 512
+  sub-campaign: 4000 probes, 462 structural rules, 20 apparatuses with yield
+  new theorems discovered: 16
+    + (?v3 2 ?v100) → (?v2 (?v3 ?v100 (?v3 1 1)) (?v2 ?v100 (?v3 0 ?v100)))
+    + (?v3 2 ?v100) → (?v2 (?v3 ?v100 (?v3 1 1)) (?v2 ?v100 (?v2 0 0)))
+    + (?v3 2 ?v100) → (?v2 (?v3 ?v100 (?v3 1 1)) (?v2 ?v100 (?v3 0 0)))
+    + (?v3 2 ?v100) → (?v2 (?v3 ?v100 (?v3 1 1)) (?v3 ?v100 (?v2 0 1)))
+    + (?v3 2 ?v100) → (?v2 (?v3 ?v100 (?v3 1 1)) (?v2 ?v100 (?v3 0 1)))
+    + (?v3 2 ?v100) → (?v2 (?v3 ?v100 (?v3 1 1)) (?v3 ?v100 (?v2 1 0)))
+    + (?v3 2 ?v100) → (?v2 (?v3 ?v100 (?v3 1 1)) (?v2 ?v100 (?v3 1 0)))
+    + (?v3 2 ?v100) → (?v2 (?v3 ?v100 (?v3 1 1)) (?v3 ?v100 (?v3 1 1)))
+    + (?v2 2 ?v100) → (?v2 (?v2 ?v100 1) 1)
+    + (?v2 2 ?v100) → (?v2 (?v2 1 ?v100) 1)
+    + (?v2 2 ?v100) → (?v2 (?v2 1 1) ?v100)
+    + (?v2 3 ?v100) → (?v1 (?v1 (?v1 (?v3 1 ?v100))))
+    + (?v2 3 ?v100) → (?v1 (?v1 (?v2 ?v100 (?v1 0))))
+    + (?v2 3 ?v100) → (?v1 (?v1 (?v2 0 (?v1 ?v100))))
+    + (?v2 3 ?v100) → (?v1 (?v1 (?v3 1 (?v1 ?v100))))
+    + (?v3 ?v100 2) → (?v2 (?v2 ?v100 0) (?v2 ?v100 0))
+  rustified: 0 reducing → substrate | 16 equivalence → ledger only
+  top apparatuses (by theorem yield): ["max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-x2-0=26", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-x2-0=26", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-x2-0=26", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-x2-0=26", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-x2-0-nov+-0=23", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-x2-0-clamp-1=21"]
+  cycle elapsed: 6.0s
+
+── cycle 34 / 50 ─────  pool size: 24  substrate size: 10  ledger size: 528
+  sub-campaign: 4000 probes, 461 structural rules, 17 apparatuses with yield
+  new theorems discovered: 16
+    + (?v3 ?v100 2) → (?v2 (?v2 ?v100 0) (?v3 ?v100 1))
+    + (?v3 ?v100 2) → (?v2 (?v2 ?v100 0) (?v2 0 ?v100))
+    + (?v3 ?v100 2) → (?v2 (?v2 ?v100 0) (?v3 1 ?v100))
+    + (?v3 ?v100 2) → (?v2 (?v2 ?v100 0) (?v3 ?v100 (?v1 0)))
+    + (?v3 ?v100 2) → (?v2 (?v2 ?v100 0) (?v3 (?v1 0) ?v100))
+    + (?v3 ?v100 2) → (?v2 (?v2 ?v100 0) (?v2 ?v100 (?v3 ?v100 0)))
+    + (?v3 ?v100 2) → (?v2 (?v2 ?v100 0) (?v2 ?v100 (?v3 0 ?v100)))
+    + (?v3 ?v100 2) → (?v2 (?v2 ?v100 0) (?v2 ?v100 (?v2 0 0)))
+    + (?v3 ?v100 2) → (?v2 (?v2 ?v100 0) (?v2 ?v100 (?v3 0 0)))
+    + (?v3 ?v100 2) → (?v2 (?v2 ?v100 0) (?v3 ?v100 (?v2 0 1)))
+    + (?v3 ?v100 2) → (?v2 (?v2 ?v100 0) (?v2 ?v100 (?v3 0 1)))
+    + (?v3 ?v100 2) → (?v2 (?v2 ?v100 0) (?v3 ?v100 (?v2 1 0)))
+    + (?v3 ?v100 2) → (?v2 (?v2 ?v100 0) (?v2 ?v100 (?v3 1 0)))
+    + (?v3 ?v100 2) → (?v2 (?v2 ?v100 0) (?v3 ?v100 (?v3 1 1)))
+    + (?v3 ?v100 2) → (?v2 (?v3 ?v100 1) (?v2 ?v100 0))
+    + (?v3 ?v100 2) → (?v2 (?v3 ?v100 1) (?v3 ?v100 1))
+  rustified: 0 reducing → substrate | 16 equivalence → ledger only
+  top apparatuses (by theorem yield): ["max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-x2-0=26", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-x2-0=26", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-x2-0=26", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-x2-0=26", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-x2-0-clamp-1=26", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-x2-0-clamp-1=26"]
+  cycle elapsed: 5.9s
+
+── cycle 35 / 50 ─────  pool size: 24  substrate size: 10  ledger size: 544
+  sub-campaign: 4000 probes, 461 structural rules, 14 apparatuses with yield
+  new theorems discovered: 16
+    + (?v3 ?v100 2) → (?v2 (?v3 ?v100 1) (?v2 0 ?v100))
+    + (?v3 ?v100 2) → (?v2 (?v3 ?v100 1) (?v3 1 ?v100))
+    + (?v3 ?v100 2) → (?v2 (?v3 ?v100 1) (?v3 ?v100 (?v1 0)))
+    + (?v3 ?v100 2) → (?v2 (?v3 ?v100 1) (?v3 (?v1 0) ?v100))
+    + (?v3 ?v100 2) → (?v2 (?v3 ?v100 1) (?v2 ?v100 (?v3 ?v100 0)))
+    + (?v3 ?v100 2) → (?v2 (?v3 ?v100 1) (?v2 ?v100 (?v3 0 ?v100)))
+    + (?v3 ?v100 2) → (?v2 (?v3 ?v100 1) (?v2 ?v100 (?v2 0 0)))
+    + (?v3 ?v100 2) → (?v2 (?v3 ?v100 1) (?v2 ?v100 (?v3 0 0)))
+    + (?v3 ?v100 2) → (?v2 (?v3 ?v100 1) (?v3 ?v100 (?v2 0 1)))
+    + (?v3 ?v100 2) → (?v2 (?v3 ?v100 1) (?v2 ?v100 (?v3 0 1)))
+    + (?v3 ?v100 2) → (?v2 (?v3 ?v100 1) (?v3 ?v100 (?v2 1 0)))
+    + (?v3 ?v100 2) → (?v2 (?v3 ?v100 1) (?v2 ?v100 (?v3 1 0)))
+    + (?v3 ?v100 2) → (?v2 (?v3 ?v100 1) (?v3 ?v100 (?v3 1 1)))
+    + (?v3 ?v100 2) → (?v2 (?v2 0 ?v100) (?v2 ?v100 0))
+    + (?v3 ?v100 2) → (?v2 (?v2 0 ?v100) (?v3 ?v100 1))
+    + (?v3 ?v100 2) → (?v2 (?v2 0 ?v100) (?v2 0 ?v100))
+  rustified: 0 reducing → substrate | 16 equivalence → ledger only
+  top apparatuses (by theorem yield): ["max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-x2-0=26", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-x2-0=26", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-x2-0=26", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-x2-0=26", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-x2-0-clamp-1=26", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-x2-0-clamp-1=26"]
+  cycle elapsed: 5.9s
+
+── cycle 36 / 50 ─────  pool size: 24  substrate size: 10  ledger size: 560
+  sub-campaign: 4000 probes, 456 structural rules, 20 apparatuses with yield
+  new theorems discovered: 16
+    + (?v3 ?v100 2) → (?v2 (?v2 0 ?v100) (?v3 1 ?v100))
+    + (?v3 ?v100 2) → (?v2 (?v2 0 ?v100) (?v3 ?v100 (?v1 0)))
+    + (?v3 ?v100 2) → (?v2 (?v2 0 ?v100) (?v3 (?v1 0) ?v100))
+    + (?v3 ?v100 2) → (?v2 (?v2 0 ?v100) (?v2 ?v100 (?v3 ?v100 0)))
+    + (?v3 ?v100 2) → (?v2 (?v2 0 ?v100) (?v2 ?v100 (?v3 0 ?v100)))
+    + (?v3 ?v100 2) → (?v2 (?v2 0 ?v100) (?v2 ?v100 (?v2 0 0)))
+    + (?v3 ?v100 2) → (?v2 (?v2 0 ?v100) (?v2 ?v100 (?v3 0 0)))
+    + (?v3 ?v100 2) → (?v2 (?v2 0 ?v100) (?v3 ?v100 (?v2 0 1)))
+    + (?v3 ?v100 2) → (?v2 (?v2 0 ?v100) (?v2 ?v100 (?v3 0 1)))
+    + (?v3 ?v100 2) → (?v2 (?v2 0 ?v100) (?v3 ?v100 (?v2 1 0)))
+    + (?v3 ?v100 2) → (?v2 (?v2 0 ?v100) (?v2 ?v100 (?v3 1 0)))
+    + (?v3 ?v100 2) → (?v2 (?v2 0 ?v100) (?v3 ?v100 (?v3 1 1)))
+    + (?v3 ?v100 2) → (?v2 (?v3 1 ?v100) (?v2 ?v100 0))
+    + (?v3 ?v100 2) → (?v2 (?v3 1 ?v100) (?v3 ?v100 1))
+    + (?v3 ?v100 2) → (?v2 (?v3 1 ?v100) (?v2 0 ?v100))
+    + (?v3 ?v100 2) → (?v2 (?v3 1 ?v100) (?v3 1 ?v100))
+  rustified: 0 reducing → substrate | 16 equivalence → ledger only
+  top apparatuses (by theorem yield): ["max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-x2-0=26", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-x2-0=26", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-x2-0=26", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-x2-0=26", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-x2-0-clamp-1=21", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-x2-0-clamp-1=21"]
+  cycle elapsed: 5.7s
+
+── cycle 37 / 50 ─────  pool size: 24  substrate size: 10  ledger size: 576
+  sub-campaign: 4000 probes, 463 structural rules, 19 apparatuses with yield
+  new theorems discovered: 16
+    + (?v3 ?v100 (?v2 ?v101 ?v102)) → (?v3 ?v100 (?v2 ?v101 ?v102))
+    + (?v3 ?v100 (?v2 ?v101 ?v102)) → (?v3 ?v100 (?v2 ?v102 ?v101))
+    + (?v3 ?v100 (?v2 ?v101 ?v102)) → (?v3 (?v2 ?v101 ?v102) ?v100)
+    + (?v3 ?v100 (?v2 ?v101 ?v102)) → (?v3 (?v2 ?v102 ?v101) ?v100)
+    + (?v2 ?v100 4) → (?v1 (?v1 (?v1 (?v1 ?v100))))
+    + (?v3 ?v100 2) → (?v2 (?v3 1 ?v100) (?v3 ?v100 (?v1 0)))
+    + (?v3 ?v100 2) → (?v2 (?v3 1 ?v100) (?v3 (?v1 0) ?v100))
+    + (?v3 ?v100 2) → (?v2 (?v3 1 ?v100) (?v2 ?v100 (?v3 ?v100 0)))
+    + (?v3 ?v100 2) → (?v2 (?v3 1 ?v100) (?v2 ?v100 (?v3 0 ?v100)))
+    + (?v3 ?v100 2) → (?v2 (?v3 1 ?v100) (?v2 ?v100 (?v2 0 0)))
+    + (?v3 ?v100 2) → (?v2 (?v3 1 ?v100) (?v2 ?v100 (?v3 0 0)))
+    + (?v3 ?v100 2) → (?v2 (?v3 1 ?v100) (?v3 ?v100 (?v2 0 1)))
+    + (?v3 ?v100 2) → (?v2 (?v3 1 ?v100) (?v2 ?v100 (?v3 0 1)))
+    + (?v3 ?v100 2) → (?v2 (?v3 1 ?v100) (?v3 ?v100 (?v2 1 0)))
+    + (?v3 ?v100 2) → (?v2 (?v3 1 ?v100) (?v2 ?v100 (?v3 1 0)))
+    + (?v3 ?v100 2) → (?v2 (?v3 1 ?v100) (?v3 ?v100 (?v3 1 1)))
+  rustified: 0 reducing → substrate | 16 equivalence → ledger only
+  top apparatuses (by theorem yield): ["max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-x2-0=26", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-x2-0=26", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-x2-0=26", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-x2-0=26", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-x2-0-clamp-0=23", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-x2-0-clamp-1=22"]
+  cycle elapsed: 6.3s
+
+── cycle 38 / 50 ─────  pool size: 24  substrate size: 10  ledger size: 592
+  sub-campaign: 4000 probes, 450 structural rules, 20 apparatuses with yield
+  new theorems discovered: 16
+    + (?v2 ?v100 (?v3 ?v101 2)) → (?v2 ?v100 (?v2 ?v101 ?v101))
+    + (?v2 ?v100 (?v3 ?v101 2)) → (?v2 ?v101 (?v2 ?v100 ?v101))
+    + (?v2 ?v100 (?v3 ?v101 2)) → (?v2 ?v101 (?v2 ?v101 ?v100))
+    + (?v2 ?v100 (?v3 ?v101 2)) → (?v2 (?v2 ?v100 ?v101) ?v101)
+    + (?v2 ?v100 (?v3 ?v101 2)) → (?v2 (?v2 ?v101 ?v100) ?v101)
+    + (?v2 ?v100 (?v3 ?v101 2)) → (?v2 (?v2 ?v101 ?v101) ?v100)
+    + (?v3 ?v100 2) → (?v2 (?v3 ?v100 (?v1 0)) ?v100)
+    + (?v3 ?v100 2) → (?v2 (?v3 ?v100 (?v1 0)) (?v2 ?v100 0))
+    + (?v3 ?v100 2) → (?v2 (?v3 ?v100 (?v1 0)) (?v3 ?v100 1))
+    + (?v3 ?v100 2) → (?v2 (?v3 ?v100 (?v1 0)) (?v2 0 ?v100))
+    + (?v3 ?v100 2) → (?v2 (?v3 ?v100 (?v1 0)) (?v3 1 ?v100))
+    + (?v3 ?v100 2) → (?v2 (?v3 ?v100 (?v1 0)) (?v3 ?v100 (?v1 0)))
+    + (?v3 ?v100 2) → (?v2 (?v3 ?v100 (?v1 0)) (?v3 (?v1 0) ?v100))
+    + (?v3 ?v100 2) → (?v2 (?v3 ?v100 (?v1 0)) (?v2 ?v100 (?v3 ?v100 0)))
+    + (?v3 ?v100 2) → (?v2 (?v3 ?v100 (?v1 0)) (?v2 ?v100 (?v3 0 ?v100)))
+    + (?v3 ?v100 2) → (?v2 (?v3 ?v100 (?v1 0)) (?v2 ?v100 (?v2 0 0)))
+  rustified: 0 reducing → substrate | 16 equivalence → ledger only
+  top apparatuses (by theorem yield): ["max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-x2-0=26", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-x2-0=26", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-x2-0=26", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-x2-0=26", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-x2-0-maxzero-0=23", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-x2-0-clamp-0-nov+-1=19"]
+  cycle elapsed: 5.9s
+
+── cycle 39 / 50 ─────  pool size: 24  substrate size: 10  ledger size: 608
+  sub-campaign: 4000 probes, 458 structural rules, 18 apparatuses with yield
+  new theorems discovered: 16
+    + (?v3 ?v100 2) → (?v2 (?v3 ?v100 (?v1 0)) (?v2 ?v100 (?v3 0 0)))
+    + (?v3 ?v100 2) → (?v2 (?v3 ?v100 (?v1 0)) (?v3 ?v100 (?v2 0 1)))
+    + (?v3 ?v100 2) → (?v2 (?v3 ?v100 (?v1 0)) (?v2 ?v100 (?v3 0 1)))
+    + (?v3 ?v100 2) → (?v2 (?v3 ?v100 (?v1 0)) (?v3 ?v100 (?v2 1 0)))
+    + (?v3 ?v100 2) → (?v2 (?v3 ?v100 (?v1 0)) (?v2 ?v100 (?v3 1 0)))
+    + (?v3 ?v100 2) → (?v2 (?v3 ?v100 (?v1 0)) (?v3 ?v100 (?v3 1 1)))
+    + (?v3 ?v100 2) → (?v2 (?v3 (?v1 0) ?v100) ?v100)
+    + (?v3 ?v100 2) → (?v2 (?v3 (?v1 0) ?v100) (?v2 ?v100 0))
+    + (?v3 ?v100 2) → (?v2 (?v3 (?v1 0) ?v100) (?v3 ?v100 1))
+    + (?v3 ?v100 2) → (?v2 (?v3 (?v1 0) ?v100) (?v2 0 ?v100))
+    + (?v3 ?v100 2) → (?v2 (?v3 (?v1 0) ?v100) (?v3 1 ?v100))
+    + (?v3 ?v100 2) → (?v2 (?v3 (?v1 0) ?v100) (?v3 ?v100 (?v1 0)))
+    + (?v3 ?v100 2) → (?v2 (?v3 (?v1 0) ?v100) (?v3 (?v1 0) ?v100))
+    + (?v3 ?v100 2) → (?v2 (?v3 (?v1 0) ?v100) (?v2 ?v100 (?v3 ?v100 0)))
+    + (?v3 ?v100 2) → (?v2 (?v3 (?v1 0) ?v100) (?v2 ?v100 (?v3 0 ?v100)))
+    + (?v3 ?v100 2) → (?v2 (?v3 (?v1 0) ?v100) (?v2 ?v100 (?v2 0 0)))
+  rustified: 0 reducing → substrate | 16 equivalence → ledger only
+  top apparatuses (by theorem yield): ["max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-x2-0=26", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-x2-0=26", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-x2-0=26", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-x2-0=26", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-x2-0-crgate-1=24", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-x2-0-crgate-1=24"]
+  cycle elapsed: 6.1s
+
+── cycle 40 / 50 ─────  pool size: 24  substrate size: 10  ledger size: 624
+  sub-campaign: 4000 probes, 447 structural rules, 19 apparatuses with yield
+  new theorems discovered: 16
+    + (?v3 ?v100 2) → (?v2 (?v3 (?v1 0) ?v100) (?v2 ?v100 (?v3 0 0)))
+    + (?v3 ?v100 2) → (?v2 (?v3 (?v1 0) ?v100) (?v3 ?v100 (?v2 0 1)))
+    + (?v3 ?v100 2) → (?v2 (?v3 (?v1 0) ?v100) (?v2 ?v100 (?v3 0 1)))
+    + (?v3 ?v100 2) → (?v2 (?v3 (?v1 0) ?v100) (?v3 ?v100 (?v2 1 0)))
+    + (?v3 ?v100 2) → (?v2 (?v3 (?v1 0) ?v100) (?v2 ?v100 (?v3 1 0)))
+    + (?v3 ?v100 2) → (?v2 (?v3 (?v1 0) ?v100) (?v3 ?v100 (?v3 1 1)))
+    + (?v3 ?v100 2) → (?v2 (?v2 ?v100 (?v3 ?v100 0)) ?v100)
+    + (?v3 ?v100 2) → (?v2 (?v2 ?v100 (?v3 ?v100 0)) (?v2 ?v100 0))
+    + (?v3 ?v100 2) → (?v2 (?v2 ?v100 (?v3 ?v100 0)) (?v3 ?v100 1))
+    + (?v3 ?v100 2) → (?v2 (?v2 ?v100 (?v3 ?v100 0)) (?v2 0 ?v100))
+    + (?v3 ?v100 2) → (?v2 (?v2 ?v100 (?v3 ?v100 0)) (?v3 1 ?v100))
+    + (?v3 ?v100 2) → (?v2 (?v2 ?v100 (?v3 ?v100 0)) (?v3 ?v100 (?v1 0)))
+    + (?v3 ?v100 2) → (?v2 (?v2 ?v100 (?v3 ?v100 0)) (?v3 (?v1 0) ?v100))
+    + (?v3 ?v100 2) → (?v2 (?v2 ?v100 (?v3 ?v100 0)) (?v2 ?v100 (?v3 ?v100 0)))
+    + (?v3 ?v100 2) → (?v2 (?v2 ?v100 (?v3 ?v100 0)) (?v2 ?v100 (?v3 0 ?v100)))
+    + (?v3 ?v100 2) → (?v2 (?v2 ?v100 (?v3 ?v100 0)) (?v2 ?v100 (?v2 0 0)))
+  rustified: 0 reducing → substrate | 16 equivalence → ledger only
+  top apparatuses (by theorem yield): ["max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-x2-0=26", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-x2-0=26", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-x2-0=26", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-x2-0=26", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-x2-0-crgate-1=26", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-x2-0-crgate-1=26"]
+  cycle elapsed: 5.5s
+
+── cycle 41 / 50 ─────  pool size: 24  substrate size: 10  ledger size: 640
+  sub-campaign: 4000 probes, 448 structural rules, 20 apparatuses with yield
+  new theorems discovered: 16
+    + (?v3 ?v100 2) → (?v2 (?v2 ?v100 (?v3 ?v100 0)) (?v2 ?v100 (?v3 0 0)))
+    + (?v3 ?v100 2) → (?v2 (?v2 ?v100 (?v3 ?v100 0)) (?v3 ?v100 (?v2 0 1)))
+    + (?v3 ?v100 2) → (?v2 (?v2 ?v100 (?v3 ?v100 0)) (?v2 ?v100 (?v3 0 1)))
+    + (?v3 ?v100 2) → (?v2 (?v2 ?v100 (?v3 ?v100 0)) (?v3 ?v100 (?v2 1 0)))
+    + (?v3 ?v100 2) → (?v2 (?v2 ?v100 (?v3 ?v100 0)) (?v2 ?v100 (?v3 1 0)))
+    + (?v3 ?v100 2) → (?v2 (?v2 ?v100 (?v3 ?v100 0)) (?v3 ?v100 (?v3 1 1)))
+    + (?v3 ?v100 2) → (?v2 (?v2 ?v100 (?v3 0 ?v100)) ?v100)
+    + (?v3 ?v100 2) → (?v2 (?v2 ?v100 (?v3 0 ?v100)) (?v2 ?v100 0))
+    + (?v3 ?v100 2) → (?v2 (?v2 ?v100 (?v3 0 ?v100)) (?v3 ?v100 1))
+    + (?v3 ?v100 2) → (?v2 (?v2 ?v100 (?v3 0 ?v100)) (?v2 0 ?v100))
+    + (?v3 ?v100 2) → (?v2 (?v2 ?v100 (?v3 0 ?v100)) (?v3 1 ?v100))
+    + (?v3 ?v100 2) → (?v2 (?v2 ?v100 (?v3 0 ?v100)) (?v3 ?v100 (?v1 0)))
+    + (?v3 ?v100 2) → (?v2 (?v2 ?v100 (?v3 0 ?v100)) (?v3 (?v1 0) ?v100))
+    + (?v3 ?v100 2) → (?v2 (?v2 ?v100 (?v3 0 ?v100)) (?v2 ?v100 (?v3 ?v100 0)))
+    + (?v3 ?v100 2) → (?v2 (?v2 ?v100 (?v3 0 ?v100)) (?v2 ?v100 (?v3 0 ?v100)))
+    + (?v3 ?v100 2) → (?v2 (?v2 ?v100 (?v3 0 ?v100)) (?v2 ?v100 (?v2 0 0)))
+  rustified: 0 reducing → substrate | 16 equivalence → ledger only
+  top apparatuses (by theorem yield): ["max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-x2-0=26", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-x2-0=26", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-x2-0=26", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-x2-0=26", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-x2-0-nov+-0=23", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-x2-0-crgate-1=21"]
+  cycle elapsed: 5.6s
+
+── cycle 42 / 50 ─────  pool size: 24  substrate size: 10  ledger size: 656
+  sub-campaign: 4000 probes, 450 structural rules, 18 apparatuses with yield
+  new theorems discovered: 16
+    + (?v3 ?v100 2) → (?v2 (?v2 ?v100 (?v3 0 ?v100)) (?v2 ?v100 (?v3 0 0)))
+    + (?v3 ?v100 2) → (?v2 (?v2 ?v100 (?v3 0 ?v100)) (?v3 ?v100 (?v2 0 1)))
+    + (?v3 ?v100 2) → (?v2 (?v2 ?v100 (?v3 0 ?v100)) (?v2 ?v100 (?v3 0 1)))
+    + (?v3 ?v100 2) → (?v2 (?v2 ?v100 (?v3 0 ?v100)) (?v3 ?v100 (?v2 1 0)))
+    + (?v3 ?v100 2) → (?v2 (?v2 ?v100 (?v3 0 ?v100)) (?v2 ?v100 (?v3 1 0)))
+    + (?v3 ?v100 2) → (?v2 (?v2 ?v100 (?v3 0 ?v100)) (?v3 ?v100 (?v3 1 1)))
+    + (?v3 ?v100 2) → (?v2 (?v2 ?v100 (?v2 0 0)) ?v100)
+    + (?v3 ?v100 2) → (?v2 (?v2 ?v100 (?v2 0 0)) (?v2 ?v100 0))
+    + (?v3 ?v100 2) → (?v2 (?v2 ?v100 (?v2 0 0)) (?v3 ?v100 1))
+    + (?v3 ?v100 2) → (?v2 (?v2 ?v100 (?v2 0 0)) (?v2 0 ?v100))
+    + (?v3 ?v100 2) → (?v2 (?v2 ?v100 (?v2 0 0)) (?v3 1 ?v100))
+    + (?v3 ?v100 2) → (?v2 (?v2 ?v100 (?v2 0 0)) (?v3 ?v100 (?v1 0)))
+    + (?v3 ?v100 2) → (?v2 (?v2 ?v100 (?v2 0 0)) (?v3 (?v1 0) ?v100))
+    + (?v3 ?v100 2) → (?v2 (?v2 ?v100 (?v2 0 0)) (?v2 ?v100 (?v3 ?v100 0)))
+    + (?v3 ?v100 2) → (?v2 (?v2 ?v100 (?v2 0 0)) (?v2 ?v100 (?v3 0 ?v100)))
+    + (?v3 ?v100 2) → (?v2 (?v2 ?v100 (?v2 0 0)) (?v2 ?v100 (?v2 0 0)))
+  rustified: 0 reducing → substrate | 16 equivalence → ledger only
+  top apparatuses (by theorem yield): ["max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-x2-0=26", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-x2-0=26", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-x2-0=26", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-x2-0=26", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-x2-0-nov+-1=24", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-x2-0-nov+-1=24"]
+  cycle elapsed: 5.8s
+
+── cycle 43 / 50 ─────  pool size: 24  substrate size: 10  ledger size: 672
+  sub-campaign: 4000 probes, 456 structural rules, 14 apparatuses with yield
+  new theorems discovered: 16
+    + (?v3 ?v100 2) → (?v2 (?v2 ?v100 (?v2 0 0)) (?v2 ?v100 (?v3 0 0)))
+    + (?v3 ?v100 2) → (?v2 (?v2 ?v100 (?v2 0 0)) (?v3 ?v100 (?v2 0 1)))
+    + (?v3 ?v100 2) → (?v2 (?v2 ?v100 (?v2 0 0)) (?v2 ?v100 (?v3 0 1)))
+    + (?v3 ?v100 2) → (?v2 (?v2 ?v100 (?v2 0 0)) (?v3 ?v100 (?v2 1 0)))
+    + (?v3 ?v100 2) → (?v2 (?v2 ?v100 (?v2 0 0)) (?v2 ?v100 (?v3 1 0)))
+    + (?v3 ?v100 2) → (?v2 (?v2 ?v100 (?v2 0 0)) (?v3 ?v100 (?v3 1 1)))
+    + (?v3 ?v100 2) → (?v2 (?v2 ?v100 (?v3 0 0)) ?v100)
+    + (?v3 ?v100 2) → (?v2 (?v2 ?v100 (?v3 0 0)) (?v2 ?v100 0))
+    + (?v3 ?v100 2) → (?v2 (?v2 ?v100 (?v3 0 0)) (?v3 ?v100 1))
+    + (?v3 ?v100 2) → (?v2 (?v2 ?v100 (?v3 0 0)) (?v2 0 ?v100))
+    + (?v3 ?v100 2) → (?v2 (?v2 ?v100 (?v3 0 0)) (?v3 1 ?v100))
+    + (?v3 ?v100 2) → (?v2 (?v2 ?v100 (?v3 0 0)) (?v3 ?v100 (?v1 0)))
+    + (?v3 ?v100 2) → (?v2 (?v2 ?v100 (?v3 0 0)) (?v3 (?v1 0) ?v100))
+    + (?v3 ?v100 2) → (?v2 (?v2 ?v100 (?v3 0 0)) (?v2 ?v100 (?v3 ?v100 0)))
+    + (?v3 ?v100 2) → (?v2 (?v2 ?v100 (?v3 0 0)) (?v2 ?v100 (?v3 0 ?v100)))
+    + (?v3 ?v100 2) → (?v2 (?v2 ?v100 (?v3 0 0)) (?v2 ?v100 (?v2 0 0)))
+  rustified: 0 reducing → substrate | 16 equivalence → ledger only
+  top apparatuses (by theorem yield): ["max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-x2-0-nov+-1=27", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-x2-0-nov+-1=27", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-x2-0-nov+-1=27", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-x2-0=26", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-x2-0=26", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-x2-0=26"]
+  cycle elapsed: 5.9s
+
+── cycle 44 / 50 ─────  pool size: 24  substrate size: 10  ledger size: 688
+  sub-campaign: 4000 probes, 468 structural rules, 20 apparatuses with yield
+  new theorems discovered: 16
+    + (?v3 ?v100 2) → (?v2 (?v2 ?v100 (?v3 0 0)) (?v2 ?v100 (?v3 0 0)))
+    + (?v3 ?v100 2) → (?v2 (?v2 ?v100 (?v3 0 0)) (?v3 ?v100 (?v2 0 1)))
+    + (?v3 ?v100 2) → (?v2 (?v2 ?v100 (?v3 0 0)) (?v2 ?v100 (?v3 0 1)))
+    + (?v3 ?v100 2) → (?v2 (?v2 ?v100 (?v3 0 0)) (?v3 ?v100 (?v2 1 0)))
+    + (?v3 ?v100 2) → (?v2 (?v2 ?v100 (?v3 0 0)) (?v2 ?v100 (?v3 1 0)))
+    + (?v3 ?v100 2) → (?v2 (?v2 ?v100 (?v3 0 0)) (?v3 ?v100 (?v3 1 1)))
+    + (?v3 ?v100 2) → (?v2 (?v3 ?v100 (?v2 0 1)) ?v100)
+    + (?v3 ?v100 2) → (?v2 (?v3 ?v100 (?v2 0 1)) (?v2 ?v100 0))
+    + (?v3 ?v100 2) → (?v2 (?v3 ?v100 (?v2 0 1)) (?v3 ?v100 1))
+    + (?v3 ?v100 2) → (?v2 (?v3 ?v100 (?v2 0 1)) (?v2 0 ?v100))
+    + (?v3 ?v100 2) → (?v2 (?v3 ?v100 (?v2 0 1)) (?v3 1 ?v100))
+    + (?v3 ?v100 2) → (?v2 (?v3 ?v100 (?v2 0 1)) (?v3 ?v100 (?v1 0)))
+    + (?v3 ?v100 2) → (?v2 (?v3 ?v100 (?v2 0 1)) (?v3 (?v1 0) ?v100))
+    + (?v3 ?v100 2) → (?v2 (?v3 ?v100 (?v2 0 1)) (?v2 ?v100 (?v3 ?v100 0)))
+    + (?v3 ?v100 2) → (?v2 (?v3 ?v100 (?v2 0 1)) (?v2 ?v100 (?v3 0 ?v100)))
+    + (?v3 ?v100 2) → (?v2 (?v3 ?v100 (?v2 0 1)) (?v2 ?v100 (?v2 0 0)))
+  rustified: 0 reducing → substrate | 16 equivalence → ledger only
+  top apparatuses (by theorem yield): ["max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-x2-0=24", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-x2-0=24", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-x2-0=24", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-x2-0-nov+-1=23", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-x2-0-nov+-1=23", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-x2-0-nov+-1=23"]
+  cycle elapsed: 5.7s
+
+── cycle 45 / 50 ─────  pool size: 24  substrate size: 10  ledger size: 704
+  sub-campaign: 4000 probes, 462 structural rules, 18 apparatuses with yield
+  new theorems discovered: 16
+    + (?v3 ?v100 2) → (?v2 (?v3 ?v100 (?v2 0 1)) (?v2 ?v100 (?v3 0 0)))
+    + (?v3 ?v100 2) → (?v2 (?v3 ?v100 (?v2 0 1)) (?v3 ?v100 (?v2 0 1)))
+    + (?v3 ?v100 2) → (?v2 (?v3 ?v100 (?v2 0 1)) (?v2 ?v100 (?v3 0 1)))
+    + (?v3 ?v100 2) → (?v2 (?v3 ?v100 (?v2 0 1)) (?v3 ?v100 (?v2 1 0)))
+    + (?v3 ?v100 2) → (?v2 (?v3 ?v100 (?v2 0 1)) (?v2 ?v100 (?v3 1 0)))
+    + (?v3 ?v100 2) → (?v2 (?v3 ?v100 (?v2 0 1)) (?v3 ?v100 (?v3 1 1)))
+    + (?v3 ?v100 2) → (?v2 (?v2 ?v100 (?v3 0 1)) ?v100)
+    + (?v3 ?v100 2) → (?v2 (?v2 ?v100 (?v3 0 1)) (?v2 ?v100 0))
+    + (?v3 ?v100 2) → (?v2 (?v2 ?v100 (?v3 0 1)) (?v3 ?v100 1))
+    + (?v3 ?v100 2) → (?v2 (?v2 ?v100 (?v3 0 1)) (?v2 0 ?v100))
+    + (?v3 ?v100 2) → (?v2 (?v2 ?v100 (?v3 0 1)) (?v3 1 ?v100))
+    + (?v3 ?v100 2) → (?v2 (?v2 ?v100 (?v3 0 1)) (?v3 ?v100 (?v1 0)))
+    + (?v3 ?v100 2) → (?v2 (?v2 ?v100 (?v3 0 1)) (?v3 (?v1 0) ?v100))
+    + (?v3 ?v100 2) → (?v2 (?v2 ?v100 (?v3 0 1)) (?v2 ?v100 (?v3 ?v100 0)))
+    + (?v3 ?v100 2) → (?v2 (?v2 ?v100 (?v3 0 1)) (?v2 ?v100 (?v3 0 ?v100)))
+    + (?v3 ?v100 2) → (?v2 (?v2 ?v100 (?v3 0 1)) (?v2 ?v100 (?v2 0 0)))
+  rustified: 0 reducing → substrate | 16 equivalence → ledger only
+  top apparatuses (by theorem yield): ["max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-x2-0-nov+-1=25", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-x2-0-nov+-1=25", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-x2-0-nov+-1=25", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-x2-0-nov+-1-clamp-0=24", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-x2-0-nov+-1-clamp-0=24", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-x2-0=23"]
+  cycle elapsed: 6.3s
+
+── cycle 46 / 50 ─────  pool size: 24  substrate size: 10  ledger size: 720
+  sub-campaign: 4000 probes, 460 structural rules, 20 apparatuses with yield
+  new theorems discovered: 16
+    + (?v3 ?v100 2) → (?v2 (?v2 ?v100 (?v3 0 1)) (?v2 ?v100 (?v3 0 0)))
+    + (?v3 ?v100 2) → (?v2 (?v2 ?v100 (?v3 0 1)) (?v3 ?v100 (?v2 0 1)))
+    + (?v3 ?v100 2) → (?v2 (?v2 ?v100 (?v3 0 1)) (?v2 ?v100 (?v3 0 1)))
+    + (?v3 ?v100 2) → (?v2 (?v2 ?v100 (?v3 0 1)) (?v3 ?v100 (?v2 1 0)))
+    + (?v3 ?v100 2) → (?v2 (?v2 ?v100 (?v3 0 1)) (?v2 ?v100 (?v3 1 0)))
+    + (?v3 ?v100 2) → (?v2 (?v2 ?v100 (?v3 0 1)) (?v3 ?v100 (?v3 1 1)))
+    + (?v3 ?v100 2) → (?v2 (?v3 ?v100 (?v2 1 0)) ?v100)
+    + (?v3 ?v100 2) → (?v2 (?v3 ?v100 (?v2 1 0)) (?v2 ?v100 0))
+    + (?v3 ?v100 2) → (?v2 (?v3 ?v100 (?v2 1 0)) (?v3 ?v100 1))
+    + (?v3 ?v100 2) → (?v2 (?v3 ?v100 (?v2 1 0)) (?v2 0 ?v100))
+    + (?v3 ?v100 2) → (?v2 (?v3 ?v100 (?v2 1 0)) (?v3 1 ?v100))
+    + (?v3 ?v100 2) → (?v2 (?v3 ?v100 (?v2 1 0)) (?v3 ?v100 (?v1 0)))
+    + (?v3 ?v100 2) → (?v2 (?v3 ?v100 (?v2 1 0)) (?v3 (?v1 0) ?v100))
+    + (?v3 ?v100 2) → (?v2 (?v3 ?v100 (?v2 1 0)) (?v2 ?v100 (?v3 ?v100 0)))
+    + (?v3 ?v100 2) → (?v2 (?v3 ?v100 (?v2 1 0)) (?v2 ?v100 (?v3 0 ?v100)))
+    + (?v3 ?v100 2) → (?v2 (?v3 ?v100 (?v2 1 0)) (?v2 ?v100 (?v2 0 0)))
+  rustified: 0 reducing → substrate | 16 equivalence → ledger only
+  top apparatuses (by theorem yield): ["max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-x2-0-nov+-1=23", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-x2-0-nov+-1=23", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-x2-0-nov+-1=23", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-x2-0-nov+-1-clamp-0=23", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-x2-0-nov+-1-clamp-0=23", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-x2-0-nov+-1-clamp-0=23"]
+  cycle elapsed: 6.1s
+
+── cycle 47 / 50 ─────  pool size: 24  substrate size: 10  ledger size: 736
+  sub-campaign: 4000 probes, 454 structural rules, 17 apparatuses with yield
+  new theorems discovered: 16
+    + (?v3 ?v100 2) → (?v2 (?v3 ?v100 (?v2 1 0)) (?v2 ?v100 (?v3 0 0)))
+    + (?v3 ?v100 2) → (?v2 (?v3 ?v100 (?v2 1 0)) (?v3 ?v100 (?v2 0 1)))
+    + (?v3 ?v100 2) → (?v2 (?v3 ?v100 (?v2 1 0)) (?v2 ?v100 (?v3 0 1)))
+    + (?v3 ?v100 2) → (?v2 (?v3 ?v100 (?v2 1 0)) (?v3 ?v100 (?v2 1 0)))
+    + (?v3 ?v100 2) → (?v2 (?v3 ?v100 (?v2 1 0)) (?v2 ?v100 (?v3 1 0)))
+    + (?v3 ?v100 2) → (?v2 (?v3 ?v100 (?v2 1 0)) (?v3 ?v100 (?v3 1 1)))
+    + (?v3 ?v100 2) → (?v2 (?v2 ?v100 (?v3 1 0)) ?v100)
+    + (?v3 ?v100 2) → (?v2 (?v2 ?v100 (?v3 1 0)) (?v2 ?v100 0))
+    + (?v3 ?v100 2) → (?v2 (?v2 ?v100 (?v3 1 0)) (?v3 ?v100 1))
+    + (?v3 ?v100 2) → (?v2 (?v2 ?v100 (?v3 1 0)) (?v2 0 ?v100))
+    + (?v3 ?v100 2) → (?v2 (?v2 ?v100 (?v3 1 0)) (?v3 1 ?v100))
+    + (?v3 ?v100 2) → (?v2 (?v2 ?v100 (?v3 1 0)) (?v3 ?v100 (?v1 0)))
+    + (?v3 ?v100 2) → (?v2 (?v2 ?v100 (?v3 1 0)) (?v3 (?v1 0) ?v100))
+    + (?v3 ?v100 2) → (?v2 (?v2 ?v100 (?v3 1 0)) (?v2 ?v100 (?v3 ?v100 0)))
+    + (?v3 ?v100 2) → (?v2 (?v2 ?v100 (?v3 1 0)) (?v2 ?v100 (?v3 0 ?v100)))
+    + (?v3 ?v100 2) → (?v2 (?v2 ?v100 (?v3 1 0)) (?v2 ?v100 (?v2 0 0)))
+  rustified: 0 reducing → substrate | 16 equivalence → ledger only
+  top apparatuses (by theorem yield): ["max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-x2-0-nov+-1-clamp-0=25", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-x2-0-nov+-1-clamp-0=25", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-x2-0-nov+-1-clamp-0=25", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-x2-0-nov+-1=23", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-x2-0-nov+-1=23", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-x2-0-nov+-1=23"]
+  cycle elapsed: 6.1s
+
+── cycle 48 / 50 ─────  pool size: 24  substrate size: 10  ledger size: 752
+  sub-campaign: 4000 probes, 457 structural rules, 19 apparatuses with yield
+  new theorems discovered: 16
+    + (?v3 ?v100 2) → (?v2 (?v2 ?v100 (?v3 1 0)) (?v2 ?v100 (?v3 0 0)))
+    + (?v3 ?v100 2) → (?v2 (?v2 ?v100 (?v3 1 0)) (?v3 ?v100 (?v2 0 1)))
+    + (?v3 ?v100 2) → (?v2 (?v2 ?v100 (?v3 1 0)) (?v2 ?v100 (?v3 0 1)))
+    + (?v3 ?v100 2) → (?v2 (?v2 ?v100 (?v3 1 0)) (?v3 ?v100 (?v2 1 0)))
+    + (?v3 ?v100 2) → (?v2 (?v2 ?v100 (?v3 1 0)) (?v2 ?v100 (?v3 1 0)))
+    + (?v3 ?v100 2) → (?v2 (?v2 ?v100 (?v3 1 0)) (?v3 ?v100 (?v3 1 1)))
+    + (?v3 ?v100 2) → (?v2 (?v3 ?v100 (?v3 1 1)) ?v100)
+    + (?v3 ?v100 2) → (?v2 (?v3 ?v100 (?v3 1 1)) (?v2 ?v100 0))
+    + (?v3 ?v100 2) → (?v2 (?v3 ?v100 (?v3 1 1)) (?v3 ?v100 1))
+    + (?v3 ?v100 2) → (?v2 (?v3 ?v100 (?v3 1 1)) (?v2 0 ?v100))
+    + (?v3 ?v100 2) → (?v2 (?v3 ?v100 (?v3 1 1)) (?v3 1 ?v100))
+    + (?v3 ?v100 2) → (?v2 (?v3 ?v100 (?v3 1 1)) (?v3 ?v100 (?v1 0)))
+    + (?v3 ?v100 2) → (?v2 (?v3 ?v100 (?v3 1 1)) (?v3 (?v1 0) ?v100))
+    + (?v3 ?v100 2) → (?v2 (?v3 ?v100 (?v3 1 1)) (?v2 ?v100 (?v3 ?v100 0)))
+    + (?v3 ?v100 2) → (?v2 (?v3 ?v100 (?v3 1 1)) (?v2 ?v100 (?v3 0 ?v100)))
+    + (?v3 ?v100 2) → (?v2 (?v3 ?v100 (?v3 1 1)) (?v2 ?v100 (?v2 0 0)))
+  rustified: 0 reducing → substrate | 16 equivalence → ledger only
+  top apparatuses (by theorem yield): ["max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-x2-0-nov+-1=25", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-x2-0-nov+-1=25", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-x2-0-nov+-1=25", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-x2-0-nov+-1-x05-1=24", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-x2-0-nov+-1-x05-1=24", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-x2-0-nov+-1-clamp-0=23"]
+  cycle elapsed: 6.2s
+
+── cycle 49 / 50 ─────  pool size: 24  substrate size: 10  ledger size: 768
+  sub-campaign: 4000 probes, 464 structural rules, 20 apparatuses with yield
+  new theorems discovered: 16
+    + (?v3 ?v100 2) → (?v2 (?v3 ?v100 (?v3 1 1)) (?v2 ?v100 (?v3 0 0)))
+    + (?v3 ?v100 2) → (?v2 (?v3 ?v100 (?v3 1 1)) (?v3 ?v100 (?v2 0 1)))
+    + (?v3 ?v100 2) → (?v2 (?v3 ?v100 (?v3 1 1)) (?v2 ?v100 (?v3 0 1)))
+    + (?v3 ?v100 2) → (?v2 (?v3 ?v100 (?v3 1 1)) (?v3 ?v100 (?v2 1 0)))
+    + (?v3 ?v100 2) → (?v2 (?v3 ?v100 (?v3 1 1)) (?v2 ?v100 (?v3 1 0)))
+    + (?v3 ?v100 2) → (?v2 (?v3 ?v100 (?v3 1 1)) (?v3 ?v100 (?v3 1 1)))
+    + (?v3 3 ?v100) → (?v3 ?v100 (?v1 (?v1 1)))
+    + (?v3 3 ?v100) → (?v2 ?v100 (?v2 ?v100 ?v100))
+    + (?v3 3 ?v100) → (?v3 (?v1 (?v1 1)) ?v100)
+    + (?v3 3 ?v100) → (?v2 (?v2 ?v100 ?v100) ?v100)
+    + (?v3 (?v2 ?v100 ?v101) ?v102) → (?v3 ?v102 (?v2 ?v100 ?v101))
+    + (?v3 (?v2 ?v100 ?v101) ?v102) → (?v3 ?v102 (?v2 ?v101 ?v100))
+    + (?v3 (?v2 ?v100 ?v101) ?v102) → (?v3 (?v2 ?v100 ?v101) ?v102)
+    + (?v3 (?v2 ?v100 ?v101) ?v102) → (?v3 (?v2 ?v101 ?v100) ?v102)
+    + (?v3 ?v100 3) → (?v3 ?v100 (?v1 (?v1 1)))
+    + (?v3 ?v100 3) → (?v2 ?v100 (?v2 ?v100 ?v100))
+  rustified: 0 reducing → substrate | 16 equivalence → ledger only
+  top apparatuses (by theorem yield): ["max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-x2-0-nov+-1=23", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-x2-0-nov+-1=23", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-x2-0-nov+-1=23", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-x2-0-nov+-1-x05-1-nov+-0=23", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-x2-0-nov+-1-clamp-0=22", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-x2-0-nov+-1-clamp-0=22"]
+  cycle elapsed: 6.8s
+
+── cycle 50 / 50 ─────  pool size: 24  substrate size: 10  ledger size: 784
+  sub-campaign: 4000 probes, 461 structural rules, 19 apparatuses with yield
+  new theorems discovered: 16
+    + (?v3 ?v100 3) → (?v3 (?v1 (?v1 1)) ?v100)
+    + (?v3 ?v100 3) → (?v2 (?v2 ?v100 ?v100) ?v100)
+    + (?v2 (?v3 ?v100 ?v101) ?v100) → (?v3 ?v100 (?v1 ?v101))
+    + (?v2 (?v3 ?v100 ?v101) ?v100) → (?v3 (?v1 ?v101) ?v100)
+    + (?v2 (?v3 ?v100 ?v101) ?v100) → (?v2 ?v100 (?v3 ?v100 ?v101))
+    + (?v2 (?v3 ?v100 ?v101) ?v100) → (?v2 ?v100 (?v3 ?v101 ?v100))
+    + (?v2 (?v3 ?v100 ?v101) ?v100) → (?v3 ?v100 (?v2 ?v101 1))
+    + (?v2 (?v3 ?v100 ?v101) ?v100) → (?v3 ?v100 (?v2 1 ?v101))
+    + (?v2 (?v3 ?v100 ?v101) ?v100) → (?v2 (?v3 ?v100 ?v101) ?v100)
+    + (?v2 (?v3 ?v100 ?v101) ?v100) → (?v2 (?v3 ?v101 ?v100) ?v100)
+    + (?v2 (?v3 ?v100 ?v101) ?v100) → (?v3 (?v2 ?v101 1) ?v100)
+    + (?v2 (?v3 ?v100 ?v101) ?v100) → (?v3 (?v2 1 ?v101) ?v100)
+    + (?v2 (?v3 ?v100 ?v101) ?v100) → (?v2 ?v100 (?v3 ?v100 (?v2 ?v101 0)))
+    + (?v2 (?v3 ?v100 ?v101) ?v100) → (?v2 ?v100 (?v3 ?v100 (?v3 ?v101 1)))
+    + (?v2 (?v3 ?v100 ?v101) ?v100) → (?v2 ?v100 (?v3 ?v100 (?v2 0 ?v101)))
+    + (?v2 (?v3 ?v100 ?v101) ?v100) → (?v2 ?v100 (?v3 ?v100 (?v3 1 ?v101)))
+  rustified: 2 reducing → substrate | 14 equivalence → ledger only
+  top apparatuses (by theorem yield): ["max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-x2-0-nov+-1-clamp-0=24", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-x2-0-nov+-1-clamp-0=24", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-x2-0-nov+-1-clamp-0=24", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-x2-0-nov+-1=23", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-x2-0-nov+-1=23", "max-pair-meta+-0-maxzero-0-x2-0-x05-0-maxzero-0-meta+-0-crgate-0-nov+-1-x2-1-nov+-1-maxzero-1-x05-1-clamp-1-meta+-1-x2-0-nov+-1=23"]
+  cycle elapsed: 7.3s
+
+╔══════════════════════════════════════════════════════════════════════╗
+║ EDGE TRAJECTORY                                                      ║
+╚══════════════════════════════════════════════════════════════════════╝
+   cycle    structural  new_theorems  substrate_size     elapsed
+       0           520            16               1        3.9s
+       1           441            16               2        3.4s
+       2           531            16               2        3.2s
+       3           589            16               3        6.2s
+       4           533            16               3        4.6s
+       5           501            16               9        4.7s
+       6           495            16              10        6.3s
+       7           436            16              10        4.6s
+       8           433            16              10        4.8s
+       9           444            16              10        5.2s
+      10           443            16              10        5.3s
+      11           441            16              10        5.4s
+      12           452            16              10        5.1s
+      13           454            16              10        5.3s
+      14           448            16              10        5.2s
+      15           460            16              10        5.3s
+      16           447            16              10        5.2s
+      17           441            16              10        5.1s
+      18           444            16              10        5.1s
+      19           451            16              10        5.0s
+      20           456            16              10        5.2s
+      21           459            16              10        5.4s
+      22           452            16              10        5.3s
+      23           442            16              10        5.2s
+      24           469            16              10        5.2s
+      25           458            16              10        5.2s
+      26           451            16              10        5.2s
+      27           459            16              10        5.2s
+      28           456            16              10        5.4s
+      29           456            16              10        5.7s
+      30           458            16              10        5.5s
+      31           448            16              10        5.2s
+      32           462            16              10        6.0s
+      33           461            16              10        5.9s
+      34           461            16              10        5.9s
+      35           456            16              10        5.7s
+      36           463            16              10        6.3s
+      37           450            16              10        5.9s
+      38           458            16              10        6.1s
+      39           447            16              10        5.5s
+      40           448            16              10        5.6s
+      41           450            16              10        5.8s
+      42           456            16              10        5.9s
+      43           468            16              10        5.7s
+      44           462            16              10        6.3s
+      45           460            16              10        6.1s
+      46           454            16              10        6.1s
+      47           457            16              10        6.2s
+      48           464            16              10        6.8s
+      49           461            16              12        7.3s
+
+ran 50 cycles in 271.9s, discovered 800 new theorems
+mean theorems per cycle: 16.00
+final substrate size: 12  ledger size: 800
+
+── evolved substrate (machine's validated axioms) ───
+  [ 0] (?v3 1 ?v100) → ?v100
+  [ 1] (?v2 0 ?v100) → ?v100
+  [ 2] (?v2 ?v100 0) → ?v100
+  [ 3] (?v2 (?v3 ?v100 1) (?v3 ?v101 1)) → (?v2 ?v100 ?v101)
+  [ 4] (?v2 (?v3 ?v100 1) (?v3 ?v101 1)) → (?v2 ?v100 ?v101)
+  [ 5] (?v2 (?v3 ?v100 1) (?v3 ?v101 1)) → (?v2 ?v100 (?v2 ?v101 0))
+  [ 6] (?v2 (?v3 ?v100 1) (?v3 ?v101 1)) → (?v2 ?v100 (?v3 ?v101 1))
+  [ 7] (?v2 (?v3 ?v100 1) (?v3 ?v101 1)) → (?v2 ?v100 (?v2 0 ?v101))
+  [ 8] (?v2 (?v3 ?v100 1) (?v3 ?v101 1)) → (?v2 ?v100 (?v3 1 ?v101))
+  [ 9] (?v3 ?v100 1) → ?v100
+  [10] (?v2 (?v3 ?v100 ?v101) ?v100) → (?v3 ?v100 (?v1 ?v101))
+  [11] (?v2 (?v3 ?v100 ?v101) ?v100) → (?v3 (?v1 ?v100) ?v101)
+
+── correctness check ───────
+  late-cycle zero-novelty count: 0
+  ✓ EDGE-RIDING CONFIRMED — nonzero novelty across all post-bootstrap cycles
+  mean theorems/cycle: 16.00  (threshold: 0.5)
+  ✓ NOVELTY RATE SUSTAINED — 16.00 ≥ 0.5
+test edge_riding_loop ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 271.88s
+
