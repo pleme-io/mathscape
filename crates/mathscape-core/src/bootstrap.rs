@@ -88,6 +88,31 @@ pub trait ModelUpdater {
     fn update(&self, policy: &mut LinearPolicy, trajectory: &Trajectory);
 }
 
+/// Layer 4 (R28): library dedup. Given the current library and a
+/// candidate new rule, decide whether the candidate is redundant
+/// and should be rejected.
+///
+/// Motivation: R27's deep-bootstrap exploration found the library
+/// grows linearly at +3 laws/iter with no saturation. Each deeper
+/// nesting level mints new anti-unification patterns that are
+/// structurally derivable from earlier laws. Without a dedup
+/// step, the library accumulates these variants forever.
+///
+/// Hijack: swap for stricter / looser duplicate detection —
+/// structural equality (default), alpha-equivalence, proper-
+/// subsumption via `mathscape_core::eval::proper_subsumes`,
+/// e-graph saturation, or an empirical equivalence check that
+/// evaluates candidates against random instances.
+pub trait LibraryDeduper {
+    /// True if `candidate` is already covered by `library` and
+    /// should be REJECTED from append. False means "novel; keep."
+    fn is_duplicate(
+        &self,
+        candidate: &RewriteRule,
+        library: &[RewriteRule],
+    ) -> bool;
+}
+
 // ── Default implementations ────────────────────────────────────────
 
 /// Default corpus generator mirroring R25's seed strategy. Iteration
@@ -174,6 +199,75 @@ impl ModelUpdater for DefaultModelUpdater {
     }
 }
 
+/// R28: no-op deduper — every candidate is novel. Backward-
+/// compatible default; `BootstrapCycle::run` uses this so
+/// existing callers don't change behavior.
+#[derive(Debug, Clone, Default)]
+pub struct NoDedup;
+
+impl LibraryDeduper for NoDedup {
+    fn is_duplicate(&self, _cand: &RewriteRule, _lib: &[RewriteRule]) -> bool {
+        false
+    }
+}
+
+/// R28: canonical-form deduper. Two rules are duplicates iff their
+/// (LHS, RHS) canonicalized forms are structurally equal.
+///
+/// Canonicalization (R3/R4/R6) already folds commutativity,
+/// associativity, and constant-fold transformations into a normal
+/// form. So `add(0, ?x)` and `add(?x, 0)` (same rule, swapped args)
+/// canonicalize identically and this deduper rejects the second
+/// as redundant against the first.
+///
+/// Does NOT catch alpha-renaming: `add(0, ?x) = ?x` and
+/// `add(0, ?y) = ?y` with different pattern-variable ids canonicalize
+/// to structurally different terms. Use `AlphaDeduper` (future)
+/// for that stronger check — but note alpha-based dedup has a
+/// known apex-shift risk (documented in eval::alpha_equivalent).
+#[derive(Debug, Clone, Default)]
+pub struct CanonicalDeduper;
+
+impl LibraryDeduper for CanonicalDeduper {
+    fn is_duplicate(
+        &self,
+        candidate: &RewriteRule,
+        library: &[RewriteRule],
+    ) -> bool {
+        let c_lhs = candidate.lhs.canonical();
+        let c_rhs = candidate.rhs.canonical();
+        library.iter().any(|r| {
+            r.lhs.canonical() == c_lhs && r.rhs.canonical() == c_rhs
+        })
+    }
+}
+
+/// R28: alpha-equivalence deduper — uses the kernel's
+/// `anonymize_rule` to canonicalize pattern variable ids before
+/// comparing. Catches rules that differ only in fresh-var naming,
+/// which CanonicalDeduper misses.
+///
+/// Stronger than CanonicalDeduper. Safe to use because it operates
+/// on candidates/library ONLY — doesn't change anything about
+/// how alpha_equivalent itself is defined (which has the deferred
+/// R1 apex-shift concern).
+#[derive(Debug, Clone, Default)]
+pub struct AlphaDeduper;
+
+impl LibraryDeduper for AlphaDeduper {
+    fn is_duplicate(
+        &self,
+        candidate: &RewriteRule,
+        library: &[RewriteRule],
+    ) -> bool {
+        let anon_cand = crate::eval::anonymize_rule(candidate);
+        library.iter().any(|r| {
+            let anon_r = crate::eval::anonymize_rule(r);
+            anon_r.lhs == anon_cand.lhs && anon_r.rhs == anon_cand.rhs
+        })
+    }
+}
+
 // ── BootstrapCycle ─────────────────────────────────────────────────
 
 /// The layered, pluggable self-producing discovery cycle.
@@ -222,12 +316,30 @@ where
         }
     }
 
-    /// Execute the cycle: run N iterations, record trajectory,
-    /// train the policy, emit BootstrapOutcome with attestation.
+    /// Execute the cycle with NO dedup (backward-compatible). Every
+    /// candidate law from the extractor is appended to the library
+    /// unconditionally.
     pub fn run(
         &self,
         seed_library: Vec<RewriteRule>,
         seed_policy: LinearPolicy,
+    ) -> BootstrapOutcome {
+        self.run_with_dedup(seed_library, seed_policy, &NoDedup)
+    }
+
+    /// Execute the cycle with a provided `LibraryDeduper`.
+    /// Candidate laws that the deduper flags as duplicates are
+    /// rejected before reaching the library.
+    ///
+    /// The outcome still reports the extractor's pre-dedup count
+    /// in `new_law_count` — that's what the extractor proposed.
+    /// The `features_after` reflects the post-dedup library,
+    /// which is what future iterations see.
+    pub fn run_with_dedup<D: LibraryDeduper>(
+        &self,
+        seed_library: Vec<RewriteRule>,
+        seed_policy: LinearPolicy,
+        deduper: &D,
     ) -> BootstrapOutcome {
         let mut library = seed_library;
         let mut policy = seed_policy;
@@ -239,10 +351,21 @@ where
             let library_size_before = library.len();
             let features_before = LibraryFeatures::extract(&library);
 
-            let new_laws = self.extractor.extract(&corpus, &library);
-            let accepted = !new_laws.is_empty();
+            let proposed = self.extractor.extract(&corpus, &library);
+            // R28: filter out duplicates BEFORE appending.
+            let mut accepted_laws = Vec::new();
+            for cand in proposed.iter() {
+                if !deduper.is_duplicate(cand, &library)
+                    && !accepted_laws
+                        .iter()
+                        .any(|prev| deduper.is_duplicate(cand, std::slice::from_ref(prev)))
+                {
+                    accepted_laws.push(cand.clone());
+                }
+            }
+            let accepted = !accepted_laws.is_empty();
 
-            library.extend(new_laws.clone());
+            library.extend(accepted_laws.clone());
             let features_after = LibraryFeatures::extract(&library);
 
             trajectory.record(TrajectoryStep {
@@ -251,14 +374,14 @@ where
                 pre_state: features_before,
                 action: ActionKind::Discover,
                 accepted,
-                delta_dl: new_laws.len() as f64,
+                delta_dl: accepted_laws.len() as f64,
             });
 
             iterations.push(IterationSnapshot {
                 iter,
                 corpus_size: corpus.len(),
                 library_size_before,
-                new_law_count: new_laws.len(),
+                new_law_count: accepted_laws.len(),
                 features_after,
             });
         }
@@ -605,6 +728,188 @@ mod tests {
         let lib: Vec<RewriteRule> = Vec::new();
         assert_eq!(g.generate(0, &lib), g.generate(0, &lib));
         assert_eq!(g.generate(3, &lib), g.generate(3, &lib));
+    }
+
+    // ── R28: LibraryDeduper tests ─────────────────────────────────
+
+    #[test]
+    fn no_dedup_accepts_everything() {
+        let d = NoDedup;
+        let lib = vec![dummy_law()];
+        // Even an exact duplicate is not rejected.
+        assert!(!d.is_duplicate(&dummy_law(), &lib));
+    }
+
+    #[test]
+    fn canonical_deduper_catches_exact_duplicates() {
+        let d = CanonicalDeduper;
+        let lib = vec![dummy_law()];
+        assert!(d.is_duplicate(&dummy_law(), &lib));
+    }
+
+    #[test]
+    fn canonical_deduper_misses_alpha_renamed_duplicates() {
+        // Two rules that are alpha-equivalent but use different
+        // pattern var ids will look distinct at the canonical
+        // level (var ids aren't canonicalized by .canonical()).
+        // AlphaDeduper catches these; CanonicalDeduper doesn't.
+        let d = CanonicalDeduper;
+        let r1 = RewriteRule {
+            name: "a".into(),
+            lhs: Term::Apply(
+                Box::new(Term::Var(2)),
+                vec![Term::Number(Value::Nat(0)), Term::Var(100)],
+            ),
+            rhs: Term::Var(100),
+        };
+        let r2 = RewriteRule {
+            name: "b".into(),
+            lhs: Term::Apply(
+                Box::new(Term::Var(2)),
+                vec![Term::Number(Value::Nat(0)), Term::Var(200)],
+            ),
+            rhs: Term::Var(200),
+        };
+        assert!(!d.is_duplicate(&r2, &[r1]));
+    }
+
+    #[test]
+    fn alpha_deduper_catches_renamed_duplicates() {
+        let d = AlphaDeduper;
+        let r1 = RewriteRule {
+            name: "a".into(),
+            lhs: Term::Apply(
+                Box::new(Term::Var(2)),
+                vec![Term::Number(Value::Nat(0)), Term::Var(100)],
+            ),
+            rhs: Term::Var(100),
+        };
+        let r2 = RewriteRule {
+            name: "b".into(),
+            lhs: Term::Apply(
+                Box::new(Term::Var(2)),
+                vec![Term::Number(Value::Nat(0)), Term::Var(200)],
+            ),
+            rhs: Term::Var(200),
+        };
+        assert!(
+            d.is_duplicate(&r2, &[r1]),
+            "alpha deduper should catch renamed duplicates"
+        );
+    }
+
+    /// Extractor that emits the SAME law on every iteration. With
+    /// no dedup the library grows linearly; with dedup it saturates
+    /// at 1.
+    struct RepeatingExtractor {
+        law: RewriteRule,
+    }
+
+    impl LawExtractor for RepeatingExtractor {
+        fn extract(&self, _c: &[Term], _l: &[RewriteRule]) -> Vec<RewriteRule> {
+            vec![self.law.clone()]
+        }
+    }
+
+    #[test]
+    fn no_dedup_repeats_grow_linearly() {
+        // Without dedup, 5 iterations × 1 repeating law → library
+        // size 5 (duplicates accepted).
+        let cycle = BootstrapCycle::new(
+            NullCorpusGenerator,
+            RepeatingExtractor { law: dummy_law() },
+            NullModelUpdater,
+            5,
+        );
+        let outcome = cycle.run(Vec::new(), LinearPolicy::new());
+        assert_eq!(outcome.final_library.len(), 5);
+    }
+
+    #[test]
+    fn canonical_dedup_saturates_repeats() {
+        // With CanonicalDeduper, 5 iterations × 1 repeating law
+        // → library size 1. The duplicate is rejected from
+        // iteration 2 onward.
+        let cycle = BootstrapCycle::new(
+            NullCorpusGenerator,
+            RepeatingExtractor { law: dummy_law() },
+            NullModelUpdater,
+            5,
+        );
+        let outcome = cycle.run_with_dedup(
+            Vec::new(),
+            LinearPolicy::new(),
+            &CanonicalDeduper,
+        );
+        assert_eq!(
+            outcome.final_library.len(),
+            1,
+            "dedup must prevent repeat-insertion"
+        );
+        // Iteration 0 accepts, iterations 1-4 reject.
+        assert_eq!(outcome.iterations[0].new_law_count, 1);
+        for iter in &outcome.iterations[1..] {
+            assert_eq!(
+                iter.new_law_count, 0,
+                "post-iter-0 repeats must be dedup'd out"
+            );
+        }
+    }
+
+    #[test]
+    fn dedup_within_a_single_iteration_works() {
+        // Extractor that emits the SAME law twice in one call.
+        // The cycle's dedup must catch the intra-iteration
+        // duplicate, not just cross-iteration ones.
+        struct DoubleEmit {
+            law: RewriteRule,
+        }
+        impl LawExtractor for DoubleEmit {
+            fn extract(&self, _: &[Term], _: &[RewriteRule]) -> Vec<RewriteRule> {
+                vec![self.law.clone(), self.law.clone()]
+            }
+        }
+        let cycle = BootstrapCycle::new(
+            NullCorpusGenerator,
+            DoubleEmit { law: dummy_law() },
+            NullModelUpdater,
+            1,
+        );
+        let outcome = cycle.run_with_dedup(
+            Vec::new(),
+            LinearPolicy::new(),
+            &CanonicalDeduper,
+        );
+        // Two proposals, one kept after intra-iteration dedup.
+        assert_eq!(outcome.final_library.len(), 1);
+    }
+
+    #[test]
+    fn dedup_layer_is_deterministic() {
+        // Two identical runs with dedup produce identical output.
+        let cycle_a = BootstrapCycle::new(
+            NullCorpusGenerator,
+            RepeatingExtractor { law: dummy_law() },
+            NullModelUpdater,
+            3,
+        );
+        let cycle_b = BootstrapCycle::new(
+            NullCorpusGenerator,
+            RepeatingExtractor { law: dummy_law() },
+            NullModelUpdater,
+            3,
+        );
+        let a = cycle_a.run_with_dedup(
+            Vec::new(),
+            LinearPolicy::new(),
+            &CanonicalDeduper,
+        );
+        let b = cycle_b.run_with_dedup(
+            Vec::new(),
+            LinearPolicy::new(),
+            &CanonicalDeduper,
+        );
+        assert_eq!(a.attestation, b.attestation);
     }
 
     #[test]

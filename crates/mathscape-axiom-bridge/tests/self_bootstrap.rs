@@ -22,8 +22,8 @@ mod common;
 use mathscape_compress::derive_laws_from_corpus;
 use mathscape_core::{
     bootstrap::{
-        BootstrapCycle, DefaultCorpusGenerator, DefaultModelUpdater,
-        LawExtractor,
+        BootstrapCycle, CanonicalDeduper, DefaultCorpusGenerator,
+        DefaultModelUpdater, LawExtractor,
     },
     builtin::{TENSOR_ADD, TENSOR_MUL},
     eval::RewriteRule,
@@ -218,6 +218,61 @@ fn self_bootstrap_larger_n_discovers_at_least_as_much() {
         b.final_library.len() >= a.final_library.len(),
         "4-iter cycle must produce ≥ library than 2-iter"
     );
+}
+
+#[test]
+#[ignore = "R28 comparison: deep bootstrap WITH dedup; run with --ignored"]
+fn self_bootstrap_deep_exploration_with_dedup() {
+    // R28 demonstration: same 10-iter deep cycle as R27's
+    // exploration, but with CanonicalDeduper filtering cross-
+    // iteration duplicates. Expect saturation instead of linear
+    // growth.
+    let cycle = BootstrapCycle::new(
+        DefaultCorpusGenerator,
+        DerivedLawsExtractor {
+            step_limit: 300,
+            min_support: 2,
+        },
+        DefaultModelUpdater::default(),
+        10,
+    );
+    let outcome = cycle.run_with_dedup(
+        Vec::new(),
+        LinearPolicy::tensor_seeking_prior(),
+        &CanonicalDeduper,
+    );
+
+    println!("\n── Deep bootstrap (10 iterations, WITH dedup) ────────");
+    let mut prev_size = 0usize;
+    let mut consecutive_stall = 0usize;
+    let mut saturation_step: Option<usize> = None;
+    for iter in &outcome.iterations {
+        let size = iter.features_after.rule_count;
+        let delta = size - prev_size;
+        println!(
+            "  iter {:2}: lib size = {:3}  Δ = +{}   kept laws = {}",
+            iter.iter, size, delta, iter.new_law_count
+        );
+        if delta == 0 {
+            consecutive_stall += 1;
+            if consecutive_stall >= 2 && saturation_step.is_none() {
+                saturation_step = Some(iter.iter);
+            }
+        } else {
+            consecutive_stall = 0;
+        }
+        prev_size = size;
+    }
+    println!();
+    match saturation_step {
+        Some(step) => println!(
+            "  saturation step: {step} (library stopped growing)"
+        ),
+        None => println!(
+            "  NO saturation — dedup wasn't strong enough to halt growth"
+        ),
+    }
+    println!("  final library size: {}", outcome.final_library.len());
 }
 
 #[test]

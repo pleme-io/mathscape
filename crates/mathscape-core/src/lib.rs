@@ -49,9 +49,10 @@ pub use epoch::{
 };
 pub use autograd::{symbolic_derivative, symbolic_derivative_float};
 pub use bootstrap::{
-    compute_attestation, BootstrapCycle, BootstrapOutcome, CorpusGenerator,
-    DefaultCorpusGenerator, DefaultModelUpdater, IterationSnapshot,
-    LawExtractor, ModelUpdater,
+    compute_attestation, AlphaDeduper, BootstrapCycle, BootstrapOutcome,
+    CanonicalDeduper, CorpusGenerator, DefaultCorpusGenerator,
+    DefaultModelUpdater, IterationSnapshot, LawExtractor, LibraryDeduper,
+    ModelUpdater, NoDedup,
 };
 pub use optimizer::{sgd_step_int, sgd_step_tensor};
 pub use bettyfine::{bettyfine_library, standard_bettyfine_cardinality, OperatorSpec};
