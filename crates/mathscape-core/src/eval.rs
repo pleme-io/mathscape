@@ -431,6 +431,75 @@ mod tests {
     use crate::value::Value;
 
     #[test]
+    fn anonymize_nested_fn_shadowing_collapses_identically() {
+        // (fn (?200) (fn (?200) ?200)) — outer binds 200, inner
+        // shadows it. The inner Fn's body ?200 is bound by the
+        // INNER scope, not the outer. The outer binding is dead.
+        //
+        // After anonymization, both Fn params and the body var
+        // should land on the same canonical id (alpha-equivalent
+        // collapse of dead + active bindings). This is the scope-
+        // share behavior: correct for the usual case since dead
+        // bindings don't contribute semantic distinctions.
+        let t = Term::Fn(
+            vec![200],
+            Box::new(Term::Fn(vec![200], Box::new(Term::Var(200)))),
+        );
+        let anon = anonymize_term(&t);
+        // Extract the three ids and confirm they all match.
+        let (outer_param, inner_fn) = match &anon {
+            Term::Fn(ps, body) => (ps[0], body.as_ref()),
+            _ => panic!("expected outer Fn"),
+        };
+        let (inner_param, inner_body) = match inner_fn {
+            Term::Fn(ps, body) => (ps[0], body.as_ref()),
+            _ => panic!("expected inner Fn"),
+        };
+        let body_var = match inner_body {
+            Term::Var(v) => *v,
+            _ => panic!("expected Var"),
+        };
+        // All three should match (dead outer + active inner + body).
+        assert_eq!(outer_param, inner_param);
+        assert_eq!(inner_param, body_var);
+    }
+
+    #[test]
+    fn anonymize_disjoint_nested_fn_bindings_get_distinct_ids() {
+        // (fn (?200) (fn (?300) (apply add ?200 ?300))) —
+        // two DIFFERENT bindings, both referenced. They should
+        // canonicalize to distinct ids. The body references both,
+        // each resolves to its own binding.
+        let t = Term::Fn(
+            vec![200],
+            Box::new(Term::Fn(
+                vec![300],
+                Box::new(apply(var(2), vec![var(200), var(300)])),
+            )),
+        );
+        let anon = anonymize_term(&t);
+        let (outer_param, inner_fn) = match &anon {
+            Term::Fn(ps, body) => (ps[0], body.as_ref()),
+            _ => panic!("expected outer Fn"),
+        };
+        let (inner_param, inner_body) = match inner_fn {
+            Term::Fn(ps, body) => (ps[0], body.as_ref()),
+            _ => panic!("expected inner Fn"),
+        };
+        assert_ne!(
+            outer_param, inner_param,
+            "distinct Fn bindings must get distinct canonical ids"
+        );
+        // The body's add call: first arg references outer, second inner.
+        if let Term::Apply(_, args) = inner_body {
+            assert_eq!(args[0], Term::Var(outer_param));
+            assert_eq!(args[1], Term::Var(inner_param));
+        } else {
+            panic!("expected Apply in body");
+        }
+    }
+
+    #[test]
     fn anonymize_preserves_multi_param_fn_bindings() {
         // (fn (?201 ?205) (apply add ?205 ?201)) —
         // two params, body uses both.
