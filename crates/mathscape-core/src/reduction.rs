@@ -26,7 +26,7 @@
 //! for any given layer's notion of reduction.
 
 use crate::epoch::{Artifact, Registry};
-use crate::eval::{pattern_equivalent, subsumes};
+use crate::eval::{pattern_equivalent, proper_subsumes, subsumes};
 use crate::hash::TermRef;
 use crate::lifecycle::ProofStatus;
 use serde::{Deserialize, Serialize};
@@ -300,31 +300,28 @@ pub fn detect_subsumption_pairs(
             if !subsumes(&a_art.rule.lhs, &b_art.rule.lhs) {
                 continue;
             }
-            // Rank-2 inception gate — irreducibility-aware.
+            // Rank-2 inception gate — absolute irreducibility via
+            // proper subsumption.
             //
-            // Blanket immunity for meta-rules would be too crude:
-            // meta-rules SHOULD collapse into each other when one
-            // strictly generalizes another (that's genuine library
-            // shortening with no coverage loss — the machine's own
-            // efficiency principle). The case we protect is the
-            // narrow one where neither strictly generalizes:
-            // pattern_equivalent meta-rules. The canonical lower-hash
-            // tiebreak would arbitrarily collapse that diversity,
-            // losing rank-2 anti-unification input for no efficiency
-            // gain.
+            // Classical LHS-only `subsumes` says a rule R1 covers R2
+            // if R1.lhs pattern-matches R2.lhs. But that's syntactic:
+            // it's wrong when R1 and R2 produce DIFFERENT reductions
+            // of the same input. Example: R1=?op(?x,?id)=>?x subsumes
+            // R2=?op(?x,?x)=>f(?x) at LHS level (?id binds to ?x),
+            // but applying them to add(5,5) gives 5 vs f(5) —
+            // distinct outcomes, distinct rules.
             //
-            // Formal statement of the invariant preserved:
-            //   subsume(A, B) legitimate iff A strictly subsumes B
-            //   (subsumes(A, B) && !subsumes(B, A))
-            //
-            // pattern_equivalent(A, B) = subsumes(A, B) && subsumes(B, A)
-            // — so when both are meta AND pattern-equivalent,
-            // neither strictly generalizes: skip.
-            if is_meta_rule(&a_art.rule)
-                && is_meta_rule(&b_art.rule)
-                && pattern_equivalent(&a_art.rule.lhs, &b_art.rule.lhs)
-            {
-                continue;
+            // For meta-rules (the layer where rank-2 inception
+            // requires diverse survivors), subsumption must be
+            // PROPER: LHS-match AND the RHS agrees under the same
+            // substitution. `proper_subsumes` from eval.rs
+            // implements this. Rank-0 rules continue to use the
+            // classical check (their RHSs are typically simple
+            // enough that proper and classical coincide).
+            if is_meta_rule(&a_art.rule) && is_meta_rule(&b_art.rule) {
+                if !proper_subsumes(&a_art.rule, &b_art.rule) {
+                    continue;
+                }
             }
             // Check for mutual subsumption (equivalence class).
             if pattern_equivalent(&a_art.rule.lhs, &b_art.rule.lhs) {

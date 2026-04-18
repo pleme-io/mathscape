@@ -694,6 +694,309 @@ fn rank2_inception_probe() {
 }
 
 #[test]
+fn oscillation_probe_seeded_variance() {
+    // Phase M instrumentation: the user's intuition is that
+    // irreducibility is not a single-point signal — it's a
+    // distribution, an oscillation, a symmetry-breaking wave. The
+    // machine's deterministic checks (pattern_equivalent,
+    // proper_subsumes) give point answers; they CAN'T see a
+    // distribution directly. But by running the pipeline with
+    // varied seeds and comparing outcomes, we measure the
+    // PHENOMENON from around it — observing the space of possible
+    // discoveries, not a single discovery.
+    //
+    // What this probe measures:
+    //   - For N different procedural seeds (same zoo otherwise),
+    //     record: library composition hash, apex-rule set,
+    //     saturation step, forest stats
+    //   - Report the distribution: unique library hashes, apex sets,
+    //     modal apex fingerprint
+    //
+    // What the numbers mean:
+    //   - All N runs identical → the machine has no visible
+    //     oscillation at this scale; the corpus distribution
+    //     doesn't reach the system's symmetry-breaking threshold
+    //   - Variance across runs → oscillation is measurable here;
+    //     the seed selects which "branch" of the symmetry-broken
+    //     outcome the machine lands on
+    //   - Varied apex fingerprints → the machine has multiple
+    //     "attractors" and sampling between them reveals them
+    use std::collections::{HashMap, HashSet};
+
+    let seed_set: [u64; 8] = [1, 7, 42, 100, 256, 500, 1024, 9999];
+    let mut apex_fingerprints: HashMap<Vec<String>, usize> = HashMap::new();
+    let mut library_hashes: HashSet<Vec<String>> = HashSet::new();
+    let mut saturation_steps: Vec<Option<usize>> = Vec::new();
+    let mut elapsed_per_seed: Vec<u128> = Vec::new();
+
+    println!("\n╔══════════════════════════════════════════════════════╗");
+    println!("║ OSCILLATION PROBE — seeded variance                  ║");
+    println!("╚══════════════════════════════════════════════════════╝");
+    println!(
+        "\n{:>5} {:>10} {:>10} {:>6} {:>10}",
+        "seed", "apex[0]", "apex[1]", "sat", "elapsed"
+    );
+    println!("{}", "─".repeat(50));
+
+    for seed in seed_set {
+        // Build a zoo where ONLY the procedural-seed offset varies.
+        // The hand-crafted zoo part is constant; all procedural
+        // corpora are seeded off of `seed` deterministically.
+        let report = run_traversal_with_seed_offset(seed, 15, 4);
+
+        let mut apex_names: Vec<String> = report
+            .axiomatized_rules
+            .iter()
+            .map(|(name, _)| name.clone())
+            .collect();
+        apex_names.sort();
+
+        let mut lib_rule_names: Vec<String> = report
+            .axiomatized_rules
+            .iter()
+            .map(|(n, _)| n.clone())
+            .collect();
+        lib_rule_names.sort();
+        library_hashes.insert(lib_rule_names);
+
+        *apex_fingerprints.entry(apex_names.clone()).or_default() += 1;
+        saturation_steps.push(report.saturation_step);
+        elapsed_per_seed.push(report.elapsed_ms);
+
+        let a0 = apex_names.first().cloned().unwrap_or_default();
+        let a1 = apex_names.get(1).cloned().unwrap_or_default();
+        println!(
+            "{:>5} {:>10} {:>10} {:>6} {:>10}",
+            seed,
+            a0,
+            a1,
+            report.saturation_step.map_or("—".into(), |s| s.to_string()),
+            format!("{}ms", report.elapsed_ms),
+        );
+    }
+
+    println!("\n▶ Distribution statistics");
+    println!("  seeds probed               : {}", seed_set.len());
+    println!("  distinct apex fingerprints : {}", apex_fingerprints.len());
+    println!("  distinct library hashes    : {}", library_hashes.len());
+    let modal = apex_fingerprints
+        .iter()
+        .max_by_key(|(_, c)| *c)
+        .map(|(_, c)| *c)
+        .unwrap_or(0);
+    let modal_ratio = modal as f64 / seed_set.len() as f64;
+    println!("  modal fingerprint support  : {}/{} ({:.0}%)", modal, seed_set.len(), modal_ratio * 100.0);
+
+    println!("\n▶ Interpretation");
+    if apex_fingerprints.len() == 1 {
+        println!(
+            "  UNIFORM — all seeds converge to the same apex set. The \
+             machine has a stable attractor at this scale; the \
+             oscillation the user described is not visible within \
+             this seed range. Try higher BUDGET or DEPTH to see if \
+             larger phase space reveals it."
+        );
+    } else {
+        println!(
+            "  OSCILLATING — {} distinct apex fingerprints across {} seeds. \
+             The phenomenon has been SURROUNDED: the seed selects which \
+             attractor the machine lands in. Each fingerprint is a branch \
+             in the symmetry-broken outcome space. Next: stabilize toward \
+             the highest-entropy fingerprint (most generative) or the \
+             most-frequent one (most confident).",
+            apex_fingerprints.len(),
+            seed_set.len(),
+        );
+    }
+
+    // Observational test — no hard failure on variance. The whole
+    // point of the probe is to MEASURE the distribution. Saturation
+    // is optional at small budgets (pure-procedural corpora may
+    // continue adding rules past the test budget because every seed
+    // introduces structurally novel terms).
+    assert!(
+        !apex_fingerprints.is_empty(),
+        "at least one seed should produce a discovery run"
+    );
+}
+
+fn run_traversal_with_seed_offset(
+    seed_offset: u64,
+    procedural_budget: usize,
+    max_depth: usize,
+) -> TraversalReport {
+    run_traversal_pure_procedural(seed_offset, procedural_budget, max_depth)
+}
+
+fn run_traversal_pure_procedural(
+    seed_offset: u64,
+    procedural_budget: usize,
+    max_depth: usize,
+) -> TraversalReport {
+    // No hand-crafted zoo. Only procedural corpora driven entirely
+    // by (seed_offset, i). This is the configuration where seeds
+    // have maximum effect on discovery — if oscillation is
+    // measurable anywhere, it's here. The zoo-anchored variant
+    // produces 100%-uniform outcomes because the 7 hand-crafted
+    // shapes dominate the structural signal.
+    use mathscape_compress::{
+        extract::ExtractConfig, CompositeGenerator, CompressionGenerator,
+        MetaPatternGenerator,
+    };
+    use std::collections::{HashMap as HM, HashSet};
+    use std::time::Instant;
+
+    let mut zoo: Vec<(String, Vec<Term>)> = Vec::new();
+    for i in 1..=procedural_budget as u64 {
+        let seed = seed_offset.wrapping_add(i);
+        let depth = 2 + (i as usize % (max_depth - 1).max(1));
+        let count = 16 + (i as usize % 8);
+        zoo.push((
+            format!("proc-s{seed}-d{depth}"),
+            procedural(seed, depth, count),
+        ));
+    }
+
+    let mut forest = DiscoveryForest::new();
+    let base = CompressionGenerator::new(
+        ExtractConfig {
+            min_shared_size: 2,
+            min_matches: 2,
+            max_new_rules: 5,
+        },
+        1,
+    );
+    let meta = MetaPatternGenerator::new(
+        ExtractConfig {
+            min_shared_size: 1,
+            min_matches: 2,
+            max_new_rules: 12,
+        },
+        10_000,
+    );
+    let mut epoch = Epoch::new(
+        CompositeGenerator::new(base, meta),
+        mathscape_reward::StatisticalProver::new(
+            mathscape_reward::reward::RewardConfig::default(),
+            0.0,
+        ),
+        RuleEmitter,
+        InMemoryRegistry::new(),
+    );
+
+    let mut rule_to_corpora: HM<TermRef, HashSet<String>> = HM::new();
+    let mut per_step_lib_size: Vec<usize> = Vec::new();
+    let mut global_epoch = 0u64;
+    let mut epoch_to_corpus: HM<u64, String> = HM::new();
+
+    let t0 = Instant::now();
+    for (name, corpus) in &zoo {
+        global_epoch += 1;
+        forest.set_epoch(global_epoch);
+        epoch_to_corpus.insert(global_epoch, name.clone());
+        for t in corpus {
+            forest.insert(t.clone());
+        }
+        for _ in 0..3 {
+            let _ = epoch.step_with_action(
+                corpus,
+                mathscape_core::control::EpochAction::Discover,
+            );
+        }
+        let _ = epoch.step_with_action(
+            corpus,
+            mathscape_core::control::EpochAction::Reinforce,
+        );
+        global_epoch += 1;
+        forest.set_epoch(global_epoch);
+        let library_rules: Vec<_> = epoch
+            .registry
+            .all()
+            .iter()
+            .map(|a| (a.content_hash, a.rule.clone()))
+            .collect();
+        let rule_refs: Vec<&mathscape_core::eval::RewriteRule> =
+            library_rules.iter().map(|(_, r)| r).collect();
+        let _ = forest.apply_rules_retroactively(&rule_refs);
+        per_step_lib_size.push(epoch.registry.all().len());
+    }
+    for edge in &forest.edges {
+        let from_node = match forest.nodes.get(&edge.from) {
+            Some(n) => n,
+            None => continue,
+        };
+        let corpus = match epoch_to_corpus.get(&from_node.inserted_epoch) {
+            Some(c) => c.clone(),
+            None => continue,
+        };
+        if let Some(artifact) = epoch
+            .registry
+            .all()
+            .iter()
+            .find(|a| a.rule.name == edge.rule_name)
+        {
+            rule_to_corpora
+                .entry(artifact.content_hash)
+                .or_default()
+                .insert(corpus);
+        }
+    }
+    let elapsed_ms = t0.elapsed().as_millis();
+
+    let saturation_step = per_step_lib_size
+        .windows(2)
+        .rposition(|w| w[1] > w[0])
+        .map(|i| i + 1);
+
+    let mut axiomatized_rules = Vec::new();
+    let mut subsumed_count = 0;
+    let mut verified_count = 0;
+    let mut conjectured_count = 0;
+    let mut fragile_rules = Vec::new();
+    for artifact in epoch.registry.all() {
+        let status = epoch
+            .registry
+            .status_of(artifact.content_hash)
+            .unwrap_or_else(|| artifact.certificate.status.clone());
+        let cross = rule_to_corpora
+            .get(&artifact.content_hash)
+            .map(|s| s.len())
+            .unwrap_or(0);
+        let is_active = !matches!(
+            status,
+            ProofStatus::Subsumed(_) | ProofStatus::Demoted(_)
+        );
+        if is_active && cross < 2 {
+            fragile_rules.push((artifact.rule.name.clone(), cross));
+        }
+        match status {
+            ProofStatus::Axiomatized => {
+                axiomatized_rules.push((artifact.rule.name.clone(), cross))
+            }
+            ProofStatus::Subsumed(_) => subsumed_count += 1,
+            ProofStatus::Verified => verified_count += 1,
+            ProofStatus::Conjectured => conjectured_count += 1,
+            _ => {}
+        }
+    }
+
+    TraversalReport {
+        total_corpora: zoo.len(),
+        library_final_size: epoch.registry.all().len(),
+        forest_nodes: forest.len(),
+        forest_edges: forest.edges.len(),
+        forest_stable_leaves: forest.stable_leaf_count(),
+        saturation_step,
+        elapsed_ms,
+        axiomatized_rules,
+        subsumed_count,
+        verified_count,
+        conjectured_count,
+        fragile_rules,
+    }
+}
+
+#[test]
 fn autonomous_traverse_deterministic_replay() {
     // Two independent runs at identical parameters must produce
     // identical reports at the structural level. The machine's

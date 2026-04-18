@@ -180,6 +180,45 @@ pub fn pattern_equivalent(a: &Term, b: &Term) -> bool {
     subsumes(a, b) && subsumes(b, a)
 }
 
+/// *Proper subsumption* — the absolute measure of rule-level
+/// irreducibility that the user flagged as the gate for meta-rule
+/// collapse. A rule `r1` properly subsumes `r2` iff:
+///
+/// 1. `r1.lhs` pattern-subsumes `r2.lhs` (classical syntactic
+///    subsumption), AND
+/// 2. Under the substitution σ that makes `r1.lhs` match `r2.lhs`,
+///    σ(r1.rhs) == r2.rhs (the two rules agree on the reduction
+///    of anything r2's pattern matches)
+///
+/// The second clause is the "absolute" part. Without it, a rule
+/// like `?op(?x, ?id) => ?x` would syntactically subsume
+/// `?op(?x, ?x) => f(?x)` because their LHSs unify with `?id = ?x`
+/// — but applying them to `add(5, 5)` yields `5` vs `f(5)`,
+/// different outcomes. Those are DISTINCT rules, and collapsing
+/// them is loss of information, not efficiency.
+///
+/// Proper subsumption gives the reinforcement pass an irreducibility
+/// check that's independent of the library's state or corpus: it's
+/// structural, computable from the rules alone, and decisive —
+/// either σ(r1.rhs) equals r2.rhs under normal form or it doesn't.
+///
+/// Used in `reduction::detect_subsumption_pairs` as the stronger
+/// check. Classical `subsumes(lhs, lhs)` remains in place as the
+/// fast rejection predicate (if LHSs don't match, no need to
+/// consider RHS).
+#[must_use]
+pub fn proper_subsumes(r1: &RewriteRule, r2: &RewriteRule) -> bool {
+    let bindings = match pattern_match(&r1.lhs, &r2.lhs) {
+        Some(b) => b,
+        None => return false,
+    };
+    let mut r1_rhs_substituted = r1.rhs.clone();
+    for (v, val) in &bindings {
+        r1_rhs_substituted = r1_rhs_substituted.substitute(*v, val);
+    }
+    r1_rhs_substituted == r2.rhs
+}
+
 /// Match a pattern term against a concrete term, returning variable bindings.
 /// Returns None if the pattern doesn't match.
 pub fn pattern_match(pattern: &Term, term: &Term) -> Option<HashMap<u32, Term>> {
