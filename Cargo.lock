@@ -2074,6 +2074,7 @@ dependencies = [
  "mathscape-compress",
  "mathscape-core",
  "mathscape-store",
+ "tatara-lisp",
 ]
 
 [[package]]
@@ -3848,6 +3849,28 @@ name = "tap"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "55937e1799185b12863d447f42597ed69d9928686b8d88a1df17376a097d8369"
+
+[[package]]
+name = "tatara-lisp"
+version = "0.2.0"
+source = "git+https://github.com/pleme-io/tatara#794354862c78b1e0b25e2107d531f7187a53635e"
+dependencies = [
+ "blake3",
+ "serde",
+ "serde_json",
+ "tatara-lisp-derive",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "tatara-lisp-derive"
+version = "0.2.0"
+source = "git+https://github.com/pleme-io/tatara#794354862c78b1e0b25e2107d531f7187a53635e"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.117",
+]
 
 [[package]]
 name = "tempfile"

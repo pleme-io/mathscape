@@ -11,6 +11,13 @@ mathscape-core.workspace = true
 mathscape-store.workspace = true
 mathscape-compress.workspace = true
 
+# Phase ML1: tatara-lisp as the Sexp substrate for the apparatus layer.
+# Reward function expressed as a Sexp form; a small evaluator walks it
+# and computes the scalar. Future phases extend this to the extractor,
+# prover, and epoch policy. Rust owns the ground rules (Term,
+# RewriteRule, invariants). Lisp owns the mutable apparatus.
+tatara-lisp = { git = "https://github.com/pleme-io/tatara" }
+
 [dev-dependencies]
 mathscape-core = { workspace = true, features = ["test-helpers"] }
 mathscape-compress.workspace = true
