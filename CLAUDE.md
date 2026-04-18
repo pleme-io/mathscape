@@ -75,6 +75,19 @@ machine produces the trajectory.
     milestone closes. The apex fingerprint, lynchpin invariant, and
     regression signals all live here. Start here when asking "what
     can mathscape do now?" or "what's the next move?"
+19. `docs/arch/oscillating-irreducibility.md` — phase-M research
+    track. Instruments that SURROUND the discovery oscillation:
+    seeded-variance probes, law-of-large-numbers sweeps, structural
+    and operator-abstract basin classification. M1 + M2 + M2+ landed
+    2026-04-18.
+20. `docs/arch/bettyfine.md` — **the bettyfine** (n.): the modal
+    attractor basin of mathscape's discovery moduli space. 89% of
+    seed-driven runs converge here under alpha+operator equivalence.
+    Mathematically: a normal form / dominant basin / generic
+    stratum — the convergence of term rewriting, dynamical
+    systems, and algebraic geometry on one empirical object. Named
+    2026-04-18. Plural: bettyfines, for when a config change
+    produces multiple equal-support modes.
 
 The sections below (Core Thesis, Compression as Tractability, etc.)
 are preserved because they explain the *philosophy* the machine

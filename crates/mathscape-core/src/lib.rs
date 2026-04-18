@@ -5,6 +5,7 @@ pub mod control;
 pub mod corpus;
 pub mod demotion;
 pub mod epoch;
+pub mod bettyfine;
 pub mod eval;
 pub mod event;
 pub mod form_tree;
@@ -33,6 +34,7 @@ pub use epoch::{
     AcceptanceCertificate, Artifact, Candidate, Emitter, Epoch, EpochTrace, Generator,
     InMemoryRegistry, Prover, Registry, Rejection, RuleEmitter, Verdict,
 };
+pub use bettyfine::{bettyfine_library, standard_bettyfine_cardinality, OperatorSpec};
 pub use event::{Event, EventCategory, StatusAdvance};
 pub use form_tree::{
     CheckPeriod, DiscoveryForest, FormNode, HitCount, IrreducibilityRate, Morphism,
