@@ -88,6 +88,13 @@ machine produces the trajectory.
     systems, and algebraic geometry on one empirical object. Named
     2026-04-18. Plural: bettyfines, for when a config change
     produces multiple equal-support modes.
+21. `docs/arch/apparatus-universals.md` — **THE CORE TRUTHS** (2026-04-18).
+    Six structural rules that emerge as near-universals across 38
+    independent apparatus × corpus × scale experiments. First
+    Rustification candidates. Empirical ground for ML2: the Lisp
+    apparatus layer IS the experimentation substrate, and the
+    catalog runner aggregates cross-experiment evidence into
+    apparatus-independent claims.
 
 The sections below (Core Thesis, Compression as Tractability, etc.)
 are preserved because they explain the *philosophy* the machine
