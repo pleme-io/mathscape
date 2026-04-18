@@ -220,21 +220,35 @@ impl Term {
     /// Produce a canonical form — structurally equal representations
     /// of semantically-equal terms become literally identical.
     ///
-    /// R3 + R4 (2026-04-18): handles both commutativity AND
-    /// associativity. For AC operators (add, mul), the algorithm is:
+    /// R3 + R4 + R6 (2026-04-18): commutativity, associativity, AND
+    /// constant folding. For every `Apply(head, args)`:
     ///   1. Recursively canonicalize args (bottom-up).
-    ///   2. If head is associative: flatten nested same-head
-    ///      Applys into a single list of operands.
-    ///   3. If head is commutative: sort operands by the derived
-    ///      Ord.
-    ///   4. Rebuild in binary LEFT-ASSOCIATED form so the evaluator
+    ///   2. R6a — if head is a registered builtin AND every arg is
+    ///      a resolved leaf (Number/Point, not Var/Apply/Fn),
+    ///      invoke the builtin's eval rule. If it returns Some,
+    ///      that IS the canonical form (single Number / single
+    ///      term). Short-circuit.
+    ///   3. R4 — if head is associative, flatten nested same-head
+    ///      Applys into one operand list.
+    ///   4. R3 — if head is commutative, sort operands by derived
+    ///      Ord. AC-sort puts Numbers/Points ahead of Vars.
+    ///   5. R6b — for AC binary builtins, fold the leading run of
+    ///      Numbers (which cluster at the front after R3's sort)
+    ///      into a single Number by repeatedly applying the
+    ///      builtin's binary eval.
+    ///   6. Collapse degenerate result: if R6b reduced to one
+    ///      operand, return that operand directly (no Apply
+    ///      wrapper, no arity-1 Add).
+    ///   7. Rebuild in binary LEFT-ASSOCIATED form so the evaluator
     ///      (which expects arity=2 add/mul) still sees a valid
     ///      binary tree: `[a, b, c]` → `add(add(a, b), c)`.
     ///
-    /// The result: every semantically-equal AC expression maps to
-    /// ONE canonical term. `add(add(1, 2), 3)`, `add(1, add(2, 3))`,
-    /// `add(3, add(1, 2))`, etc. all collapse to
-    /// `add(add(1, 2), 3)`.
+    /// Result: every semantically-equal expression over the builtin
+    /// registry maps to ONE canonical term. `Apply(add, [3, 5])`,
+    /// `Apply(add, [5, 3])`, and `Number(8)` all canonicalize to
+    /// `Number(8)`. `Apply(succ, [Apply(succ, [Apply(zero, [])])])`
+    /// canonicalizes to `Number(2)`. The structural-equality →
+    /// semantic-equality invariant holds for reducible subterms.
     #[must_use]
     pub fn canonical(&self) -> Term {
         match self {
@@ -246,6 +260,14 @@ impl Term {
                 let head_c = head.canonical();
                 let args_c: Vec<Term> = args.iter().map(Term::canonical).collect();
 
+                // R6a: whole-application fold. If head is a registered
+                // builtin and every arg is fully resolved, compute
+                // the result directly. Covers nullary (zero), unary
+                // (succ), binary (add/mul) — registry-driven.
+                if let Some(folded) = try_builtin_fold(&head_c, &args_c) {
+                    return folded;
+                }
+
                 // R4: if associative, flatten nested same-head
                 // applications into a single operand list.
                 let flat_args: Vec<Term> = if is_associative_op(&head_c) {
@@ -255,6 +277,8 @@ impl Term {
                 };
 
                 // R3: if commutative, sort the flat operand list.
+                // Because Number < Apply < Var in derived Ord,
+                // Numbers cluster at the front.
                 let sorted_args = if is_commutative_op(&head_c) {
                     let mut v = flat_args;
                     v.sort();
@@ -263,13 +287,24 @@ impl Term {
                     flat_args
                 };
 
+                // R6b: AC binary-builtin constant folding. Fold the
+                // leading Number-run (guaranteed contiguous after R3)
+                // into a single Number using the builtin's eval.
+                let folded_args = fold_ac_constants(&head_c, sorted_args);
+
+                // R6 collapse: if folding crushed everything to one
+                // operand, that IS the canonical form. No more Apply.
+                if folded_args.len() == 1 {
+                    return folded_args.into_iter().next().unwrap();
+                }
+
                 // R4 rebuild: binary left-associated form preserves
                 // arity=2 so the existing evaluator works unchanged.
                 // [a, b, c, d] → add(add(add(a, b), c), d)
-                if is_associative_op(&head_c) && sorted_args.len() > 2 {
-                    rebuild_left_associated(head_c, sorted_args)
+                if is_associative_op(&head_c) && folded_args.len() > 2 {
+                    rebuild_left_associated(head_c, folded_args)
                 } else {
-                    Term::Apply(Box::new(head_c), sorted_args)
+                    Term::Apply(Box::new(head_c), folded_args)
                 }
             }
             Term::Symbol(id, args) => {
@@ -285,6 +320,83 @@ impl Term {
     pub fn apply_canonical(head: Term, args: Vec<Term>) -> Term {
         Term::Apply(Box::new(head), args).canonical()
     }
+}
+
+/// R6a: whole-Apply constant fold. If the head is a registered
+/// builtin and every arg is already a resolved leaf
+/// (`Term::Number` or `Term::Point`), invoke the builtin's `eval`
+/// rule. `None` if any precondition fails — the caller falls
+/// through to the AC path.
+///
+/// Registry-driven: adding a new builtin instantly gives its eval
+/// rule constant-folding power. The kernel never needs to know
+/// about specific operators.
+fn try_builtin_fold(head: &Term, args: &[Term]) -> Option<Term> {
+    let Term::Var(id) = head else { return None; };
+    let builtin = crate::builtin::lookup(*id)?;
+    // Only fold when every arg is a resolved leaf. Vars, Applys,
+    // Fns mean "not yet reduced" — the builtin eval would return
+    // None anyway, but we check up front for clarity.
+    if !args
+        .iter()
+        .all(|a| matches!(a, Term::Number(_) | Term::Point(_)))
+    {
+        return None;
+    }
+    (builtin.eval)(args)
+}
+
+/// R6b: fold the leading Number-run of an AC-binary-builtin
+/// application into a single Number. Because R3's sort puts
+/// Numbers at the front, the leading run is the contiguous
+/// Number prefix.
+///
+/// `[Number(1), Number(2), Number(3)]` → `[Number(6)]`
+/// `[Number(1), Number(2), Var(x)]`   → `[Number(3), Var(x)]`
+/// `[Number(5), Var(x)]`              → `[Number(5), Var(x)]` (prefix < 2)
+/// `[Var(x), Var(y)]`                 → `[Var(x), Var(y)]`
+///
+/// No-op for non-binary, non-associative, or unknown heads.
+fn fold_ac_constants(head: &Term, args: Vec<Term>) -> Vec<Term> {
+    if args.len() < 2 {
+        return args;
+    }
+    let Term::Var(id) = head else { return args; };
+    let Some(builtin) = crate::builtin::lookup(*id) else {
+        return args;
+    };
+    if !builtin.associative || builtin.arity != 2 {
+        return args;
+    }
+
+    // Count the leading Number prefix.
+    let n_leading = args
+        .iter()
+        .take_while(|a| matches!(a, Term::Number(_)))
+        .count();
+    if n_leading < 2 {
+        return args;
+    }
+
+    // Fold the first n_leading args into one by iterated binary eval.
+    let mut iter = args.into_iter();
+    let mut acc = iter.next().expect("n_leading >= 2");
+    for _ in 1..n_leading {
+        let next = iter.next().expect("n_leading counted");
+        match (builtin.eval)(&[acc.clone(), next.clone()]) {
+            Some(folded) => acc = folded,
+            None => {
+                // Evaluator rejected — unexpected for same-shape
+                // Numbers, but stay safe and keep them as-is.
+                let mut v = vec![acc, next];
+                v.extend(iter);
+                return v;
+            }
+        }
+    }
+    let mut result = vec![acc];
+    result.extend(iter);
+    result
 }
 
 /// Flatten nested same-head Apply trees into a single operand list.
@@ -404,19 +516,22 @@ mod tests {
 
     #[test]
     fn canonical_is_recursive() {
-        // add(mul(3, 5), mul(5, 3)) — the outer is AC (add), but
-        // the inner muls are also AC (mul). Both inner muls
-        // canonicalize to the same thing, and the outer sorts.
-        let left = app(Term::Var(3), vec![nat(3), nat(5)]);
-        let right = app(Term::Var(3), vec![nat(5), nat(3)]);
+        // add(mul(?a, ?b), mul(?b, ?a)) — outer is AC (add), inner
+        // muls are AC. Inner muls sort their args identically;
+        // outer sees two identical subterms. Vars are used (not
+        // Numbers) so R6 constant-folding doesn't collapse the
+        // whole expression — we're testing the recursion, not the
+        // folding.
+        let left = app(Term::Var(3), vec![Term::Var(100), Term::Var(101)]);
+        let right = app(Term::Var(3), vec![Term::Var(101), Term::Var(100)]);
         let outer = app(Term::Var(2), vec![left, right]);
         let canon = outer.canonical();
-        // Both inner muls → mul(3, 5). Outer args both mul(3, 5).
+        // Both inner muls → mul(?100, ?101). Outer args both the same.
         if let Term::Apply(_, args) = &canon {
             assert_eq!(args.len(), 2);
             assert_eq!(args[0], args[1], "identical subterms after canonicalization");
         } else {
-            panic!("expected Apply");
+            panic!("expected Apply, got {canon:?}");
         }
     }
 
@@ -614,24 +729,30 @@ mod tests {
         // canonical AC expression into binary left-associated form:
         //   [a, b, c] → add(add(a, b), c)
         //   [a, b, c, d] → add(add(add(a, b), c), d)
+        // Uses Vars (not Numbers) to avoid R6 constant folding —
+        // this test checks the rebuild SHAPE, not the folding.
+        // Vars sort by id: ?10 < ?11 < ?12.
+        let a = Term::Var(10);
+        let b = Term::Var(11);
+        let c = Term::Var(12);
         let t = app(
             Term::Var(2),
-            vec![app(Term::Var(2), vec![nat(1), nat(2)]), nat(3)],
+            vec![app(Term::Var(2), vec![a.clone(), b.clone()]), c.clone()],
         );
         let canon = t.canonical();
         match canon {
             Term::Apply(ref outer_head, ref outer_args) => {
                 assert_eq!(**outer_head, Term::Var(2));
                 assert_eq!(outer_args.len(), 2, "binary at top");
-                // second arg is the largest leaf (after sort)
-                assert_eq!(outer_args[1], nat(3));
-                // first arg is the nested add(1, 2)
+                // second arg is the largest Var (?12)
+                assert_eq!(outer_args[1], c);
+                // first arg is the nested add(?10, ?11)
                 match &outer_args[0] {
                     Term::Apply(inner_head, inner_args) => {
                         assert_eq!(**inner_head, Term::Var(2));
                         assert_eq!(inner_args.len(), 2);
-                        assert_eq!(inner_args[0], nat(1));
-                        assert_eq!(inner_args[1], nat(2));
+                        assert_eq!(inner_args[0], a);
+                        assert_eq!(inner_args[1], b);
                     }
                     other => panic!("expected inner Apply, got {other:?}"),
                 }
@@ -711,25 +832,32 @@ mod tests {
 
     #[test]
     fn canonical_deeply_nested_ac_collapses_to_one_tree() {
-        // An adversarial case: add(add(add(4,1),add(3,2)),5) —
-        // 5 operands arriving through 4 levels of nesting. After
-        // canonicalization the operands must be sorted ascending
-        // and rebuilt as a binary left-associated spine.
+        // An adversarial shape case: add(add(add(?d,?a),add(?c,?b)),?e)
+        // — 5 operands arriving through 4 levels of nesting. After
+        // canonicalization the operands must be sorted by Var id
+        // and rebuilt as a binary left-associated spine. Uses Vars
+        // so R6 constant-folding doesn't collapse to one Number;
+        // this test checks the REBUILD SHAPE, not the folding.
+        let a = Term::Var(20);
+        let b = Term::Var(21);
+        let c = Term::Var(22);
+        let d = Term::Var(23);
+        let e = Term::Var(24);
         let t = app(
             Term::Var(2),
             vec![
                 app(
                     Term::Var(2),
                     vec![
-                        app(Term::Var(2), vec![nat(4), nat(1)]),
-                        app(Term::Var(2), vec![nat(3), nat(2)]),
+                        app(Term::Var(2), vec![d.clone(), a.clone()]),
+                        app(Term::Var(2), vec![c.clone(), b.clone()]),
                     ],
                 ),
-                nat(5),
+                e.clone(),
             ],
         );
         let canon = t.canonical();
-        // Expected: add(add(add(add(1, 2), 3), 4), 5)
+        // Expected: add(add(add(add(?a, ?b), ?c), ?d), ?e)
         let expected = app(
             Term::Var(2),
             vec![
@@ -739,16 +867,178 @@ mod tests {
                         app(
                             Term::Var(2),
                             vec![
-                                app(Term::Var(2), vec![nat(1), nat(2)]),
-                                nat(3),
+                                app(Term::Var(2), vec![a, b]),
+                                c,
                             ],
                         ),
-                        nat(4),
+                        d,
                     ],
                 ),
-                nat(5),
+                e,
             ],
         );
         assert_eq!(canon, expected);
+    }
+
+    // ── R6: constant-folding gold tests ──────────────────────────
+
+    #[test]
+    fn canonical_folds_binary_add_to_number() {
+        // The core R6 claim: Apply(add, [3, 5]) and Number(8) are
+        // semantically equal, therefore canonically equal.
+        let apply_form = app(Term::Var(2), vec![nat(3), nat(5)]);
+        let number_form = nat(8);
+        assert_ne!(apply_form, number_form, "structurally distinct before canonical");
+        assert_eq!(apply_form.canonical(), number_form);
+    }
+
+    #[test]
+    fn canonical_folds_binary_mul_to_number() {
+        let apply_form = app(Term::Var(3), vec![nat(7), nat(9)]);
+        assert_eq!(apply_form.canonical(), nat(63));
+    }
+
+    #[test]
+    fn canonical_folds_nullary_zero_to_number() {
+        // Apply(zero, []) IS Number(0) after canonical.
+        let zero_apply = app(Term::Var(0), vec![]);
+        assert_eq!(zero_apply.canonical(), nat(0));
+    }
+
+    #[test]
+    fn canonical_folds_unary_succ_to_number() {
+        // succ is non-AC, unary. R6a (whole-fold) handles it.
+        let succ_apply = app(Term::Var(1), vec![nat(41)]);
+        assert_eq!(succ_apply.canonical(), nat(42));
+    }
+
+    #[test]
+    fn canonical_folds_nested_succ_chain() {
+        // succ(succ(succ(zero))) → 3. Bottom-up folding means every
+        // layer reduces to a Number, so the outer sees Number input
+        // and can fold too.
+        let zero_apply = app(Term::Var(0), vec![]);
+        let s1 = app(Term::Var(1), vec![zero_apply]);
+        let s2 = app(Term::Var(1), vec![s1]);
+        let s3 = app(Term::Var(1), vec![s2]);
+        assert_eq!(s3.canonical(), nat(3));
+    }
+
+    #[test]
+    fn canonical_folds_leading_numbers_in_ac_multi_add() {
+        // add(1, 2, ?x) after sort is [1, 2, ?x]. R6b folds the
+        // leading Number-run [1, 2] → 3, leaving [3, ?x]. Result:
+        // add(3, ?x).
+        let t = app(
+            Term::Var(2),
+            vec![
+                nat(1),
+                nat(2),
+                Term::Var(99),
+            ],
+        );
+        let canon = t.canonical();
+        let expected = app(Term::Var(2), vec![nat(3), Term::Var(99)]);
+        assert_eq!(canon, expected);
+    }
+
+    #[test]
+    fn canonical_leaves_var_plus_constant_intact() {
+        // add(?x, 0) after sort is [0, ?x]. Only ONE Number in the
+        // leading run → R6b does nothing. Result: add(0, ?x).
+        let t = app(Term::Var(2), vec![Term::Var(7), nat(0)]);
+        let canon = t.canonical();
+        let expected = app(Term::Var(2), vec![nat(0), Term::Var(7)]);
+        assert_eq!(canon, expected);
+    }
+
+    #[test]
+    fn canonical_folds_mixed_add_mul_bottom_up() {
+        // add(mul(3, 5), mul(2, 4)) — inner muls fold to 15 and 8,
+        // outer add folds 15+8 = 23.
+        let t = app(
+            Term::Var(2),
+            vec![
+                app(Term::Var(3), vec![nat(3), nat(5)]),
+                app(Term::Var(3), vec![nat(2), nat(4)]),
+            ],
+        );
+        assert_eq!(t.canonical(), nat(23));
+    }
+
+    #[test]
+    fn canonical_fold_is_idempotent_on_numbers() {
+        // canonical(Number(n)) = Number(n). No-op on already-folded.
+        let n = nat(42);
+        assert_eq!(n.canonical(), n);
+        assert_eq!(n.canonical().canonical(), n);
+    }
+
+    #[test]
+    fn canonical_ac_folding_unifies_all_number_groupings() {
+        // Every all-Number grouping of 1+2+3+4 canonicalizes to
+        // Number(10). Regardless of nesting, permutation, or depth.
+        let groupings = [
+            app(Term::Var(2), vec![
+                app(Term::Var(2), vec![
+                    app(Term::Var(2), vec![nat(1), nat(2)]),
+                    nat(3),
+                ]),
+                nat(4),
+            ]),
+            app(Term::Var(2), vec![
+                nat(4),
+                app(Term::Var(2), vec![
+                    nat(3),
+                    app(Term::Var(2), vec![nat(2), nat(1)]),
+                ]),
+            ]),
+            app(Term::Var(2), vec![
+                app(Term::Var(2), vec![nat(2), nat(3)]),
+                app(Term::Var(2), vec![nat(1), nat(4)]),
+            ]),
+        ];
+        for g in &groupings {
+            assert_eq!(g.canonical(), nat(10), "grouping {g:?} must fold to 10");
+        }
+    }
+
+    #[test]
+    fn canonical_does_not_fold_unknown_head() {
+        // Var(999) is not in the builtin registry. Canonical must
+        // NOT fold; returns the Apply structurally sorted-if-known
+        // (here not sorted since unknown → not commutative, not
+        // associative).
+        let t = app(Term::Var(999), vec![nat(3), nat(5)]);
+        let canon = t.canonical();
+        match canon {
+            Term::Apply(h, args) => {
+                assert_eq!(*h, Term::Var(999));
+                assert_eq!(args, vec![nat(3), nat(5)]);
+            }
+            other => panic!("unknown head must not fold, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn canonical_does_not_fold_symbol() {
+        // Symbols are library discoveries; the kernel doesn't try
+        // to evaluate them here — that's the library's job. Args
+        // are recursively canonicalized but the Symbol itself
+        // stays.
+        let t = Term::Symbol(
+            42,
+            vec![app(Term::Var(2), vec![nat(3), nat(5)])],
+        );
+        let canon = t.canonical();
+        match canon {
+            Term::Symbol(id, args) => {
+                assert_eq!(id, 42);
+                // inner Apply(add, [3, 5]) canonicalized under R6
+                // folds to Number(8); Symbol itself preserved.
+                assert_eq!(args, vec![nat(8)]);
+            }
+            other => panic!("expected Symbol, got {other:?}"),
+        }
     }
 }
