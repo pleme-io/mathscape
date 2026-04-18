@@ -51,6 +51,7 @@ use crate::policy::LinearPolicy;
 use crate::term::Term;
 use crate::trajectory::{ActionKind, LibraryFeatures, Trajectory, TrajectoryStep};
 use serde::{Deserialize, Serialize};
+use std::time::Instant;
 
 // ── Layer traits ───────────────────────────────────────────────────
 
@@ -573,6 +574,13 @@ pub struct ExperimentOutcome {
     /// attestations. Two scenarios with identical phase sequences
     /// produce identical chain attestations.
     pub chain_attestation: crate::hash::TermRef,
+    /// R34: wall-clock total for the entire scenario run.
+    /// OBSERVATIONAL — does NOT enter `chain_attestation`.
+    /// `phases[i].cycle_outcome.timings.total_ns` carries per-
+    /// phase totals and together they cover every phase; this
+    /// field additionally captures scenario-level overhead
+    /// (phase chaining + attestation rollup).
+    pub scenario_total_ns: u64,
 }
 
 impl ExperimentOutcome {
@@ -611,6 +619,16 @@ impl ExperimentOutcome {
         }
         growth
     }
+
+    /// R34: per-phase wall-clock totals in nanoseconds. Index
+    /// aligned with `phases`.
+    #[must_use]
+    pub fn per_phase_timings_ns(&self) -> Vec<u64> {
+        self.phases
+            .iter()
+            .map(|p| p.cycle_outcome.timings.total_ns)
+            .collect()
+    }
 }
 
 /// Run an `ExperimentScenario` by chaining phase outputs.
@@ -625,10 +643,12 @@ impl ExperimentOutcome {
 pub fn execute_scenario_core(
     scenario: &ExperimentScenario,
 ) -> Result<ExperimentOutcome, SpecExecutionError> {
+    let scenario_start = Instant::now();
     if scenario.phases.is_empty() {
         return Ok(ExperimentOutcome {
             phases: Vec::new(),
             chain_attestation: crate::hash::TermRef::from_bytes(b""),
+            scenario_total_ns: elapsed_ns(scenario_start),
         });
     }
 
@@ -669,6 +689,7 @@ pub fn execute_scenario_core(
     Ok(ExperimentOutcome {
         phases,
         chain_attestation,
+        scenario_total_ns: elapsed_ns(scenario_start),
     })
 }
 
@@ -701,6 +722,70 @@ pub fn deduplicate_library<D: LibraryDeduper>(
         }
     }
     (kept, rejected)
+}
+
+// ── R34: timing instrumentation ────────────────────────────────────
+//
+// Efficiency framing (2026-04-18): "from here on we only think in
+// terms of making the model exist more efficiently and train more
+// efficiently." You can't optimize what you don't measure — so the
+// BootstrapCycle and ExperimentScenario runs now carry wall-clock
+// timings covering each seam of the loop.
+//
+// Timings are OBSERVATIONAL — they do NOT enter the attestation
+// payload. Two runs with identical inputs produce identical
+// attestations even though their timings differ (same machine or
+// not). This keeps cycle-level deterministic_replay intact.
+
+/// Per-iteration wall-clock timings in nanoseconds. One instance
+/// per iteration, in `CycleTimings::per_iteration`.
+///
+/// Fields cover the three trait seams inside each iteration:
+///   - `corpus_gen_ns`: time in `CorpusGenerator::generate`
+///   - `extract_ns`: time in `LawExtractor::extract`
+///   - `dedup_ns`: time running the dedup filter over proposals
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct IterationTimings {
+    pub corpus_gen_ns: u64,
+    pub extract_ns: u64,
+    pub dedup_ns: u64,
+}
+
+impl IterationTimings {
+    /// Sum across all three seams.
+    #[must_use]
+    pub fn total_ns(&self) -> u64 {
+        self.corpus_gen_ns
+            .saturating_add(self.extract_ns)
+            .saturating_add(self.dedup_ns)
+    }
+}
+
+/// Full cycle timings: one `IterationTimings` per iteration, plus
+/// the post-loop training call and the outer run total.
+///
+/// `total_ns` is measured across the whole `run_with_dedup` body
+/// and therefore includes all sub-timings plus any overhead
+/// (trajectory recording, feature extraction, attestation).
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CycleTimings {
+    pub per_iteration: Vec<IterationTimings>,
+    /// Time inside the post-loop `ModelUpdater::update`.
+    pub train_ns: u64,
+    /// Wall-clock total for the entire cycle run.
+    pub total_ns: u64,
+}
+
+impl CycleTimings {
+    /// Sum of all per-iteration timings. Equals
+    /// `total_ns - train_ns - overhead`.
+    #[must_use]
+    pub fn iter_sum_ns(&self) -> u64 {
+        self.per_iteration
+            .iter()
+            .map(IterationTimings::total_ns)
+            .fold(0u64, u64::saturating_add)
+    }
 }
 
 // ── BootstrapCycle ─────────────────────────────────────────────────
@@ -776,18 +861,27 @@ where
         seed_policy: LinearPolicy,
         deduper: &D,
     ) -> BootstrapOutcome {
+        let cycle_start = Instant::now();
         let mut library = seed_library;
         let mut policy = seed_policy;
         let mut trajectory = Trajectory::new();
         let mut iterations: Vec<IterationSnapshot> = Vec::new();
+        let mut per_iter_timings: Vec<IterationTimings> = Vec::new();
 
         for iter in 0..self.n_iterations {
+            let t_corpus = Instant::now();
             let corpus = self.corpus_gen.generate(iter, &library);
+            let corpus_gen_ns = elapsed_ns(t_corpus);
+
             let library_size_before = library.len();
             let features_before = LibraryFeatures::extract(&library);
 
+            let t_extract = Instant::now();
             let proposed = self.extractor.extract(&corpus, &library);
+            let extract_ns = elapsed_ns(t_extract);
+
             // R28: filter out duplicates BEFORE appending.
+            let t_dedup = Instant::now();
             let mut accepted_laws = Vec::new();
             for cand in proposed.iter() {
                 if !deduper.is_duplicate(cand, &library)
@@ -798,6 +892,7 @@ where
                     accepted_laws.push(cand.clone());
                 }
             }
+            let dedup_ns = elapsed_ns(t_dedup);
             let accepted = !accepted_laws.is_empty();
 
             library.extend(accepted_laws.clone());
@@ -819,12 +914,20 @@ where
                 new_law_count: accepted_laws.len(),
                 features_after,
             });
+            per_iter_timings.push(IterationTimings {
+                corpus_gen_ns,
+                extract_ns,
+                dedup_ns,
+            });
         }
 
         trajectory.finalize(LibraryFeatures::extract(&library));
+        let t_train = Instant::now();
         self.updater.update(&mut policy, &trajectory);
+        let train_ns = elapsed_ns(t_train);
 
         let attestation = compute_attestation(&library, &policy, &trajectory);
+        let total_ns = elapsed_ns(cycle_start);
 
         BootstrapOutcome {
             iterations,
@@ -832,8 +935,20 @@ where
             final_policy: policy,
             trajectory,
             attestation,
+            timings: CycleTimings {
+                per_iteration: per_iter_timings,
+                train_ns,
+                total_ns,
+            },
         }
     }
+}
+
+#[inline]
+fn elapsed_ns(start: Instant) -> u64 {
+    // as_nanos() returns u128; saturate to u64 — at 1 GHz this only
+    // wraps after ~584 years of wall-clock inside a single seam.
+    u64::try_from(start.elapsed().as_nanos()).unwrap_or(u64::MAX)
 }
 
 // ── Outcome + attestation ──────────────────────────────────────────
@@ -860,6 +975,11 @@ pub struct BootstrapOutcome {
     /// trajectory)`. Covers the whole cycle result. Use this to
     /// detect drift when a layer implementation changes.
     pub attestation: TermRef,
+    /// R34: wall-clock timings. OBSERVATIONAL only — NOT part of
+    /// the attestation payload, so two runs with identical inputs
+    /// still produce identical attestations despite varying clock
+    /// readings.
+    pub timings: CycleTimings,
 }
 
 /// Compute a BLAKE3 attestation hash for a cycle outcome. The
@@ -1650,6 +1770,152 @@ mod tests {
         let g = DefaultCorpusGenerator;
         let lib: Vec<RewriteRule> = Vec::new();
         assert_ne!(g.generate(0, &lib), g.generate(1, &lib));
+    }
+
+    // ── R34: timing invariants ────────────────────────────────────
+
+    #[test]
+    fn timings_per_iteration_length_equals_iteration_count() {
+        for n in [0usize, 1, 3, 5] {
+            let cycle = BootstrapCycle::new(
+                NullCorpusGenerator,
+                FixedLawExtractor { law: dummy_law() },
+                NullModelUpdater,
+                n,
+            );
+            let outcome = cycle.run(Vec::new(), LinearPolicy::new());
+            assert_eq!(
+                outcome.timings.per_iteration.len(),
+                n,
+                "per_iteration length must equal iteration count N={n}"
+            );
+        }
+    }
+
+    #[test]
+    fn timings_do_not_affect_attestation() {
+        // Two runs on identical inputs — wall-clock timings will
+        // differ slightly but attestation must be bit-identical.
+        let cycle = || {
+            BootstrapCycle::new(
+                NullCorpusGenerator,
+                FixedLawExtractor { law: dummy_law() },
+                NullModelUpdater,
+                3,
+            )
+        };
+        let a = cycle().run(Vec::new(), LinearPolicy::new());
+        let b = cycle().run(Vec::new(), LinearPolicy::new());
+        assert_eq!(
+            a.attestation, b.attestation,
+            "attestation must be independent of wall-clock timings"
+        );
+    }
+
+    #[test]
+    fn total_ns_covers_iterations_plus_train() {
+        // total_ns >= sum of per-iteration totals + train_ns. The
+        // difference is outer-loop overhead (trajectory ops,
+        // feature extraction, attestation).
+        let cycle = BootstrapCycle::new(
+            NullCorpusGenerator,
+            FixedLawExtractor { law: dummy_law() },
+            DefaultModelUpdater::default(),
+            4,
+        );
+        let outcome = cycle.run(Vec::new(), LinearPolicy::new());
+        let inner = outcome
+            .timings
+            .iter_sum_ns()
+            .saturating_add(outcome.timings.train_ns);
+        assert!(
+            outcome.timings.total_ns >= inner,
+            "total_ns ({}) must cover iter_sum+train ({inner})",
+            outcome.timings.total_ns
+        );
+    }
+
+    #[test]
+    fn zero_iter_cycle_still_records_total_timing() {
+        // Even with no iterations, the total wall-clock is measured
+        // (attestation + updater call still happen). Per-iteration
+        // vec is empty, but total_ns is typically > 0.
+        let cycle = BootstrapCycle::new(
+            NullCorpusGenerator,
+            FixedLawExtractor { law: dummy_law() },
+            DefaultModelUpdater::default(),
+            0,
+        );
+        let outcome = cycle.run(Vec::new(), LinearPolicy::new());
+        assert!(outcome.timings.per_iteration.is_empty());
+        // total_ns is u64; we don't assert > 0 (on mock clocks it
+        // could underflow to 0) but we do assert it's bounded.
+        assert!(outcome.timings.total_ns < u64::MAX);
+    }
+
+    #[test]
+    fn scenario_total_covers_phase_totals() {
+        // The scenario total wall-clock must be at least as large
+        // as the sum of per-phase totals — the phases execute
+        // sequentially inside the scenario loop.
+        let base = BootstrapCycleSpec {
+            corpus_generator: "null".into(),
+            law_extractor: "null".into(),
+            model_updater: "default".into(),
+            deduper: "canonical".into(),
+            n_iterations: 2,
+            seed_library: Vec::new(),
+            seed_policy: LinearPolicy::new(),
+        };
+        let scenario = ExperimentScenario {
+            name: "timing".into(),
+            phases: vec![base.clone(), base.clone(), base],
+        };
+        let outcome = execute_scenario_core(&scenario).unwrap();
+        let phase_sum: u64 = outcome
+            .per_phase_timings_ns()
+            .iter()
+            .copied()
+            .fold(0u64, u64::saturating_add);
+        assert!(
+            outcome.scenario_total_ns >= phase_sum,
+            "scenario_total_ns ({}) must cover phase sum ({})",
+            outcome.scenario_total_ns,
+            phase_sum,
+        );
+    }
+
+    #[test]
+    fn scenario_chain_attestation_independent_of_timings() {
+        // Running the same scenario twice: timings vary, chain
+        // attestation does not.
+        let base = BootstrapCycleSpec {
+            corpus_generator: "null".into(),
+            law_extractor: "null".into(),
+            model_updater: "default".into(),
+            deduper: "canonical".into(),
+            n_iterations: 1,
+            seed_library: Vec::new(),
+            seed_policy: LinearPolicy::new(),
+        };
+        let scenario = ExperimentScenario {
+            name: "attn".into(),
+            phases: vec![base.clone(), base],
+        };
+        let a = execute_scenario_core(&scenario).unwrap();
+        let b = execute_scenario_core(&scenario).unwrap();
+        assert_eq!(a.chain_attestation, b.chain_attestation);
+    }
+
+    #[test]
+    fn empty_scenario_has_zero_phase_sum_and_bounded_total() {
+        let scenario = ExperimentScenario {
+            name: "empty".into(),
+            phases: Vec::new(),
+        };
+        let outcome = execute_scenario_core(&scenario).unwrap();
+        assert!(outcome.per_phase_timings_ns().is_empty());
+        assert!(outcome.scenario_total_ns < u64::MAX);
     }
 
     #[test]

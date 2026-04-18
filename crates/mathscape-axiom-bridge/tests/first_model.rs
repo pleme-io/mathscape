@@ -197,6 +197,35 @@ fn produce_and_inspect_first_model() {
     println!("  (covers library + policy + trajectory; stable under");
     println!("   identical cycle inputs, differs if any content changes)");
 
+    // ── Section 7b: R34 efficiency report ────────────────────────
+    println!("\n──── 7b. CYCLE EFFICIENCY (wall-clock ns) ───────────────");
+    println!(
+        "  total          : {:>10} ns ({:>8.3} ms)",
+        outcome.timings.total_ns,
+        outcome.timings.total_ns as f64 / 1.0e6,
+    );
+    println!(
+        "  iter sum       : {:>10} ns ({:>8.3} ms)",
+        outcome.timings.iter_sum_ns(),
+        outcome.timings.iter_sum_ns() as f64 / 1.0e6,
+    );
+    println!(
+        "  train          : {:>10} ns ({:>8.3} ms)",
+        outcome.timings.train_ns,
+        outcome.timings.train_ns as f64 / 1.0e6,
+    );
+    println!("  per-iteration breakdown:");
+    for (i, t) in outcome.timings.per_iteration.iter().enumerate() {
+        println!(
+            "    iter {}: corpus={:>7}ns extract={:>8}ns dedup={:>7}ns (total {:>8}ns)",
+            i,
+            t.corpus_gen_ns,
+            t.extract_ns,
+            t.dedup_ns,
+            t.total_ns(),
+        );
+    }
+
     // ── Section 8: what this proves ──────────────────────────────
     println!("\n──── 8. WHAT M0 PROVES ─────────────────────────────────");
     println!("  ✓ A model was produced starting from empty library");

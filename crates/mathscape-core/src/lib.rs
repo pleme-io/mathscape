@@ -54,10 +54,10 @@ pub use autograd::{
 pub use bootstrap::{
     compute_attestation, deduplicate_library, execute_scenario_core,
     execute_spec_core, AlphaDeduper, BootstrapCycle, BootstrapCycleSpec,
-    BootstrapOutcome, CanonicalDeduper, CorpusGenerator,
+    BootstrapOutcome, CanonicalDeduper, CorpusGenerator, CycleTimings,
     DefaultCorpusGenerator, DefaultModelUpdater, ExperimentOutcome,
-    ExperimentScenario, IterationSnapshot, LawExtractor, LibraryDeduper,
-    ModelUpdater, NoDedup, PhaseOutcome, SpecExecutionError,
+    ExperimentScenario, IterationSnapshot, IterationTimings, LawExtractor,
+    LibraryDeduper, ModelUpdater, NoDedup, PhaseOutcome, SpecExecutionError,
     SubsumptionDeduper,
 };
 pub use optimizer::{sgd_step_int, sgd_step_tensor};
