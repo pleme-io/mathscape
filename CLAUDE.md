@@ -59,6 +59,14 @@ machine produces the trajectory.
     to the next step"; levels 0–7.
 16. `docs/arch/realization-plan.md` — the phased implementation plan
     (A through L).
+17. `docs/arch/autonomous-traversal.md` — **MILESTONE (2026-04-17)**.
+    The machine now traverses mathscape autonomously: discovers
+    primitives, reinforces via retroactive reduction across a shared
+    forest substrate, and climbs the proof-status lattice to
+    `Axiomatized` on cross-corpus empirical evidence alone. No human
+    approval in the loop; no hook fakes. Pinned by
+    `crates/mathscape-axiom-bridge/tests/autonomous_traverse.rs`.
+    Invoked via the `mathscape-traverse` skill.
 
 The sections below (Core Thesis, Compression as Tractability, etc.)
 are preserved because they explain the *philosophy* the machine
