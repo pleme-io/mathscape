@@ -158,6 +158,10 @@ fn term_to_lean(t: &Term, params: &[String]) -> String {
                 shape
             )
         }
+        // R18: Float — Lean's Float type.
+        Term::Number(Value::Float(bits)) => {
+            format!("({} : Float)", f64::from_bits(*bits))
+        }
         Term::Point(p) => format!("(Point.mk {p})"),
         Term::Apply(f, args) => match f.as_ref() {
             Term::Var(2) if args.len() == 2 => format!(

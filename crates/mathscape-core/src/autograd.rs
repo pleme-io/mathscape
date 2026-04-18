@@ -63,8 +63,9 @@
 //! material to work with.
 
 use crate::builtin::{
-    ADD, INT_ADD, INT_MUL, INT_SUCC, INT_ZERO, MUL, NEG, SUCC, TENSOR_ADD,
-    TENSOR_DOT, TENSOR_MUL, TENSOR_NEG, TENSOR_SCALE, TENSOR_SUM, ZERO,
+    ADD, FLOAT_ADD, FLOAT_MUL, FLOAT_NEG, FLOAT_SUB, INT_ADD, INT_MUL, INT_SUCC,
+    INT_ZERO, MUL, NEG, SUCC, TENSOR_ADD, TENSOR_DOT, TENSOR_MUL, TENSOR_NEG,
+    TENSOR_SCALE, TENSOR_SUM, ZERO,
 };
 use crate::term::Term;
 use crate::value::Value;
@@ -134,6 +135,43 @@ fn derive_apply(head_id: u32, args: &[Term], var_id: u32) -> Term {
             let term_1 = simplify_mul(da, args[1].clone());
             let term_2 = simplify_mul(args[0].clone(), db);
             simplify_add(term_1, term_2)
+        }
+        // R18: Float analogs. Build derivative expressions using
+        // FLOAT ops so eval reduces in the correct domain.
+        FLOAT_ADD => {
+            if args.len() != 2 {
+                return float_zero();
+            }
+            let da = symbolic_derivative(&args[0], var_id);
+            let db = symbolic_derivative(&args[1], var_id);
+            simplify_float_add(da, db)
+        }
+        FLOAT_SUB => {
+            if args.len() != 2 {
+                return float_zero();
+            }
+            let da = symbolic_derivative(&args[0], var_id);
+            let db = symbolic_derivative(&args[1], var_id);
+            // d(a - b)/dx = d(a)/dx - d(b)/dx. Express as
+            // float_sub(da, db).
+            simplify_float_sub(da, db)
+        }
+        FLOAT_MUL => {
+            if args.len() != 2 {
+                return float_zero();
+            }
+            let da = symbolic_derivative(&args[0], var_id);
+            let db = symbolic_derivative(&args[1], var_id);
+            let term_1 = simplify_float_mul(da, args[1].clone());
+            let term_2 = simplify_float_mul(args[0].clone(), db);
+            simplify_float_add(term_1, term_2)
+        }
+        FLOAT_NEG => {
+            if args.len() != 1 {
+                return float_zero();
+            }
+            let da = symbolic_derivative(&args[0], var_id);
+            simplify_float_neg(da)
         }
         // Neg: d(-a)/dx = -(da)
         NEG => {
@@ -360,6 +398,142 @@ fn is_int_zero(t: &Term) -> bool {
 
 fn is_int_one(t: &Term) -> bool {
     matches!(t, Term::Number(Value::Int(1)) | Term::Number(Value::Nat(1)))
+}
+
+// ── R18: Float-domain derivative helpers ─────────────────────────
+
+fn float_zero() -> Term {
+    Term::Number(Value::zero_float())
+}
+
+fn float_one() -> Term {
+    Term::Number(Value::from_f64(1.0).unwrap())
+}
+
+fn is_float_zero(t: &Term) -> bool {
+    match t {
+        Term::Number(Value::Float(bits)) => f64::from_bits(*bits) == 0.0,
+        _ => false,
+    }
+}
+
+fn is_float_one(t: &Term) -> bool {
+    match t {
+        Term::Number(Value::Float(bits)) => f64::from_bits(*bits) == 1.0,
+        _ => false,
+    }
+}
+
+fn simplify_float_add(a: Term, b: Term) -> Term {
+    if is_float_zero(&a) || is_int_zero(&a) {
+        return b;
+    }
+    if is_float_zero(&b) || is_int_zero(&b) {
+        return a;
+    }
+    Term::Apply(Box::new(Term::Var(FLOAT_ADD)), vec![a, b])
+}
+
+fn simplify_float_sub(a: Term, b: Term) -> Term {
+    if is_float_zero(&b) || is_int_zero(&b) {
+        return a;
+    }
+    Term::Apply(Box::new(Term::Var(FLOAT_SUB)), vec![a, b])
+}
+
+fn simplify_float_mul(a: Term, b: Term) -> Term {
+    if is_float_zero(&a) || is_float_zero(&b) || is_int_zero(&a) || is_int_zero(&b)
+    {
+        return float_zero();
+    }
+    if is_float_one(&a) || is_int_one(&a) {
+        return b;
+    }
+    if is_float_one(&b) || is_int_one(&b) {
+        return a;
+    }
+    Term::Apply(Box::new(Term::Var(FLOAT_MUL)), vec![a, b])
+}
+
+fn simplify_float_neg(a: Term) -> Term {
+    if is_float_zero(&a) || is_int_zero(&a) {
+        return float_zero();
+    }
+    if let Term::Apply(head, inner) = &a {
+        if let Term::Var(FLOAT_NEG) = head.as_ref() {
+            if inner.len() == 1 {
+                return inner[0].clone();
+            }
+        }
+    }
+    Term::Apply(Box::new(Term::Var(FLOAT_NEG)), vec![a])
+}
+
+/// R18: Float-aware symbolic derivative.
+///
+/// `symbolic_derivative` was designed for Int/Nat expressions and
+/// emits Int(0) / Int(1) constants throughout. For expressions
+/// that use FLOAT_* operators, those Int constants don't mix
+/// cleanly at eval time (cross-domain rejection).
+///
+/// This variant mirrors `symbolic_derivative` but emits Float
+/// constants and uses FLOAT_* operators internally. The caller
+/// chooses which to use based on the expression's domain.
+#[must_use]
+pub fn symbolic_derivative_float(expr: &Term, var_id: u32) -> Term {
+    match expr {
+        Term::Number(_) | Term::Point(_) => float_zero(),
+        Term::Var(v) => {
+            if *v == var_id {
+                float_one()
+            } else {
+                float_zero()
+            }
+        }
+        Term::Apply(head, args) => {
+            let head_id = match head.as_ref() {
+                Term::Var(id) => *id,
+                _ => return float_zero(),
+            };
+            match head_id {
+                FLOAT_ADD => {
+                    if args.len() != 2 {
+                        return float_zero();
+                    }
+                    let da = symbolic_derivative_float(&args[0], var_id);
+                    let db = symbolic_derivative_float(&args[1], var_id);
+                    simplify_float_add(da, db)
+                }
+                FLOAT_SUB => {
+                    if args.len() != 2 {
+                        return float_zero();
+                    }
+                    let da = symbolic_derivative_float(&args[0], var_id);
+                    let db = symbolic_derivative_float(&args[1], var_id);
+                    simplify_float_sub(da, db)
+                }
+                FLOAT_MUL => {
+                    if args.len() != 2 {
+                        return float_zero();
+                    }
+                    let da = symbolic_derivative_float(&args[0], var_id);
+                    let db = symbolic_derivative_float(&args[1], var_id);
+                    let t1 = simplify_float_mul(da, args[1].clone());
+                    let t2 = simplify_float_mul(args[0].clone(), db);
+                    simplify_float_add(t1, t2)
+                }
+                FLOAT_NEG => {
+                    if args.len() != 1 {
+                        return float_zero();
+                    }
+                    let da = symbolic_derivative_float(&args[0], var_id);
+                    simplify_float_neg(da)
+                }
+                _ => float_zero(),
+            }
+        }
+        Term::Fn(_, _) | Term::Symbol(_, _) => float_zero(),
+    }
 }
 
 #[cfg(test)]
@@ -689,6 +863,92 @@ mod tests {
         let g = grad.substitute(100, &int_(3));
         let v_eval = eval(&g, &[], 200).unwrap();
         assert_eq!(v_eval, int_(84));
+    }
+
+    // ── R18: Float-domain autograd proofs ────────────────────────
+
+    fn f(v: f64) -> Term {
+        Term::Number(Value::from_f64(v).unwrap())
+    }
+
+    #[test]
+    fn float_derivative_of_self_is_one() {
+        assert_eq!(symbolic_derivative_float(&var(100), 100), f(1.0));
+    }
+
+    #[test]
+    fn float_derivative_of_constant_is_zero() {
+        assert_eq!(symbolic_derivative_float(&f(3.14), 100), f(0.0));
+    }
+
+    #[test]
+    fn float_sum_rule() {
+        // d(a + b)/da at a=100 = 1
+        let expr = apply(
+            Term::Var(crate::builtin::FLOAT_ADD),
+            vec![var(100), var(101)],
+        );
+        assert_eq!(symbolic_derivative_float(&expr, 100), f(1.0));
+    }
+
+    #[test]
+    fn float_product_rule() {
+        // d(x * y)/dx = y
+        let expr = apply(
+            Term::Var(crate::builtin::FLOAT_MUL),
+            vec![var(100), var(101)],
+        );
+        assert_eq!(symbolic_derivative_float(&expr, 100), var(101));
+    }
+
+    #[test]
+    fn proof_float_autograd_sgd_end_to_end() {
+        // Full training loop proof: use symbolic_derivative_float
+        // to compute the gradient of a loss function, then apply
+        // SGD. Verify convergence.
+        //
+        // Problem: minimize L(w) = (w - target)² via SGD.
+        //   L(w)  = (w - 5.0)²
+        //   L'(w) = 2(w - 5.0)
+        //
+        // We build the loss expression once, derive it once
+        // symbolically, then in each step substitute the current
+        // w and evaluate, apply SGD.
+        use crate::eval::eval;
+        let target_f = 5.0_f64;
+        let lr_f = 0.1_f64;
+
+        // Loss: float_mul(float_sub(w, target), float_sub(w, target))
+        let w_var = var(100);
+        let diff = apply(
+            Term::Var(crate::builtin::FLOAT_SUB),
+            vec![w_var.clone(), f(target_f)],
+        );
+        let loss = apply(
+            Term::Var(crate::builtin::FLOAT_MUL),
+            vec![diff.clone(), diff],
+        );
+
+        // Symbolic gradient.
+        let dloss_dw = symbolic_derivative_float(&loss, 100);
+
+        // Training loop: 50 iterations.
+        let mut w: f64 = 0.0;
+        for _ in 0..50 {
+            // Substitute current w into gradient expression.
+            let g_expr = dloss_dw.substitute(100, &f(w));
+            let g_term = eval(&g_expr, &[], 500).unwrap();
+            let g = g_term.as_float_val().unwrap();
+
+            // SGD update: w = w - lr * g
+            w -= lr_f * g;
+        }
+
+        // Should converge near target.
+        assert!(
+            (w - target_f).abs() < 0.001,
+            "after 50 float-autograd SGD steps, w={w}, target={target_f}"
+        );
     }
 
     #[test]

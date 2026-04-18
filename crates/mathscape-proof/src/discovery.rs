@@ -95,6 +95,10 @@ fn format_term(t: &Term) -> String {
                 .join(",");
             format!("T{s}[{d}]")
         }
+        // R18: Float keyed by bit pattern for exact theorem
+        // identity (0.1 and 0.1 + 0.0 have different bits —
+        // distinct theorems).
+        Term::Number(Value::Float(bits)) => format!("{}f", f64::from_bits(*bits)),
         Term::Apply(f, args) => {
             let fs = format_term(f);
             let ass: Vec<String> = args.iter().map(format_term).collect();

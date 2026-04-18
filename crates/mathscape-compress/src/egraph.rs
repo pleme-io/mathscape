@@ -105,6 +105,11 @@ pub fn term_to_recexpr(term: &Term, expr: &mut RecExpr<MathscapeLang>) -> Id {
             data.hash(&mut h);
             expr.add(MathscapeLang::Num(h.finish()))
         }
+        // R18: Float — same bit-pattern encoding as Value::Float.
+        // Distinct floats hash distinctly; equivalent floats
+        // (same bits) are e-graph-equal. IEEE 754 NaN would be
+        // problematic but kernel never sees NaN.
+        Term::Number(Value::Float(bits)) => expr.add(MathscapeLang::Num(*bits)),
         Term::Var(v) => {
             let id_node = expr.add(MathscapeLang::Num(*v as u64));
             expr.add(MathscapeLang::Var([id_node]))

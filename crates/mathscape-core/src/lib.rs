@@ -46,7 +46,7 @@ pub use epoch::{
     AcceptanceCertificate, Artifact, Candidate, Emitter, Epoch, EpochTrace, Generator,
     InMemoryRegistry, Prover, Registry, Rejection, RuleEmitter, Verdict,
 };
-pub use autograd::symbolic_derivative;
+pub use autograd::{symbolic_derivative, symbolic_derivative_float};
 pub use optimizer::{sgd_step_int, sgd_step_tensor};
 pub use bettyfine::{bettyfine_library, standard_bettyfine_cardinality, OperatorSpec};
 pub use event::{Event, EventCategory, StatusAdvance};

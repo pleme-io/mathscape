@@ -3905,6 +3905,7 @@ fn format_term(t: &mathscape_core::term::Term) -> String {
                 data.iter().map(|x| x.to_string()).collect::<Vec<_>>().join(",")
             )
         }
+        Term::Number(Value::Float(bits)) => format!("{}f", f64::from_bits(*bits)),
         Term::Apply(f, args) => {
             let f_str = format_term(f);
             let args_str: Vec<String> = args.iter().map(format_term).collect();

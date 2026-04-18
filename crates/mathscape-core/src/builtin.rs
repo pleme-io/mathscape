@@ -82,6 +82,19 @@ pub const TENSOR_MATMUL: u32 = 26;
 pub const TENSOR_TRANSPOSE: u32 = 27;
 pub const TENSOR_RESHAPE: u32 = 28;
 
+// Float domain (30..=36) — R18 (2026-04-18). IEEE 754 doubles
+// enable real gradient descent convergence. All eval rules
+// reject non-Float args; overflow/underflow to non-finite
+// returns None (preserves kernel "true" invariant — non-finite
+// is not a valid value).
+pub const FLOAT_ZERO: u32 = 30;
+pub const FLOAT_ADD: u32 = 31;
+pub const FLOAT_MUL: u32 = 32;
+pub const FLOAT_NEG: u32 = 33;
+pub const FLOAT_DIV: u32 = 34;
+pub const FLOAT_FROM_INT: u32 = 35;
+pub const FLOAT_SUB: u32 = 36;
+
 /// A builtin operator — the atomic primitives the evaluator knows
 /// how to reduce directly. Fields are the declaration; `eval` is
 /// the reduction rule.
@@ -358,6 +371,76 @@ fn eval_tensor_transpose(args: &[Term]) -> Option<Term> {
     }))
 }
 
+// ── R18 (2026-04-18): Float-domain eval rules ─────────────────────
+
+fn eval_float_zero(_args: &[Term]) -> Option<Term> {
+    Some(Term::Number(Value::zero_float()))
+}
+
+fn eval_float_add(args: &[Term]) -> Option<Term> {
+    if args.len() != 2 {
+        return None;
+    }
+    let a = args[0].as_float_val()?;
+    let b = args[1].as_float_val()?;
+    Value::from_f64(a + b).map(Term::Number)
+}
+
+fn eval_float_mul(args: &[Term]) -> Option<Term> {
+    if args.len() != 2 {
+        return None;
+    }
+    let a = args[0].as_float_val()?;
+    let b = args[1].as_float_val()?;
+    Value::from_f64(a * b).map(Term::Number)
+}
+
+fn eval_float_sub(args: &[Term]) -> Option<Term> {
+    if args.len() != 2 {
+        return None;
+    }
+    let a = args[0].as_float_val()?;
+    let b = args[1].as_float_val()?;
+    Value::from_f64(a - b).map(Term::Number)
+}
+
+fn eval_float_neg(args: &[Term]) -> Option<Term> {
+    if args.len() != 1 {
+        return None;
+    }
+    let a = args[0].as_float_val()?;
+    Value::from_f64(-a).map(Term::Number)
+}
+
+fn eval_float_div(args: &[Term]) -> Option<Term> {
+    if args.len() != 2 {
+        return None;
+    }
+    let a = args[0].as_float_val()?;
+    let b = args[1].as_float_val()?;
+    // Division by zero → non-finite → None (kernel "true"
+    // invariant). This is the right behavior: the caller must
+    // discover a "reciprocal of non-zero" precondition rule
+    // rather than the kernel silently producing Inf.
+    if b == 0.0 {
+        return None;
+    }
+    Value::from_f64(a / b).map(Term::Number)
+}
+
+fn eval_float_from_int(args: &[Term]) -> Option<Term> {
+    // Promote Int → Float. Distinct operator rather than
+    // implicit so cross-domain conversion is always visible.
+    if args.len() != 1 {
+        return None;
+    }
+    let i = match &args[0] {
+        Term::Number(Value::Int(n)) => *n,
+        _ => return None,
+    };
+    Value::from_f64(i as f64).map(Term::Number)
+}
+
 fn eval_tensor_reshape(args: &[Term]) -> Option<Term> {
     // Reshape T to a new shape. Second arg is a 1D tensor whose
     // elements (as usize) are the new dims. Rejects on numel
@@ -583,6 +666,66 @@ pub const BUILTINS: &[Builtin] = &[
         commutative: false,
         associative: false,
         eval: eval_tensor_reshape,
+    },
+    // R18: Float domain (ids 30..=36). Enables real-valued
+    // gradient descent. All operations are element-disjoint from
+    // Nat/Int/Tensor — cross-domain eval rejects.
+    Builtin {
+        id: 30,
+        name: "float_zero",
+        arity: 0,
+        commutative: false,
+        associative: false,
+        eval: eval_float_zero,
+    },
+    Builtin {
+        id: 31,
+        name: "float_add",
+        arity: 2,
+        commutative: true,
+        associative: true,
+        eval: eval_float_add,
+    },
+    Builtin {
+        id: 32,
+        name: "float_mul",
+        arity: 2,
+        commutative: true,
+        associative: true,
+        eval: eval_float_mul,
+    },
+    Builtin {
+        id: 33,
+        name: "float_neg",
+        arity: 1,
+        commutative: false,
+        associative: false,
+        eval: eval_float_neg,
+    },
+    Builtin {
+        id: 34,
+        name: "float_div",
+        arity: 2,
+        // Division is NOT commutative (a/b != b/a in general).
+        commutative: false,
+        associative: false,
+        eval: eval_float_div,
+    },
+    Builtin {
+        id: 35,
+        name: "float_from_int",
+        arity: 1,
+        commutative: false,
+        associative: false,
+        eval: eval_float_from_int,
+    },
+    Builtin {
+        id: 36,
+        name: "float_sub",
+        arity: 2,
+        commutative: false,
+        associative: false,
+        eval: eval_float_sub,
     },
 ];
 
@@ -1195,6 +1338,141 @@ mod tests {
         );
         let result = eval(&layer_out, &[], 100).unwrap();
         assert_eq!(result, t(vec![2, 1], vec![24, 52]));
+    }
+
+    // ── R18: Float-domain tests ──────────────────────────────────
+
+    fn f(v: f64) -> Term {
+        Term::Number(Value::from_f64(v).unwrap())
+    }
+
+    #[test]
+    fn float_builtins_registered() {
+        assert_eq!(lookup(FLOAT_ADD).unwrap().name, "float_add");
+        assert_eq!(lookup(FLOAT_MUL).unwrap().name, "float_mul");
+        assert_eq!(lookup(FLOAT_DIV).unwrap().name, "float_div");
+        assert_eq!(lookup(FLOAT_SUB).unwrap().name, "float_sub");
+    }
+
+    #[test]
+    fn float_add_basic() {
+        let r = eval_float_add(&[f(1.5), f(2.5)]).unwrap();
+        assert_eq!(r, f(4.0));
+    }
+
+    #[test]
+    fn float_mul_basic() {
+        let r = eval_float_mul(&[f(2.5), f(4.0)]).unwrap();
+        assert_eq!(r, f(10.0));
+    }
+
+    #[test]
+    fn float_sub_basic() {
+        let r = eval_float_sub(&[f(10.0), f(3.5)]).unwrap();
+        assert_eq!(r, f(6.5));
+    }
+
+    #[test]
+    fn float_div_basic() {
+        let r = eval_float_div(&[f(10.0), f(4.0)]).unwrap();
+        assert_eq!(r, f(2.5));
+    }
+
+    #[test]
+    fn float_div_by_zero_returns_none() {
+        let r = eval_float_div(&[f(1.0), f(0.0)]);
+        assert!(r.is_none(), "division by zero must not silently produce Inf");
+    }
+
+    #[test]
+    fn float_overflow_rejects() {
+        // Max × 2 overflows to Inf — must reject.
+        let r = eval_float_mul(&[f(f64::MAX), f(2.0)]);
+        assert!(r.is_none(), "overflow must not silently produce Inf");
+    }
+
+    #[test]
+    fn float_from_int_promotes() {
+        let r = eval_float_from_int(&[Term::Number(Value::Int(42))]).unwrap();
+        assert_eq!(r, f(42.0));
+    }
+
+    #[test]
+    fn float_neg_flips_sign() {
+        let r = eval_float_neg(&[f(3.14)]).unwrap();
+        assert_eq!(r, f(-3.14));
+    }
+
+    #[test]
+    fn float_ops_reject_int_input() {
+        // Cross-domain guard: Float builtins must reject Int args.
+        assert!(eval_float_add(&[Term::Number(Value::Int(1)), Term::Number(Value::Int(2))])
+            .is_none());
+    }
+
+    #[test]
+    fn nat_add_rejects_float_input() {
+        // Symmetric: Nat add rejects Float.
+        assert!(eval_add(&[f(1.0), f(2.0)]).is_none());
+    }
+
+    // ── PROOF: gradient descent converges with floats ────────────
+
+    #[test]
+    fn proof_float_gradient_descent_converges() {
+        // Problem: find w such that w = target = 7.0.
+        // Loss: L(w) = (w - target)². dL/dw = 2(w - target).
+        // With lr = 0.1, update: w_new = w - lr * 2 * (w - target).
+        //
+        // Starting w = 0.0, target = 7.0.
+        // After 1 step: w = 0 - 0.1 * 2 * (-7) = 1.4
+        // After 2 steps: w = 1.4 - 0.1 * 2 * (-5.6) = 1.4 + 1.12 = 2.52
+        // ... convergence toward 7.
+        //
+        // Run 50 steps and verify we're close to 7.
+        use crate::eval::eval;
+        let target: f64 = 7.0;
+        let lr: f64 = 0.1;
+        let mut w: f64 = 0.0;
+        for _ in 0..50 {
+            // Construct gradient expression: 2 * (w - target).
+            // Actually easier to compute directly since w is just
+            // a value — we're proving the KERNEL eval does it
+            // right, not the autograd.
+            let grad_expr = Term::Apply(
+                Box::new(Term::Var(FLOAT_MUL)),
+                vec![
+                    f(2.0),
+                    Term::Apply(
+                        Box::new(Term::Var(FLOAT_SUB)),
+                        vec![f(w), f(target)],
+                    ),
+                ],
+            );
+            let grad_term = eval(&grad_expr, &[], 100).unwrap();
+            let grad = grad_term.as_float_val().unwrap();
+
+            // Apply SGD step: w = w - lr * grad
+            let step_expr = Term::Apply(
+                Box::new(Term::Var(FLOAT_SUB)),
+                vec![
+                    f(w),
+                    Term::Apply(
+                        Box::new(Term::Var(FLOAT_MUL)),
+                        vec![f(lr), f(grad)],
+                    ),
+                ],
+            );
+            let step_term = eval(&step_expr, &[], 100).unwrap();
+            w = step_term.as_float_val().unwrap();
+        }
+        // After 50 steps with lr=0.1, the convergence rate
+        // (1 - 0.2)^50 ~ 1.4e-5, so we're within ~0.0001 of target.
+        assert!(
+            (w - target).abs() < 0.001,
+            "after 50 SGD steps, w={w}, target={target}, |diff|={}",
+            (w - target).abs()
+        );
     }
 
     #[test]

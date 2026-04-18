@@ -35,11 +35,26 @@ pub enum Value {
     /// maintained by constructor helpers in `impl Value` below;
     /// direct field construction can break it (avoid).
     ///
-    /// Integer-only for now: avoids floating-point NaN/ordering
-    /// complexity. Future extension to Float(f64) data requires a
-    /// new variant since Value derives Eq/Ord/Hash and f64
-    /// doesn't satisfy those.
+    /// Integer-only: avoids floating-point NaN/ordering
+    /// complexity. Float tensors are a future extension (would
+    /// require bit-encoded storage like Value::Float below).
     Tensor { shape: Vec<usize>, data: Vec<i64> },
+    /// R18 (2026-04-18): IEEE 754 double-precision float stored
+    /// as bit pattern (u64). Bit-level storage preserves the
+    /// derive(Eq, Ord, Hash) chain — comparing floats by bit
+    /// pattern makes `Float(0.0)` distinct from `Float(-0.0)` and
+    /// `Float(f64::NAN)` bit-equal to itself (which IEEE 754 says
+    /// is FALSE, but our kernel never sees NaN anyway —
+    /// `Value::from_f64` rejects non-finite values).
+    ///
+    /// Why not `f64` direct: `f64: !Eq` because NaN != NaN. The
+    /// Value enum depends on Eq / Ord / Hash for hash-consing,
+    /// canonical sort, and pattern matching. Bit storage is the
+    /// clean workaround.
+    ///
+    /// Construction: `Value::from_f64(f)` — returns None on NaN
+    /// or Inf. Access: `value.as_float()` — converts back to f64.
+    Float(u64),
 }
 
 impl Value {
@@ -60,7 +75,7 @@ impl Value {
         Value::Nat(0)
     }
 
-    /// Successor — defined for both Nat and Int. Maps each value
+    /// Successor — defined for Nat, Int, Float. Maps each value
     /// to its +1 in its own domain. Undefined for Tensor (caller
     /// gets identity — no increment semantics on a multi-element
     /// container).
@@ -68,12 +83,23 @@ impl Value {
         match self {
             Value::Nat(n) => Value::Nat(n + 1),
             Value::Int(n) => Value::Int(n + 1),
+            Value::Float(bits) => {
+                let f = f64::from_bits(*bits);
+                let next = f + 1.0;
+                // Guard finite — overflow to Inf drops us out of
+                // the kernel invariant. Return self as a no-op.
+                if next.is_finite() {
+                    Value::Float(next.to_bits())
+                } else {
+                    self.clone()
+                }
+            }
             Value::Tensor { .. } => self.clone(),
         }
     }
 
-    /// Negation — defined for Int and Tensor (element-wise). Nat has
-    /// no negatives; caller gets `None` for Nat input.
+    /// Negation — defined for Int, Float, Tensor (element-wise).
+    /// Nat has no negatives; caller gets `None` for Nat input.
     pub fn neg(&self) -> Option<Self> {
         match self {
             Value::Nat(_) => None,
@@ -82,6 +108,10 @@ impl Value {
                 shape: shape.clone(),
                 data: data.iter().map(|x| -x).collect(),
             }),
+            Value::Float(bits) => {
+                let f = f64::from_bits(*bits);
+                Value::from_f64(-f)
+            }
         }
     }
 
@@ -117,6 +147,7 @@ impl Value {
             (Value::Nat(_), Value::Nat(_))
                 | (Value::Int(_), Value::Int(_))
                 | (Value::Tensor { .. }, Value::Tensor { .. })
+                | (Value::Float(_), Value::Float(_))
         )
     }
 
@@ -156,6 +187,32 @@ impl Value {
     pub fn tensor_numel(&self) -> Option<usize> {
         self.as_tensor().map(|(_, d)| d.len())
     }
+
+    // ── R18 Float constructors and accessors ─────────────────────
+
+    /// Construct a Float from an f64. Returns None for NaN or
+    /// Inf — the kernel enforces finite arithmetic so non-finite
+    /// values never reach rule matching or canonical forms.
+    pub fn from_f64(f: f64) -> Option<Self> {
+        if f.is_finite() {
+            Some(Value::Float(f.to_bits()))
+        } else {
+            None
+        }
+    }
+
+    /// Float zero — the additive identity for Float.
+    pub fn zero_float() -> Self {
+        Value::Float(0.0_f64.to_bits())
+    }
+
+    /// View as f64; None if this is not a Float.
+    pub fn as_float(&self) -> Option<f64> {
+        match self {
+            Value::Float(bits) => Some(f64::from_bits(*bits)),
+            _ => None,
+        }
+    }
 }
 
 impl fmt::Display for Value {
@@ -186,6 +243,13 @@ impl fmt::Display for Value {
                     .collect::<Vec<_>>()
                     .join(" ");
                 write!(f, "T<{shape_str}>[{data_str}]")
+            }
+            // R18: Float renders with 'f' suffix to distinguish
+            // from Int/Nat in display output. `3f` is Float(3.0);
+            // plain `3` is Nat(3). Negative handled inline.
+            Value::Float(bits) => {
+                let v = f64::from_bits(*bits);
+                write!(f, "{v}f")
             }
         }
     }

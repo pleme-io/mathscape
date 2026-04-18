@@ -160,6 +160,15 @@ impl Term {
         }
     }
 
+    /// R18: view as f64 if this Term is Number(Float). Wraps the
+    /// Value's bit-encoded float transparently.
+    pub fn as_float_val(&self) -> Option<f64> {
+        match self {
+            Term::Number(v) => v.as_float(),
+            _ => None,
+        }
+    }
+
     /// Collect all free variables in the term.
     pub fn free_vars(&self) -> std::collections::HashSet<u32> {
         let mut vars = std::collections::HashSet::new();
