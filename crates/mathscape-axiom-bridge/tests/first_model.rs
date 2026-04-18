@@ -124,6 +124,10 @@ fn produce_m0() -> mathscape_core::bootstrap::BootstrapOutcome {
 /// R35: same as `produce_m0` but also returns the per-iteration
 /// extract-layer stats (one LawGenStats per iteration). Used by
 /// the inspection test to render the extract breakdown.
+///
+/// Uses `run_with_dedup` (full 5 iterations) to preserve the
+/// baseline M0 attestation. The R37 early-stop variant lives in
+/// the dedicated `m0_under_early_stop_is_same_outcome` test.
 fn produce_m0_with_extract_stats() -> (
     mathscape_core::bootstrap::BootstrapOutcome,
     Vec<LawGenStats>,
@@ -132,7 +136,7 @@ fn produce_m0_with_extract_stats() -> (
         DefaultCorpusGenerator,
         DerivedLawsExtractor::new(300, 2),
         DefaultModelUpdater::default(),
-        5, // 5 iterations — enough to see post-saturation stability
+        5, // 5 iterations — preserves baseline attestation
     );
     let outcome = cycle.run_with_dedup(
         Vec::new(),
@@ -435,6 +439,7 @@ fn m0_is_producible_from_a_lisp_recipe() {
         n_iterations: 3,
         seed_library: Vec::new(),
         seed_policy: LinearPolicy::tensor_seeking_prior(),
+        early_stop_after_stable: None,
     };
 
     // Convert spec → Sexp (produce the Lisp recipe).
@@ -489,6 +494,7 @@ fn m0_through_mn_from_a_lisp_scenario() {
         n_iterations: 2,
         seed_library: Vec::new(),
         seed_policy: LinearPolicy::tensor_seeking_prior(),
+        early_stop_after_stable: None,
     };
 
     let scenario = ExperimentScenario {
@@ -539,5 +545,93 @@ fn m0_through_mn_from_a_lisp_scenario() {
     assert_eq!(*outcome.final_model(), reloaded);
     println!(
         "\n── Final model (M3) ─ Sexp round-trip verified ──────"
+    );
+}
+
+#[test]
+fn m0_under_early_stop_produces_same_library_fewer_iterations() {
+    // R37 efficiency demo: running the exact same cycle under
+    // `run_until_stable(..., window=1)` instead of `run_with_dedup`
+    // produces THE SAME final library in FEWER iterations. The
+    // extract phase is the dominant cost, and R37 eliminates
+    // post-plateau iterations that don't change the library.
+    //
+    // This is the first real efficiency win under the 2026-04-18
+    // framing ("make the model exist and train more efficiently").
+    // Baseline: 5 iterations × ~950µs extract/iter ≈ 4.7 ms.
+    // R37:     2-3 iterations × ~950µs extract/iter ≈ 1.9-2.9 ms.
+    // Speedup: ~1.5-2x on the M0 default corpus.
+    use std::time::Instant;
+
+    // Baseline: full 5 iterations.
+    let t_baseline = Instant::now();
+    let baseline = BootstrapCycle::new(
+        DefaultCorpusGenerator,
+        DerivedLawsExtractor::new(300, 2),
+        DefaultModelUpdater::default(),
+        5,
+    )
+    .run_with_dedup(
+        Vec::new(),
+        LinearPolicy::tensor_seeking_prior(),
+        &CanonicalDeduper,
+    );
+    let baseline_elapsed = t_baseline.elapsed();
+
+    // R37: early-stop after 1 consecutive no-growth iteration.
+    let t_early = Instant::now();
+    let early = BootstrapCycle::new(
+        DefaultCorpusGenerator,
+        DerivedLawsExtractor::new(300, 2),
+        DefaultModelUpdater::default(),
+        5, // same upper bound; the early-stop should cut it short
+    )
+    .run_until_stable(
+        Vec::new(),
+        LinearPolicy::tensor_seeking_prior(),
+        &CanonicalDeduper,
+        1,
+    );
+    let early_elapsed = t_early.elapsed();
+
+    println!("\n── R37 EARLY-STOP EFFICIENCY DEMO ─────────────────────");
+    println!(
+        "  baseline (5 iters)     : {:>8.3} ms, library size = {}",
+        baseline_elapsed.as_secs_f64() * 1000.0,
+        baseline.final_library.len(),
+    );
+    println!(
+        "  early-stop (window=1)  : {:>8.3} ms, library size = {}",
+        early_elapsed.as_secs_f64() * 1000.0,
+        early.final_library.len(),
+    );
+    println!(
+        "  iterations ran         : baseline={}  early-stop={}",
+        baseline.iterations.len(),
+        early.iterations.len(),
+    );
+    let speedup = baseline_elapsed.as_secs_f64() / early_elapsed.as_secs_f64();
+    println!("  wall-clock speedup     : {speedup:>5.2}x");
+
+    // R37 invariant: the final libraries must match — early-stop
+    // doesn't discover fewer rules, it just stops redundant work.
+    assert_eq!(
+        baseline.final_library.len(),
+        early.final_library.len(),
+        "early-stop must produce the same library as the full run"
+    );
+    for (b, e) in baseline
+        .final_library
+        .iter()
+        .zip(early.final_library.iter())
+    {
+        assert_eq!(b.lhs, e.lhs, "same LHS by position");
+        assert_eq!(b.rhs, e.rhs, "same RHS by position");
+    }
+
+    // Efficiency invariant: early-stop ran strictly fewer iterations.
+    assert!(
+        early.iterations.len() < baseline.iterations.len(),
+        "early-stop must run fewer iterations on a plateau-reaching workload"
     );
 }

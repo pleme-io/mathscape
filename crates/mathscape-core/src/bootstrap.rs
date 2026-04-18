@@ -345,6 +345,13 @@ pub struct BootstrapCycleSpec {
     /// Seed policy. Built-in default helpers: see
     /// `LinearPolicy::{new, tensor_seeking_prior}`.
     pub seed_policy: LinearPolicy,
+    /// R37: optional early-stop. `Some(W)` → stop when the
+    /// library has not grown for `W` consecutive iterations.
+    /// `None` → always run `n_iterations`. Default (via
+    /// `BootstrapCycleSpec::default_m0`) is None to preserve
+    /// backwards-compatible behavior.
+    #[serde(default)]
+    pub early_stop_after_stable: Option<usize>,
 }
 
 impl BootstrapCycleSpec {
@@ -360,6 +367,7 @@ impl BootstrapCycleSpec {
             n_iterations: 5,
             seed_library: Vec::new(),
             seed_policy: LinearPolicy::tensor_seeking_prior(),
+            early_stop_after_stable: None,
         }
     }
 }
@@ -475,10 +483,15 @@ pub fn execute_spec_core(
     // extractor × 2 corpus × 2 updater × 4 deduper = 16 branches.
     // Axiom-bridge's executor adds the rich law extractor and
     // richer corpora.
+    let early_stop = spec.early_stop_after_stable;
     macro_rules! run {
         ($cg:expr, $ex:expr, $up:expr, $dd:expr) => {{
             let cycle = BootstrapCycle::new($cg, $ex, $up, n);
-            cycle.run_with_dedup(seed_lib, seed_pol, $dd)
+            if let Some(w) = early_stop {
+                cycle.run_until_stable(seed_lib, seed_pol, $dd, w)
+            } else {
+                cycle.run_with_dedup(seed_lib, seed_pol, $dd)
+            }
         }};
     }
     macro_rules! run_all_dedup {
@@ -855,11 +868,50 @@ where
     /// in `new_law_count` — that's what the extractor proposed.
     /// The `features_after` reflects the post-dedup library,
     /// which is what future iterations see.
+    /// R37: variant that short-circuits when the library has not
+    /// grown for `stable_window` consecutive iterations. Returns
+    /// early with whatever iterations have completed; the
+    /// trajectory and iteration snapshots reflect only the
+    /// completed iterations (NOT `n_iterations`), so the outcome
+    /// reports the *real* work done.
+    ///
+    /// Use when the default extractor reliably saturates — the
+    /// M0 default corpus discovers 3 rules in iter 0 then adds 0
+    /// in iters 1-N. Calling `run_until_stable(..., 1)` cuts the
+    /// cycle from 5 iterations to 2 (iter 0 produces rules; iter
+    /// 1 confirms plateau → stop).
+    ///
+    /// `stable_window = 0` is meaningless (would stop after
+    /// iteration 0 regardless of growth); it's coerced to 1.
+    pub fn run_until_stable<D: LibraryDeduper>(
+        &self,
+        seed_library: Vec<RewriteRule>,
+        seed_policy: LinearPolicy,
+        deduper: &D,
+        stable_window: usize,
+    ) -> BootstrapOutcome {
+        let stable_window = stable_window.max(1);
+        self.run_impl(seed_library, seed_policy, deduper, Some(stable_window))
+    }
+
     pub fn run_with_dedup<D: LibraryDeduper>(
         &self,
         seed_library: Vec<RewriteRule>,
         seed_policy: LinearPolicy,
         deduper: &D,
+    ) -> BootstrapOutcome {
+        self.run_impl(seed_library, seed_policy, deduper, None)
+    }
+
+    /// Shared implementation. `early_stop_after` = None → run all
+    /// `n_iterations`. Some(W) → stop when the library has not
+    /// grown for W consecutive iterations.
+    fn run_impl<D: LibraryDeduper>(
+        &self,
+        seed_library: Vec<RewriteRule>,
+        seed_policy: LinearPolicy,
+        deduper: &D,
+        early_stop_after: Option<usize>,
     ) -> BootstrapOutcome {
         let cycle_start = Instant::now();
         let mut library = seed_library;
@@ -867,6 +919,7 @@ where
         let mut trajectory = Trajectory::new();
         let mut iterations: Vec<IterationSnapshot> = Vec::new();
         let mut per_iter_timings: Vec<IterationTimings> = Vec::new();
+        let mut consecutive_no_growth: usize = 0;
 
         for iter in 0..self.n_iterations {
             let t_corpus = Instant::now();
@@ -919,6 +972,21 @@ where
                 extract_ns,
                 dedup_ns,
             });
+
+            // R37: track consecutive no-growth iterations. When
+            // `early_stop_after = Some(W)` and we've hit W in a
+            // row, stop early — further iterations won't change
+            // the library if nothing's proposed anything new.
+            if accepted_laws.is_empty() {
+                consecutive_no_growth += 1;
+            } else {
+                consecutive_no_growth = 0;
+            }
+            if let Some(window) = early_stop_after {
+                if consecutive_no_growth >= window {
+                    break;
+                }
+            }
         }
 
         trajectory.finalize(LibraryFeatures::extract(&library));
@@ -1592,6 +1660,7 @@ mod tests {
             n_iterations: 3,
             seed_library: Vec::new(),
             seed_policy: LinearPolicy::tensor_seeking_prior(),
+            early_stop_after_stable: None,
         };
         let scenario = ExperimentScenario {
             name: "one-phase".into(),
@@ -1625,6 +1694,7 @@ mod tests {
             n_iterations: 2,
             seed_library: Vec::new(),
             seed_policy: LinearPolicy::tensor_seeking_prior(),
+            early_stop_after_stable: None,
         };
         let scenario = ExperimentScenario {
             name: "two-phase".into(),
@@ -1650,6 +1720,7 @@ mod tests {
             n_iterations: 1,
             seed_library: Vec::new(),
             seed_policy: LinearPolicy::new(),
+            early_stop_after_stable: None,
         };
         let scenario = ExperimentScenario {
             name: "det".into(),
@@ -1670,6 +1741,7 @@ mod tests {
             n_iterations: 1,
             seed_library: vec![dummy_law()],
             seed_policy: LinearPolicy::new(),
+            early_stop_after_stable: None,
         };
         let scenario = ExperimentScenario {
             name: "growth".into(),
@@ -1691,6 +1763,7 @@ mod tests {
             n_iterations: 1,
             seed_library: Vec::new(),
             seed_policy: LinearPolicy::new(),
+            early_stop_after_stable: None,
         };
         let scenario = ExperimentScenario {
             name: "bad".into(),
@@ -1866,6 +1939,7 @@ mod tests {
             n_iterations: 2,
             seed_library: Vec::new(),
             seed_policy: LinearPolicy::new(),
+            early_stop_after_stable: None,
         };
         let scenario = ExperimentScenario {
             name: "timing".into(),
@@ -1897,6 +1971,7 @@ mod tests {
             n_iterations: 1,
             seed_library: Vec::new(),
             seed_policy: LinearPolicy::new(),
+            early_stop_after_stable: None,
         };
         let scenario = ExperimentScenario {
             name: "attn".into(),
@@ -1905,6 +1980,115 @@ mod tests {
         let a = execute_scenario_core(&scenario).unwrap();
         let b = execute_scenario_core(&scenario).unwrap();
         assert_eq!(a.chain_attestation, b.chain_attestation);
+    }
+
+    // ── R37: early-stop on plateau tests ─────────────────────────
+
+    #[test]
+    fn run_until_stable_short_circuits_on_plateau() {
+        // FixedLawExtractor emits the law only once (first call).
+        // With CanonicalDeduper + stable_window=1, the second
+        // iteration adds 0 rules → stop. Total iterations = 2.
+        let cycle = BootstrapCycle::new(
+            NullCorpusGenerator,
+            FixedLawExtractor { law: dummy_law() },
+            NullModelUpdater,
+            100, // request 100 iters — we should stop WAY before that
+        );
+        let outcome = cycle.run_until_stable(
+            Vec::new(),
+            LinearPolicy::new(),
+            &CanonicalDeduper,
+            1,
+        );
+        assert_eq!(
+            outcome.iterations.len(),
+            2,
+            "iter 0 accepts, iter 1 plateaus → stop after 2"
+        );
+        assert_eq!(outcome.final_library.len(), 1);
+        // Trajectory steps match iterations (not n_iterations).
+        assert_eq!(outcome.trajectory.steps.len(), 2);
+    }
+
+    #[test]
+    fn run_until_stable_respects_wider_window() {
+        // With stable_window=3, we need 3 consecutive no-growth
+        // iterations to stop. FixedLawExtractor: iter 0 accepts,
+        // iter 1 no-growth, iter 2 no-growth, iter 3 no-growth →
+        // stop after 4 iterations.
+        let cycle = BootstrapCycle::new(
+            NullCorpusGenerator,
+            FixedLawExtractor { law: dummy_law() },
+            NullModelUpdater,
+            100,
+        );
+        let outcome = cycle.run_until_stable(
+            Vec::new(),
+            LinearPolicy::new(),
+            &CanonicalDeduper,
+            3,
+        );
+        assert_eq!(outcome.iterations.len(), 4);
+    }
+
+    #[test]
+    fn run_until_stable_reaches_n_iterations_when_always_growing() {
+        // If the extractor keeps producing NEW laws every iter,
+        // the plateau is never reached and we run all N.
+        struct GrowingExtractor {
+            counter: std::cell::Cell<u32>,
+        }
+        impl LawExtractor for GrowingExtractor {
+            fn extract(&self, _: &[Term], _: &[RewriteRule]) -> Vec<RewriteRule> {
+                let id = self.counter.get();
+                self.counter.set(id + 1);
+                vec![RewriteRule {
+                    name: format!("grow-{id}"),
+                    lhs: Term::Var(1000 + id),
+                    rhs: Term::Var(1000 + id),
+                }]
+            }
+        }
+        let cycle = BootstrapCycle::new(
+            NullCorpusGenerator,
+            GrowingExtractor {
+                counter: std::cell::Cell::new(0),
+            },
+            NullModelUpdater,
+            5,
+        );
+        // Even with short stable_window=1, the library grows every
+        // iter — we never hit the plateau.
+        let outcome = cycle.run_until_stable(
+            Vec::new(),
+            LinearPolicy::new(),
+            &NoDedup,
+            1,
+        );
+        assert_eq!(outcome.iterations.len(), 5);
+    }
+
+    #[test]
+    fn early_stop_via_bootstrap_cycle_spec_sexp_bridge() {
+        // R32+R33+R37 integration: author a spec with early_stop,
+        // execute via the core executor, get back shortened
+        // trajectory.
+        let spec = BootstrapCycleSpec {
+            corpus_generator: "null".into(),
+            law_extractor: "null".into(),
+            model_updater: "null".into(),
+            deduper: "canonical".into(),
+            n_iterations: 100,
+            seed_library: Vec::new(),
+            seed_policy: LinearPolicy::new(),
+            early_stop_after_stable: Some(1),
+        };
+        let outcome = execute_spec_core(&spec).unwrap();
+        // NullExtractor produces nothing → iter 0 is already a
+        // no-growth iteration → stop after iter 0.
+        assert_eq!(outcome.iterations.len(), 1);
+        assert!(outcome.final_library.is_empty());
     }
 
     #[test]

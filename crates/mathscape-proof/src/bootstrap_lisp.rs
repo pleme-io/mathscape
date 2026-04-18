@@ -69,6 +69,13 @@ pub fn spec_to_sexp(spec: &BootstrapCycleSpec) -> Sexp {
     ));
     items.push(Sexp::keyword("seed-policy"));
     items.push(policy_to_sexp(&spec.seed_policy));
+    // R37: early-stop window. Omitted from the Sexp when None to
+    // keep existing recipes backward-compatible; emitted as an
+    // integer keyword when Some(W).
+    if let Some(w) = spec.early_stop_after_stable {
+        items.push(Sexp::keyword("early-stop-after-stable"));
+        items.push(Sexp::int(w as i64));
+    }
     Sexp::List(items)
 }
 
@@ -102,6 +109,10 @@ pub fn spec_from_sexp(sexp: &Sexp) -> Option<BootstrapCycleSpec> {
         seed_policy: fields
             .get("seed-policy")
             .and_then(policy_from_sexp)?,
+        // R37: optional; absent means None (backward-compatible).
+        early_stop_after_stable: fields
+            .get_int("early-stop-after-stable")
+            .map(|n| n as usize),
     })
 }
 
