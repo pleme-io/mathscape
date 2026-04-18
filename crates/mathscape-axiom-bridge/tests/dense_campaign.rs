@@ -28,6 +28,9 @@ mod common;
 use common::experiment::{format_term, run_probe_fast, CorpusFamily};
 use mathscape_compress::extract::ExtractConfig;
 use mathscape_core::eval::{anonymize_term, RewriteRule};
+use mathscape_proof::semantic::{
+    discover_semantic_projections, CandidateKind, SemanticVerdict, ValidationConfig,
+};
 use rayon::prelude::*;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::Mutex;
@@ -112,6 +115,11 @@ struct Provenance {
     ec_names: BTreeSet<&'static str>,
     budgets: BTreeSet<usize>,
     depths: BTreeSet<usize>,
+    /// One anonymized exemplar of the rule. Used for semantic
+    /// validation — phase J tests whether this rule denotes a
+    /// concrete equation by sampling LHS/RHS with primitive
+    /// evaluation.
+    exemplar: Option<RewriteRule>,
 }
 
 fn xorshift(mut x: u64) -> u64 {
@@ -132,8 +140,24 @@ fn rule_key(r: &RewriteRule) -> String {
     )
 }
 
-/// Run a single probe. Deterministic given `iter`.
-fn run_probe(iter: u64) -> (Vec<(String, &'static str, &'static str, &'static str, usize, usize)>, bool) {
+/// Run a single probe. Deterministic given `iter`. Returns for
+/// each discovered rule: (key, anonymized rule, apparatus, corpus,
+/// ec label, budget, depth). The anonymized rule is kept so the
+/// post-sweep semantic-validation pass can test it.
+fn run_probe(
+    iter: u64,
+) -> (
+    Vec<(
+        String,
+        RewriteRule,
+        &'static str,
+        &'static str,
+        &'static str,
+        usize,
+        usize,
+    )>,
+    bool,
+) {
     let mut r = xorshift(iter.wrapping_mul(2654435761));
     let (ap_label, ap_src) = APPARATUSES[(r as usize) % APPARATUSES.len()];
     r = xorshift(r);
@@ -156,7 +180,22 @@ fn run_probe(iter: u64) -> (Vec<(String, &'static str, &'static str, &'static st
     let barren = rules.is_empty();
     let out: Vec<_> = rules
         .iter()
-        .map(|rule| (rule_key(rule), ap_label, corp_label, ec_label, budget, depth))
+        .map(|rule| {
+            let anon = RewriteRule {
+                name: rule.name.clone(),
+                lhs: anonymize_term(&rule.lhs),
+                rhs: anonymize_term(&rule.rhs),
+            };
+            (
+                rule_key(rule),
+                anon,
+                ap_label,
+                corp_label,
+                ec_label,
+                budget,
+                depth,
+            )
+        })
         .collect();
     (out, barren)
 }
@@ -214,7 +253,7 @@ fn dense_campaign() {
             if barren {
                 local_barren += 1;
             }
-            if let Some((_, ap_label, corp_label, _, _, _)) = rules.first() {
+            if let Some((_, _anon, ap_label, corp_label, _, _, _)) = rules.first() {
                 *local_app.entry(*ap_label).or_insert(0) += 1;
                 *local_corp.entry(*corp_label).or_insert(0) += 1;
             } else {
@@ -228,8 +267,11 @@ fn dense_campaign() {
                 *local_app.entry(ap_label).or_insert(0) += 1;
                 *local_corp.entry(corp_label).or_insert(0) += 1;
             }
-            for (key, ap, corp, ec, bud, dep) in rules {
+            for (key, anon, ap, corp, ec, bud, dep) in rules {
                 let p = local_prov.entry(key).or_default();
+                if p.exemplar.is_none() {
+                    p.exemplar = Some(anon);
+                }
                 p.total_runs += 1;
                 p.apparatuses.insert(ap);
                 p.corpora.insert(corp);
@@ -266,6 +308,9 @@ fn dense_campaign() {
                 entry.ec_names.extend(p.ec_names);
                 entry.budgets.extend(p.budgets);
                 entry.depths.extend(p.depths);
+                if entry.exemplar.is_none() {
+                    entry.exemplar = p.exemplar;
+                }
             }
         }
         *total_emissions.lock().unwrap() += local_emissions;
@@ -424,6 +469,126 @@ fn dense_campaign() {
         apparatus_specific, elapsed, n_probes as f64 / elapsed
     );
     println!("╚══════════════════════════════════════════════════════════════════════╝");
+
+    // ── PHASE J: semantic validation of the top-coverage rules ──
+    //
+    // For each of the top-N most-universal structural rules, ask
+    // the validator: does this rule denote a concrete equation over
+    // primitive arithmetic? Phase J proposes semantic projection
+    // candidates (→ ?v, → 0, → 1, commuted binary, ...) and tests
+    // each against K random substitutions.
+    //
+    // Output classes:
+    //   theorem   : has ≥1 valid semantic projection
+    //   opaque    : no simple projection matches; rule is
+    //               structurally universal but semantically
+    //               richer than our candidate set captures
+    //               (could be a higher-order abstraction, or a
+    //               pattern that needs reshape candidates we
+    //               haven't proposed yet)
+    println!();
+    println!("╔══════════════════════════════════════════════════════════════════════╗");
+    println!("║ PHASE J — SEMANTIC VALIDATION OF CROSS-DIMENSIONAL UNIVERSALS        ║");
+    println!("╚══════════════════════════════════════════════════════════════════════╝");
+    let vconfig = ValidationConfig {
+        samples: 24,
+        max_value: 10,
+        step_limit: 96,
+        rng_seed: 0x9E37_79B9_7F4A_7C15,
+    };
+
+    let n_validate = 30usize.min(by_coverage.len());
+    let mut theorems = 0usize;
+    let mut opaque = 0usize;
+    let mut by_kind: BTreeMap<String, usize> = BTreeMap::new();
+
+    println!();
+    println!("testing top-{n_validate} cross-dimensional universals with K={} samples each:",
+        vconfig.samples);
+    println!(
+        "  {:>4}  {:<20}  {:<10}  rule",
+        "apps", "verdict", "kind"
+    );
+    println!("  {:─>4}  {:─<20}  {:─<10}  ──────────", "", "", "");
+    for (k, p, _score) in by_coverage.iter().take(n_validate) {
+        let Some(rule) = p.exemplar.as_ref() else {
+            println!("  {:>4}  (no exemplar)       {}  {}", p.apparatuses.len(), "", k);
+            continue;
+        };
+        let verdicts = discover_semantic_projections(rule, &vconfig);
+        if verdicts.is_empty() {
+            opaque += 1;
+            println!(
+                "  {:>4}  OPAQUE              {:<10}  {}",
+                p.apparatuses.len(),
+                "-",
+                k
+            );
+        } else {
+            theorems += 1;
+            // Use the first (most-preferred) validated projection.
+            let (cand, verdict) = &verdicts[0];
+            let samples = match verdict {
+                SemanticVerdict::Valid { samples_tested } => *samples_tested,
+                _ => 0,
+            };
+            let kind_name = match &cand.kind {
+                CandidateKind::Projection(_) => "projection",
+                CandidateKind::Constant(_) => "constant",
+                CandidateKind::Reshape(_) => "reshape",
+            };
+            *by_kind.entry(kind_name.to_string()).or_insert(0) += 1;
+            println!(
+                "  {:>4}  THEOREM ({samples:>3}✓)    {:<10}  {}",
+                p.apparatuses.len(),
+                cand.kind.to_string(),
+                k
+            );
+        }
+    }
+
+    println!();
+    println!("phase-J summary for top-{n_validate}:");
+    println!("  theorems (≥1 valid projection) : {theorems}");
+    println!("  opaque (no projection matched) : {opaque}");
+    for (kind, count) in &by_kind {
+        println!("  {kind:<30} : {count}");
+    }
+    println!();
+
+    // Full validation pass — all rules with ≥ half apparatus
+    // coverage get tested. Reports the semantic yield rate.
+    let half = APPARATUSES.len() / 2 + 1;
+    let candidates_for_theorem: Vec<_> = provenance
+        .iter()
+        .filter(|(_, p)| p.apparatuses.len() >= half && p.exemplar.is_some())
+        .collect();
+    let mut full_theorems = 0usize;
+    let mut full_opaque = 0usize;
+    for (_k, p) in &candidates_for_theorem {
+        let rule = p.exemplar.as_ref().unwrap();
+        let verdicts = discover_semantic_projections(rule, &vconfig);
+        if verdicts.is_empty() {
+            full_opaque += 1;
+        } else {
+            full_theorems += 1;
+        }
+    }
+    println!(
+        "full-population phase-J on ≥{half}-apparatus rules ({}):",
+        candidates_for_theorem.len()
+    );
+    println!("  theorems : {full_theorems}");
+    println!("  opaque   : {full_opaque}");
+    println!(
+        "  yield    : {:.1}%",
+        if candidates_for_theorem.is_empty() {
+            0.0
+        } else {
+            100.0 * full_theorems as f64 / candidates_for_theorem.len() as f64
+        }
+    );
+    println!();
 
     // Invariants.
     assert!(!provenance.is_empty(), "campaign must discover rules");
