@@ -3,7 +3,9 @@ use std::fmt;
 
 /// A numeric value in the expression system.
 /// Starts with naturals (Peano-style), extensible to rationals/reals later.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(
+    Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize,
+)]
 pub enum Value {
     /// Natural number (Peano encoding for small values, direct for large)
     Nat(u64),
