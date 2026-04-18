@@ -146,6 +146,61 @@ files). Deferred.
 - Extensible: Value carries two domains (Nat, Int); the registry
   scales by appending Builtin entries with no magic numbers ✓
 
+### Phase S: compute layer + self-producing cycle (2026-04-18)
+
+Session arc building the full ML compute stack and the typed
+self-producing discovery loop on top. Preserves the autonomous-
+traversal milestone throughout; apex fingerprint unchanged,
+deterministic_replay bit-identical.
+
+| Landmark | Closes |
+|---|---|
+| **R13** (Value::Tensor + 6 builtins) | tensor_add/mul/sum/dot/neg/scale, elementwise + reductions + checked arithmetic |
+| **R14** (symbolic autograd) | chain/product/sum rules for scalar ops; Int-valued derivative expressions |
+| **R15** (SGD optimizer) | sgd_step as Term composition — no new builtin needed, primitives compose |
+| **R16** (2D tensor ops) | matmul / transpose / reshape, classical linear algebra |
+| **R17** (autograd through tensor ops) | gradient flow for FT_ADD/MUL/SUM/DOT/SCALE/NEG |
+| **R18** (Value::Float + SGD convergence) | IEEE 754 doubles as bit-encoded u64. 50-step SGD on (w-7)² converges to within 0.001 |
+| **R19** (FloatTensor) | real-valued parametric models; bit-encoded data Vec<u64>; 8 ft_* builtins |
+| **R20** (float-tensor autograd + training) | full end-to-end FT training: derive loss symbolically once, 60 SGD steps converge |
+| **R21** (tensor discovery corpus) | R24 + tensor_corpus generator; anti-unification produces tensor-headed candidates |
+| **R22** (natural emergence probe) | HONEST finding: apex rules {S_10000, S_043} are library compressions, NOT laws. R12 matches zero |
+| **R23** (repeated-arrival observation) | 18 configs → same apex every time; zero variation. Machine has a single fixed convergence target on Peano |
+| **R24** (law generator) | paired_anti_unify + derive_laws_from_corpus. MACHINE NOW DISCOVERS tensor_add/mul identity laws autonomously from eval traces |
+| **R25** (self-bootstrapping loop) | empty library → discover → grow → repeat. 4 iterations, 10 laws, policy trains |
+| **R26** (BootstrapCycle typescape entity) | enshrines R25 as first-class typed generic struct with 3 hijackable layers + BLAKE3 attestation |
+| **R27** (refactor + invariants) | 20 invariant tests; self_bootstrap now uses R26 DefaultCorpusGenerator. Found: library grows LINEARLY forever (no saturation) |
+| **R28** (LibraryDeduper layer 4) | closes R27 linear-growth gap. CanonicalDeduper saturates cycle at step 3 instead of +3/iter forever. Library 30 → 4 rules |
+| **R29** (DomainOps trait in autograd) | 10 parallel simplify_* helpers → 3 generic simplify_X_of + 3 trait impls (IntOps/FloatOps/TensorOps). Adding a domain is one impl |
+
+**Phase S headline findings:**
+
+- **The machine discovers its own tensor primitives.** R24's law
+  generator, given concrete tensor-identity corpora, produces
+  `tensor_add(zeros, ?x) = ?x` and `tensor_mul(ones, ?x) = ?x` —
+  matching the hand-coded R13/R19 reference via paired-AU.
+- **The cycle converges with dedup.** Without: linear growth
+  forever (30 rules after 10 iter). With: saturation at step 3
+  (4 rules, remainder rejected as derivable variants).
+- **Self-producing loop works end-to-end.** Empty → tensor →
+  model → more tensor → updated model, BLAKE3-attested,
+  bit-identical replay. The typed entity encapsulates chaos.
+
+**ML apparatus plan.** `docs/arch/ml-apparatus.md` lays out the
+full 4-layer hijack-and-optimize architecture with the
+orchestrator as the outermost model. Layers 1–4 shipped; the
+orchestrator itself is future work.
+
+**Kernel invariant status after Phase S:**
+Phase R invariants all preserved. Phase S adds:
+- **Compositional compute**: gradient flow through any registered
+  domain; SGD step composes from existing primitives
+- **Self-producing cycle**: 4-layer trait-based BootstrapCycle
+  with BLAKE3 attestation for deterministic replay at the cycle
+  level
+- **Convergence**: dedup-enabled cycle reaches a structurally-
+  distinct fixed point, not unbounded growth
+
 ## Where we go next
 
 Ranked by impact-per-effort. Each extension must preserve the lynchpin.
