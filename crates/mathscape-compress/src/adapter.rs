@@ -9,9 +9,69 @@
 use crate::extract::{extract_rules, ExtractConfig};
 use mathscape_core::{
     epoch::{Artifact, Candidate, Generator},
-    eval::{pattern_equivalent, RewriteRule},
+    eval::{pattern_equivalent, pattern_match, RewriteRule},
     term::{SymbolId, Term},
 };
+
+/// Apply library rewrite rules bottom-up to a term until fixed-point.
+/// Reinforcement and status advancement are the runtime's problem;
+/// this function just produces the library-reduced view the
+/// generator needs to see "what's left" when proposing new patterns.
+///
+/// Bottom-up: rewrite children first so that when a parent's children
+/// are rewritten, a new root-level rule match may fire.
+/// Step-bounded to avoid pathological non-termination from a
+/// mis-designed library (shouldn't happen with the lattice's
+/// current semantics, but cheap insurance).
+fn rewrite_fixed_point(term: &Term, library: &[RewriteRule], max_steps: usize) -> Term {
+    let mut current = rewrite_children(term, library, max_steps);
+    for _ in 0..max_steps {
+        let next = rewrite_root_once(&current, library);
+        if next == current {
+            return current;
+        }
+        // A root rewrite may have exposed new children to rewrite.
+        current = rewrite_children(&next, library, max_steps);
+    }
+    current
+}
+
+fn rewrite_root_once(term: &Term, library: &[RewriteRule]) -> Term {
+    for rule in library {
+        if let Some(bindings) = pattern_match(&rule.lhs, term) {
+            let mut rhs = rule.rhs.clone();
+            for (var, val) in &bindings {
+                rhs = rhs.substitute(*var, val);
+            }
+            return rhs;
+        }
+    }
+    term.clone()
+}
+
+fn rewrite_children(term: &Term, library: &[RewriteRule], max_steps: usize) -> Term {
+    match term {
+        Term::Point(_) | Term::Number(_) | Term::Var(_) => term.clone(),
+        Term::Fn(params, body) => Term::Fn(
+            params.clone(),
+            Box::new(rewrite_fixed_point(body, library, max_steps)),
+        ),
+        Term::Apply(f, args) => {
+            let rewritten_args: Vec<Term> = args
+                .iter()
+                .map(|a| rewrite_fixed_point(a, library, max_steps))
+                .collect();
+            let rewritten_f = rewrite_fixed_point(f, library, max_steps);
+            Term::Apply(Box::new(rewritten_f), rewritten_args)
+        }
+        Term::Symbol(id, args) => Term::Symbol(
+            *id,
+            args.iter()
+                .map(|a| rewrite_fixed_point(a, library, max_steps))
+                .collect(),
+        ),
+    }
+}
 
 /// A [`Generator`] that proposes `RewriteRule` candidates by
 /// anti-unifying the corpus against the current library.
@@ -46,8 +106,27 @@ impl Generator for CompressionGenerator {
         // Materialize a RewriteRule view of the library for extract_rules.
         let existing: Vec<RewriteRule> =
             library.iter().map(|a| a.rule.clone()).collect();
+
+        // Rewrite the corpus through the current library BEFORE anti-
+        // unifying. Anti-unification over the raw corpus gets stuck
+        // re-deriving patterns the library already covers; working
+        // on the library-reduced view is what exposes higher-order
+        // structure. This is the "dimensional discovery" move from
+        // docs/arch/machine-synthesis.md — each primitive peels a
+        // layer of the corpus, revealing what's left to compress.
+        //
+        // Empty library falls through to the raw corpus (no-op).
+        let reduced_corpus: Vec<Term> = if existing.is_empty() {
+            corpus.to_vec()
+        } else {
+            corpus
+                .iter()
+                .map(|t| rewrite_fixed_point(t, &existing, 64))
+                .collect()
+        };
+
         let rules = extract_rules(
-            corpus,
+            &reduced_corpus,
             &existing,
             &mut self.next_symbol_id,
             &self.config,
