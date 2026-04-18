@@ -298,6 +298,222 @@ impl LibraryDeduper for SubsumptionDeduper {
     }
 }
 
+// ── R32: BootstrapCycleSpec — fully Lisp-producible recipe ─────────
+//
+// Before R32, BootstrapCycle was generic over three-to-four
+// trait-bounded types. That's great for zero-cost dispatch in Rust
+// but unfriendly to Lisp: you can't write a Rust generic in Lisp.
+//
+// R32 introduces a data-level recipe — `BootstrapCycleSpec` — that
+// names each layer by a string identifier resolvable in a registry.
+// Advantages:
+//
+//   1. Fully Lisp-describable: `spec_to_sexp` emits a pure Lisp
+//      value for the recipe. `spec_from_sexp` reconstructs it.
+//   2. Fully Lisp-producible: a Lisp program can construct a
+//      spec Sexp, hand it to the executor, receive back the
+//      trained model as Sexp. Round-trip closed through Lisp.
+//   3. The registry + executor is Rust, but from the Lisp
+//      program's view the whole process is: "here's a recipe,
+//      give me the model."
+
+/// A Lisp-serializable recipe for running a BootstrapCycle. Each
+/// layer is named by a string the executor resolves in its
+/// internal registry.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct BootstrapCycleSpec {
+    /// Name resolved to a `CorpusGenerator` by the executor.
+    /// Built-in: `"default"`.
+    pub corpus_generator: String,
+    /// Name resolved to a `LawExtractor`. Built-in: `"null"` (always
+    /// returns empty — needed because the R24 law generator lives
+    /// in mathscape-compress and core can't depend on compress).
+    /// External registries can register richer extractors.
+    pub law_extractor: String,
+    /// Name resolved to a `ModelUpdater`. Built-in: `"default"`
+    /// (train_from_trajectory @ lr=0.05), `"null"` (no-op).
+    pub model_updater: String,
+    /// Name resolved to a `LibraryDeduper`. Built-in: `"none"`,
+    /// `"canonical"`, `"alpha"`, `"subsumption"`.
+    pub deduper: String,
+    /// Iteration count.
+    pub n_iterations: usize,
+    /// Seed library (typically empty for first cycle; later cycles
+    /// seed from a previous M's final library).
+    pub seed_library: Vec<RewriteRule>,
+    /// Seed policy. Built-in default helpers: see
+    /// `LinearPolicy::{new, tensor_seeking_prior}`.
+    pub seed_policy: LinearPolicy,
+}
+
+impl BootstrapCycleSpec {
+    /// Canonical default spec: the same layer triple +
+    /// CanonicalDeduper used by the R31 first-model tests.
+    #[must_use]
+    pub fn default_m0() -> Self {
+        Self {
+            corpus_generator: "default".into(),
+            law_extractor: "derived-laws".into(),
+            model_updater: "default".into(),
+            deduper: "canonical".into(),
+            n_iterations: 5,
+            seed_library: Vec::new(),
+            seed_policy: LinearPolicy::tensor_seeking_prior(),
+        }
+    }
+}
+
+/// Errors that can arise when resolving / executing a spec.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SpecExecutionError {
+    UnknownLayer {
+        role: &'static str,
+        name: String,
+    },
+}
+
+impl std::fmt::Display for SpecExecutionError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SpecExecutionError::UnknownLayer { role, name } => {
+                write!(f, "no {role} registered under name '{name}'")
+            }
+        }
+    }
+}
+
+impl std::error::Error for SpecExecutionError {}
+
+/// R32: execute a `BootstrapCycleSpec` with the built-in layer
+/// registry. Returns the resulting `BootstrapOutcome`.
+///
+/// Built-in names:
+///   - corpus_generator: "default" (R26 DefaultCorpusGenerator),
+///     "null" (always empty)
+///   - law_extractor: "null" (always empty; richer extractors
+///     live in downstream crates — see axiom-bridge for
+///     `derived-laws` wired through R24)
+///   - model_updater: "default" (lr=0.05), "null" (no-op)
+///   - deduper: "none", "canonical", "alpha", "subsumption"
+///
+/// Unknown names yield `UnknownLayer` — the caller can extend by
+/// wrapping this executor or by providing a custom registry-based
+/// dispatch.
+pub fn execute_spec_core(
+    spec: &BootstrapCycleSpec,
+) -> Result<BootstrapOutcome, SpecExecutionError> {
+    // Resolve corpus generator. Only "default" and "null" live here
+    // (core doesn't know about tensor corpora or other specialties).
+    match spec.corpus_generator.as_str() {
+        "default" => {}
+        "null" => {}
+        other => {
+            return Err(SpecExecutionError::UnknownLayer {
+                role: "corpus_generator",
+                name: other.to_string(),
+            });
+        }
+    }
+    if spec.law_extractor != "null" {
+        return Err(SpecExecutionError::UnknownLayer {
+            role: "law_extractor",
+            name: spec.law_extractor.clone(),
+        });
+    }
+    // Updater.
+    match spec.model_updater.as_str() {
+        "default" | "null" => {}
+        other => {
+            return Err(SpecExecutionError::UnknownLayer {
+                role: "model_updater",
+                name: other.to_string(),
+            });
+        }
+    }
+    // Deduper.
+    match spec.deduper.as_str() {
+        "none" | "canonical" | "alpha" | "subsumption" => {}
+        other => {
+            return Err(SpecExecutionError::UnknownLayer {
+                role: "deduper",
+                name: other.to_string(),
+            });
+        }
+    }
+
+    // Dispatch: core only ships null-extractor executor. Richer
+    // executors (axiom-bridge) override for richer extractor names.
+    // This is the minimal "just layer resolution works" version.
+    use crate::bootstrap::{AlphaDeduper, CanonicalDeduper, NoDedup, SubsumptionDeduper};
+
+    /// Null extractor used when spec.law_extractor == "null".
+    struct NullExtractor;
+    impl LawExtractor for NullExtractor {
+        fn extract(&self, _c: &[Term], _l: &[RewriteRule]) -> Vec<RewriteRule> {
+            Vec::new()
+        }
+    }
+    struct NullGen;
+    impl CorpusGenerator for NullGen {
+        fn generate(&self, _iter: usize, _l: &[RewriteRule]) -> Vec<Term> {
+            Vec::new()
+        }
+    }
+    struct NullUpdater;
+    impl ModelUpdater for NullUpdater {
+        fn update(&self, _p: &mut LinearPolicy, _t: &Trajectory) {}
+    }
+
+    let seed_lib = spec.seed_library.clone();
+    let seed_pol = spec.seed_policy.clone();
+    let n = spec.n_iterations;
+
+    // Because each layer type is distinct and Rust generics are
+    // resolved at compile time, we handcraft a handful of
+    // concrete dispatch branches. Core's minimum: "null" law
+    // extractor × 2 corpus × 2 updater × 4 deduper = 16 branches.
+    // Axiom-bridge's executor adds the rich law extractor and
+    // richer corpora.
+    macro_rules! run {
+        ($cg:expr, $ex:expr, $up:expr, $dd:expr) => {{
+            let cycle = BootstrapCycle::new($cg, $ex, $up, n);
+            cycle.run_with_dedup(seed_lib, seed_pol, $dd)
+        }};
+    }
+    macro_rules! run_all_dedup {
+        ($cg:expr, $ex:expr, $up:expr) => {
+            match spec.deduper.as_str() {
+                "none" => run!($cg, $ex, $up, &NoDedup),
+                "canonical" => run!($cg, $ex, $up, &CanonicalDeduper),
+                "alpha" => run!($cg, $ex, $up, &AlphaDeduper),
+                "subsumption" => run!($cg, $ex, $up, &SubsumptionDeduper),
+                _ => unreachable!(),
+            }
+        };
+    }
+    let outcome = match (
+        spec.corpus_generator.as_str(),
+        spec.law_extractor.as_str(),
+        spec.model_updater.as_str(),
+    ) {
+        ("default", "null", "default") => {
+            run_all_dedup!(DefaultCorpusGenerator, NullExtractor, DefaultModelUpdater::default())
+        }
+        ("default", "null", "null") => {
+            run_all_dedup!(DefaultCorpusGenerator, NullExtractor, NullUpdater)
+        }
+        ("null", "null", "default") => {
+            run_all_dedup!(NullGen, NullExtractor, DefaultModelUpdater::default())
+        }
+        ("null", "null", "null") => {
+            run_all_dedup!(NullGen, NullExtractor, NullUpdater)
+        }
+        _ => unreachable!(), // validated above
+    };
+
+    Ok(outcome)
+}
+
 /// R30: post-process a collection of rules, partitioning them
 /// into (kept, rejected) using the supplied deduper. Useful for
 /// cleaning up a library AFTER it was built (e.g., collected

@@ -5,6 +5,7 @@
 //! SemanticallyValidated equations the machine can compose and
 //! Rustify with confidence.
 
+pub mod bootstrap_lisp;
 pub mod discovery;
 pub mod lean_export;
 pub mod mechanism;
@@ -24,6 +25,7 @@ pub use mechanism::{
     respond_to_saturation_with_fitness, MechanismConfig, MechanismMutation,
     MechanismPool, TrialResult,
 };
+pub use bootstrap_lisp::{spec_from_sexp, spec_to_sexp};
 pub use policy_lisp::{policy_from_sexp, policy_to_sexp};
 pub use primitives_lisp::{census_to_sexp, primitive_from_sexp, primitive_to_sexp};
 pub use semantic::{
