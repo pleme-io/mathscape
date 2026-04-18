@@ -333,6 +333,94 @@ with tighter modal dominance).
 This is a one-line change and is a direct empirical win. Phase M7
 deliverable.
 
+## The bettyfine is the asymmetry source
+
+The deepest reframing, from the user:
+
+> "the bettyfine is the seed generator essentially that provides
+>  the small amount of asymmetry that powers the traversal"
+
+This is right. The bettyfine is simultaneously:
+
+1. **What discovery converges to** — the fixed point under the
+   discovery dynamics. The output.
+2. **What makes discovery possible** — the asymmetry in the
+   structure of the library that breaks the raw-term symmetry
+   and gives the machine leverage. The input to every subsequent
+   step.
+
+Before the bettyfine exists, the library is empty. The machine
+sees only raw terms: symmetric under any relabeling, no preferred
+compression. After the bettyfine's layer-0 Symbol-naming rules
+land, a SPECIFIC asymmetry is in place: now some terms reduce to
+named forms, others don't. That asymmetry propagates: future
+discovery uses the bettyfine as context, producing rules that
+reference its symbols.
+
+The seeded-discovery observation (M9) reads differently under
+this framing:
+
+- **Vanilla discovery**: starts without bettyfine. The machine
+  must produce the asymmetry from random input. Each seed
+  produces a DIFFERENT asymmetry (3 vanilla basins, 50% modal)
+  because the specific symmetry-breaking depends on seed chance.
+- **Seeded discovery**: starts with the bettyfine pre-loaded.
+  The asymmetry is already specified. All seeds proceed
+  DETERMINISTICALLY from the same asymmetric substrate → same
+  final library (1 basin, 100% modal, all 32 seeds identical).
+
+The bettyfine is the minimum asymmetry that makes traversal
+possible. Without it (or something like it) every term remains
+interchangeable with every other term — no compression discipline
+can apply. With it, a direction is chosen; compression can
+proceed along that direction.
+
+This is Higgs-field-like: the bettyfine is the background that
+breaks the symmetry of raw structure and gives discoveries their
+"mass" (their meaningfulness relative to each other).
+
+## The bettyfine is a tool, not a bound
+
+A subtle observation from the seeded-bettyfine penetration probe
+(phase M9, 2026-04-18):
+
+Seeding the canonical library before discovery produces a
+LIBRARY IDENTICAL in size to the vanilla run (mean 2.00 vs 2.03
+rules). No new rules emerge past the bettyfine under current
+machinery.
+
+**This is easy to misinterpret.** It's tempting to conclude "the
+bettyfine is the mathscape's ceiling." It isn't. The measurement
+is:
+
+  The bettyfine is the current machinery's REACH into the
+  mathscape. The mathscape extends beyond that reach — vastly,
+  by nature — but current tools can't see past this layer.
+
+The machinery limitations are known:
+- Anti-unification is root-level only — can't see distributivity-
+  shape where roots differ but inner structure matches
+- No equality saturation — can't recognize commutativity or
+  associativity (syntactic pattern matching misses them)
+- No empirical semantic check — can't distinguish rules that
+  structurally subsume but semantically disagree
+
+These are named in `landmarks.md` as phases I / K / J.
+
+**The mathscape is open-ended by nature.** We shouldn't over-
+define what's "out there." We can only empirically describe what
+our current tools can see. The bettyfine is the tool's current
+output; the space beyond the tool's reach is genuinely unknown.
+
+Seeded discovery DID produce one useful observation though: it
+COMPRESSES the moduli space. Vanilla gives 3 basins, 50% modal.
+Seeded gives 1 basin, 100% modal across 32 seeds. Pre-loading
+the bettyfine **deterministically pins the post-discovery
+library** — all seed-variation disappears. That's a practical
+utility: if you want reproducible discovery beyond the bettyfine
+(once we HAVE phases I/K/J), pre-seeding gives you a clean
+starting substrate.
+
 ## The core insight, stated
 
 The machine's discoveries exist in a moduli space. Viewed under

@@ -1399,6 +1399,200 @@ fn run_traversal_pure_procedural_with_library(
 }
 
 #[test]
+#[ignore = "phase M9: seeded-bettyfine discovery — what can we penetrate on top? ~20s, --ignored"]
+fn seeded_bettyfine_penetration() {
+    // The bettyfine is the tool. What does it penetrate?
+    //
+    // Method: seed the registry with the canonical bettyfine
+    // library at epoch 0. Pre-mark those rules as Axiomatized
+    // (via trivial certificate → the W-window will advance them).
+    // Then run the full discovery pipeline. Any NEW rules that
+    // land past the bettyfine are what the bettyfine "unlocked" —
+    // discoveries that live at a layer above the canonical
+    // compression.
+    //
+    // Baseline: vanilla discovery (no seed) → observed final libraries
+    // Seeded: discovery starting from bettyfine → compare libraries
+    //
+    // The delta is the penetration. If the seeded run ends with MORE
+    // rules on average, the bettyfine unlocked deeper territory. If
+    // the seeded run ends with the same count, the bettyfine is just
+    // an accelerator, not an unlocker.
+    use mathscape_compress::extract::ExtractConfig as EC;
+    use mathscape_core::bettyfine::{bettyfine_library, OperatorSpec};
+    use std::collections::HashMap;
+    use std::time::Instant;
+
+    const N_SEEDS: u64 = 32;
+    const BUDGET: usize = 15;
+    const DEPTH: usize = 4;
+    let ec = EC {
+        min_shared_size: 2,
+        min_matches: 2,
+        max_new_rules: 10,
+    };
+
+    let t0 = Instant::now();
+    let mut vanilla_apex_counts: Vec<usize> = Vec::new();
+    let mut seeded_apex_counts: Vec<usize> = Vec::new();
+    let mut vanilla_basins: HashMap<Vec<(String, String)>, usize> = HashMap::new();
+    let mut seeded_basins: HashMap<Vec<(String, String)>, usize> = HashMap::new();
+    // Post-bettyfine discoveries: rules in seeded run that AREN'T
+    // in the bettyfine. How many and what shape?
+    let mut post_bettyfine_new_rules: Vec<usize> = Vec::new();
+
+    for seed in 1..=N_SEEDS {
+        // Vanilla baseline
+        let vanilla = run_traversal_pure_procedural_with_extract(seed, BUDGET, DEPTH, ec.clone());
+        vanilla_apex_counts.push(vanilla.axiomatized_rules_full.len());
+        *vanilla_basins
+            .entry(structural_fingerprint(&vanilla.axiomatized_rules_full))
+            .or_default() += 1;
+
+        // Seeded: pre-load the bettyfine then run discovery
+        let seeded = run_with_bettyfine_seeded(seed, BUDGET, DEPTH, ec.clone());
+        seeded_apex_counts.push(seeded.axiomatized_rules_full.len());
+        *seeded_basins
+            .entry(structural_fingerprint(&seeded.axiomatized_rules_full))
+            .or_default() += 1;
+
+        // How many rules are in seeded that aren't in the seeded
+        // bettyfine itself? The bettyfine has 3 rules (succ + add + mul).
+        let seed_bettyfine_count = bettyfine_library(&OperatorSpec::standard_vocabulary(), 500_000).len();
+        let extra = seeded.axiomatized_rules_full.len().saturating_sub(seed_bettyfine_count);
+        post_bettyfine_new_rules.push(extra);
+    }
+    let elapsed = t0.elapsed().as_millis();
+
+    let mean_vanilla = vanilla_apex_counts.iter().sum::<usize>() as f64 / N_SEEDS as f64;
+    let mean_seeded = seeded_apex_counts.iter().sum::<usize>() as f64 / N_SEEDS as f64;
+    let mean_extra = post_bettyfine_new_rules.iter().sum::<usize>() as f64 / N_SEEDS as f64;
+    let vanilla_modal = vanilla_basins.values().copied().max().unwrap_or(0);
+    let seeded_modal = seeded_basins.values().copied().max().unwrap_or(0);
+
+    println!("\n╔══════════════════════════════════════════════════════╗");
+    println!("║ SEEDED BETTYFINE PENETRATION                         ║");
+    println!("║   The bettyfine as a tool for deeper discovery       ║");
+    println!("╚══════════════════════════════════════════════════════╝");
+    println!("\n▶ Scope");
+    println!("  seeds        : {N_SEEDS}");
+    println!("  budget×depth : {BUDGET} × {DEPTH}");
+    println!("  elapsed      : {elapsed}ms");
+
+    println!("\n▶ Library sizes");
+    println!("  vanilla mean apex rules : {mean_vanilla:.2}");
+    println!("  seeded mean apex rules  : {mean_seeded:.2}");
+    println!("  bettyfine cardinality   : 3 (succ + add + mul)");
+    println!("  seeded extra (post-bettyfine): {mean_extra:.2}");
+
+    println!("\n▶ Basin structure");
+    println!("  vanilla basins  : {}", vanilla_basins.len());
+    println!("  vanilla modal   : {vanilla_modal}/{N_SEEDS} ({:.1}%)",
+        vanilla_modal as f64 / N_SEEDS as f64 * 100.0);
+    println!("  seeded  basins  : {}", seeded_basins.len());
+    println!("  seeded  modal   : {seeded_modal}/{N_SEEDS} ({:.1}%)",
+        seeded_modal as f64 / N_SEEDS as f64 * 100.0);
+
+    println!("\n▶ Interpretation");
+    if mean_extra > 1.0 {
+        println!("  PENETRATION CONFIRMED — seeded runs reach {:.1}+ rules beyond",
+            mean_extra);
+        println!("  the bettyfine. The bettyfine unlocks deeper layers.");
+    } else if mean_extra > 0.0 {
+        println!("  MARGINAL PENETRATION — seeded runs land {:.2} rules past", mean_extra);
+        println!("  the bettyfine on average. Subtle unlock; deeper probing");
+        println!("  (bigger vocab, richer corpus) would reveal more.");
+    } else {
+        println!("  NO PENETRATION — seeded runs produce the same library as");
+        println!("  vanilla. The bettyfine IS the attractor at this machinery");
+        println!("  scale; nothing more is reachable without new capability.");
+    }
+}
+
+fn run_with_bettyfine_seeded(
+    seed_offset: u64,
+    procedural_budget: usize,
+    max_depth: usize,
+    extract_config: mathscape_compress::extract::ExtractConfig,
+) -> TraversalReportWithLibrary {
+    use mathscape_core::bettyfine::{bettyfine_library, OperatorSpec};
+    use mathscape_core::epoch::{AcceptanceCertificate, Artifact};
+    use mathscape_core::lifecycle::ProofStatus;
+
+    let mut zoo: Vec<(String, Vec<Term>)> = Vec::new();
+    for i in 1..=procedural_budget as u64 {
+        let seed = seed_offset.wrapping_add(i);
+        let depth = 2 + (i as usize % (max_depth - 1).max(1));
+        let count = 16 + (i as usize % 8);
+        zoo.push((
+            format!("proc-s{seed}-d{depth}"),
+            procedural(seed, depth, count),
+        ));
+    }
+
+    let base = CompressionGenerator::new(extract_config.clone(), 500_100);
+    let meta = MetaPatternGenerator::new(
+        ExtractConfig {
+            min_shared_size: 1,
+            min_matches: 2,
+            max_new_rules: 12,
+        },
+        600_000,
+    );
+    let mut epoch = Epoch::new(
+        CompositeGenerator::new(base, meta),
+        mathscape_reward::StatisticalProver::new(
+            mathscape_reward::reward::RewardConfig::default(),
+            0.0,
+        ),
+        RuleEmitter,
+        InMemoryRegistry::new(),
+    );
+
+    // Seed the bettyfine. Mark each seeded rule Axiomatized so it
+    // acts as an established fixed-point the discovery proceeds from.
+    let bf = bettyfine_library(&OperatorSpec::standard_vocabulary(), 500_000);
+    for rule in bf {
+        let mut cert = AcceptanceCertificate::trivial_conjecture(1.0);
+        cert.status = ProofStatus::Axiomatized;
+        let artifact = Artifact::seal(rule, 0, cert, vec![]);
+        let hash = artifact.content_hash;
+        epoch.registry.insert(artifact);
+        epoch.registry.mark_status(hash, ProofStatus::Axiomatized);
+    }
+
+    for (_, corpus) in &zoo {
+        for _ in 0..3 {
+            let _ = epoch.step_with_action(
+                corpus,
+                mathscape_core::control::EpochAction::Discover,
+            );
+        }
+        let _ = epoch.step_with_action(
+            corpus,
+            mathscape_core::control::EpochAction::Reinforce,
+        );
+    }
+
+    let mut names = Vec::new();
+    let mut full = Vec::new();
+    for artifact in epoch.registry.all() {
+        let s = epoch
+            .registry
+            .status_of(artifact.content_hash)
+            .unwrap_or_else(|| artifact.certificate.status.clone());
+        if matches!(s, ProofStatus::Axiomatized) {
+            names.push(artifact.rule.name.clone());
+            full.push(artifact.rule.clone());
+        }
+    }
+    TraversalReportWithLibrary {
+        axiomatized_rule_names: names,
+        axiomatized_rules_full: full,
+    }
+}
+
+#[test]
 #[ignore = "phase M8+: which 2-zoo-corpus pairs trigger the transition, ~60s, --ignored"]
 fn hpo_zoo_pair_transition() {
     // Zoo-weight sweep showed phase transition at zoo=2 (jump to
