@@ -7,6 +7,7 @@ pub mod demotion;
 pub mod epoch;
 pub mod eval;
 pub mod event;
+pub mod form_tree;
 pub mod hash;
 pub mod lifecycle;
 pub mod meta;
@@ -33,6 +34,7 @@ pub use epoch::{
     InMemoryRegistry, Prover, Registry, Rejection, RuleEmitter, Verdict,
 };
 pub use event::{Event, EventCategory, StatusAdvance};
+pub use form_tree::{DiscoveryForest, FormNode, Morphism};
 pub use hash::TermRef;
 pub use lifecycle::{AxiomIdentity, DemotionReason, ProofStatus, TypescapeCoord};
 pub use trap::{Trap, TrapDetector, TrapExitReason};
