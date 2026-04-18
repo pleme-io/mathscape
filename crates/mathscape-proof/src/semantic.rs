@@ -282,14 +282,13 @@ pub fn generate_semantic_candidates_with_ledger(
     }
 
     // Generic term enumeration: every term of size ≤ K built from
-    // {succ, add, mul} over {free_vars, 0, 1}. This is the machine's
-    // uniform candidate source — no hand-coded equations. Size cap
-    // keeps combinatorics in check.
-    let max_size = 3; // gives ~30-50 candidates per 2-free-var rule
+    // {succ, add, mul} over {free_vars, 0, 1}. No hand-coded
+    // equations. Size cap keeps combinatorics in check while
+    // reaching candidates like succ(add(a, b)) and associativity
+    // LHS/RHS shapes.
+    let max_size = 5; // enough for assoc-shape (size 5) and distrib precursors
     let enumerated = enumerate_candidate_terms(&rule_vars, max_size);
     for (i, candidate_rhs) in enumerated.into_iter().enumerate() {
-        // Skip RHSs already in the bootstrap set (projection + constants)
-        // to avoid duplicates.
         let already = out.iter().any(|c| c.rule.rhs == candidate_rhs);
         if already {
             continue;
@@ -306,6 +305,9 @@ pub fn generate_semantic_candidates_with_ledger(
 
     // Ledger-driven candidates: every validated theorem's RHS
     // shape becomes a candidate for this rule too (with var-remapping).
+    // Collect these into a `ledger_rhs_shapes` set — they're also
+    // the seeds for the compositional pass below.
+    let mut ledger_rhs_shapes: Vec<Term> = Vec::new();
     for (i, theorem) in ledger.iter().enumerate() {
         let theorem_vars = collect_free_vars(&theorem.lhs);
         if theorem_vars.is_empty() || theorem_vars.len() > rule_vars.len() {
@@ -317,6 +319,9 @@ pub fn generate_semantic_candidates_with_ledger(
                 continue;
             }
             adapted = adapted.substitute(*tv, &Term::Var(rule_vars[j]));
+        }
+        if !ledger_rhs_shapes.contains(&adapted) {
+            ledger_rhs_shapes.push(adapted.clone());
         }
         let already = out.iter().any(|c| c.rule.rhs == adapted);
         if already {
@@ -331,6 +336,53 @@ pub fn generate_semantic_candidates_with_ledger(
             kind: CandidateKind::Reshape(adapted),
         });
     }
+
+    // Compositional candidates: take every pair of ledger RHS
+    // shapes and wrap them with each builtin binary operator;
+    // take every single ledger RHS and wrap with succ. This
+    // mechanism is what drives depth-N+1 discovery from depth-N
+    // theorems. It's the Gödel-style bootstrap: each validated
+    // shape becomes a building block for the next layer.
+    //
+    // Capped at a small number of compositions per rule to keep
+    // the candidate count tractable. With N ledger shapes, we
+    // generate N (succ-wrapped) + 2×N² (binary-wrapped) =
+    // O(N²) candidates. For N=10 that's 210 extra candidates.
+    let composition_cap = 12;
+    let shapes: Vec<&Term> =
+        ledger_rhs_shapes.iter().take(composition_cap).collect();
+    let mut compositional: Vec<Term> = Vec::new();
+    for s in &shapes {
+        // succ(s)
+        compositional.push(Term::Apply(
+            Box::new(Term::Var(1)),
+            vec![(*s).clone()],
+        ));
+    }
+    for s1 in &shapes {
+        for s2 in &shapes {
+            for op in [2u32, 3] {
+                compositional.push(Term::Apply(
+                    Box::new(Term::Var(op)),
+                    vec![(*s1).clone(), (*s2).clone()],
+                ));
+            }
+        }
+    }
+    for (i, rhs) in compositional.into_iter().enumerate() {
+        if out.iter().any(|c| c.rule.rhs == rhs) {
+            continue;
+        }
+        out.push(SemanticCandidate {
+            rule: RewriteRule {
+                name: format!("{}::compose-{i}", rule.name),
+                lhs: rule.lhs.clone(),
+                rhs: rhs.clone(),
+            },
+            kind: CandidateKind::Reshape(rhs),
+        });
+    }
+
     out
 }
 
