@@ -16,8 +16,8 @@ pub use discovery::{
 };
 pub use lean_export::{export_rule_as_lean, LeanExportOptions};
 pub use mechanism::{
-    propose_random_mutations, respond_to_saturation, MechanismConfig,
-    MechanismMutation, MechanismPool, TrialResult,
+    propose_mutations_from_pool, propose_random_mutations, respond_to_saturation,
+    MechanismConfig, MechanismMutation, MechanismPool, TrialResult,
 };
 pub use semantic::{
     discover_semantic_projections, discover_semantic_projections_with_config,

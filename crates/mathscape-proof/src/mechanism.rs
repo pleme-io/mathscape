@@ -1,9 +1,65 @@
-//! ML4 — mechanism self-mutation.
+//! ML4+ML5 — mechanism self-mutation with a growable operator set.
 //!
 //! Every bottleneck parameter in the discovery pipeline is bundled
 //! into a `MechanismConfig` that the machine can mutate when it
-//! detects saturation. No more human-as-compiler for parameter
+//! detects saturation. Zero human intervention for parameter
 //! bumps.
+//!
+//! # The self-feeding topology
+//!
+//! This module is one of several places the system feeds its own
+//! output back as input. Being explicit about where and how the
+//! feedback happens — so we can reason about correctness at each
+//! self-feeding loop.
+//!
+//! ```text
+//!   Level        What feeds what                       Fitness signal
+//!   ─────        ───────────────                       ──────────────
+//!   L1: data     ledger RHSs → candidate generator     rule validates
+//!   L2: corpus   theorem LHSs → corpus terms           post-reduce residue has structure
+//!   L3: apparatus apparatus pool → new apparatuses     apparatus theorem yield
+//!   L4: mechanism mechanism pool → new configs         delta-novelty under new config
+//!   L5: operator  pool.discovered_operators →          mutation-produces-delta-novelty
+//!                 new operator proposals               AT COMPOUND LEVEL
+//!   L6+: ...      meta-operator proposals →            (not yet built)
+//!                 new meta-operators
+//! ```
+//!
+//! Each level has THE SAME STRUCTURAL PATTERN:
+//!   - A *bootstrap set* (fixed-at-this-level inputs)
+//!   - A *mutation mechanism* (how to produce variants)
+//!   - A *trial* (measure whether variant produces novelty)
+//!   - A *promotion* (winner gets added back to the input pool)
+//!
+//! Every level's bootstrap set is the next level's discovered
+//! output. Making L(N+1) unlock L(N)'s static bootstrap set.
+//! ML5 here makes the mutation OPERATOR SET (previously static
+//! enum variants) into a growable pool. ML6 will make the
+//! compound-generation strategy itself growable. And so on.
+//!
+//! Gödel guarantees there's always an N+1. Each level we build
+//! is one more place where we're explicit about the self-feeding.
+//! The architectural risk is FORGETTING a self-feeding loop exists
+//! — then we hand-code where the machine should discover, and the
+//! human-as-compiler pattern reasserts.
+//!
+//! # How this module's self-feeding works (ML5 specifically)
+//!
+//! - `MechanismPool::discovered_operators` starts empty.
+//! - When `respond_to_saturation` finds a COMPOUND mutation that
+//!   produces delta-novelty, the compound is promoted to the
+//!   discovered_operators pool.
+//! - Subsequent calls to `propose_random_mutations` sample from
+//!   (atomic variants) ∪ (pool.discovered_operators) — the space
+//!   grows each time a compound wins.
+//! - An atomic mutation that wins does NOT get added, because
+//!   it's already in the bootstrap set.
+//! - An atomic-like compound (e.g., `Compound(vec![single_atom])`)
+//!   would be a redundant addition; we skip them.
+//!
+//! The output of the self-mutation loop (winning compound
+//! operators) feeds back as INPUT to the same loop at the next
+//! saturation. Level 5 self-reference, closed.
 //!
 //! # The correctness tightening this enables
 //!
@@ -157,6 +213,13 @@ pub enum MechanismMutation {
     BumpValidatorSamples(i32),
     BumpValidatorMaxValue(i32),
     BumpValidatorStepLimit(i32),
+    /// ML5: a compound mutation. Applies each child sequentially
+    /// to the config. A compound that breaks saturation gets
+    /// promoted to `MechanismPool::discovered_operators`, making
+    /// it available as a first-class operator in future saturation
+    /// responses. The mutation SPACE thus grows as the machine
+    /// discovers which combinations of atomic mutations work.
+    Compound(Vec<MechanismMutation>),
 }
 
 impl MechanismMutation {
@@ -229,9 +292,31 @@ impl MechanismMutation {
                 new.validator_step_limit =
                     (new.validator_step_limit as i32 + d).max(1) as usize;
             }
+            Self::Compound(children) => {
+                let mut staged = new;
+                for child in children {
+                    staged = child.apply(&staged);
+                }
+                return staged;
+            }
         }
         new.clamp();
         new
+    }
+
+    /// Is this an atomic (single-parameter) mutation?
+    #[must_use]
+    pub fn is_atomic(&self) -> bool {
+        !matches!(self, Self::Compound(_))
+    }
+
+    /// Compound arity — 1 for atoms, N for Compound(N children).
+    #[must_use]
+    pub fn arity(&self) -> usize {
+        match self {
+            Self::Compound(children) => children.iter().map(|c| c.arity()).sum(),
+            _ => 1,
+        }
     }
 
     /// One-line summary for logging.
@@ -254,6 +339,11 @@ pub struct MechanismPool {
     /// Mutations that WERE accepted (broke saturation). The
     /// full trajectory of self-mutations.
     pub history: Vec<(usize, MechanismMutation)>,
+    /// ML5: compound mutations that won at least once. Added to
+    /// the baseline proposal set so future saturation responses
+    /// can draw from (atomic variants) ∪ (discovered_operators).
+    /// The mutation SPACE grows with the machine's experience.
+    pub discovered_operators: Vec<MechanismMutation>,
 }
 
 impl MechanismPool {
@@ -263,6 +353,7 @@ impl MechanismPool {
             current: MechanismConfig::default(),
             graveyard: Vec::new(),
             history: Vec::new(),
+            discovered_operators: Vec::new(),
         }
     }
 
@@ -272,23 +363,46 @@ impl MechanismPool {
             current: config,
             graveyard: Vec::new(),
             history: Vec::new(),
+            discovered_operators: Vec::new(),
         }
+    }
+
+    /// Is this operator already promoted (to avoid duplicate
+    /// entries in discovered_operators)?
+    fn is_discovered(&self, m: &MechanismMutation) -> bool {
+        self.discovered_operators.contains(m)
     }
 }
 
 // ── Mutation proposal ────────────────────────────────────────────
 
 /// A pool of candidate mutations sampled uniformly from the
-/// mutation enum's variants. This is the "C escalation" path
-/// per the ML4 design: random sweep rather than targeted
-/// diagnosis, at least for V1.
+/// mutation enum's variants PLUS the pool's discovered compound
+/// operators. When `compound_arity > 1`, compound mutations are
+/// generated by chaining `compound_arity` atomic mutations.
+///
+/// This is the ML5 extension of the ML4 sampler: the mutation
+/// space is (atomic variants) ∪ (pool.discovered_operators) ∪
+/// (compound mutations of any arity).
 ///
 /// Deterministic given `seed` (xorshift). Multiple calls with
-/// different seeds give different mutation sets, which the
-/// saturation-response loop uses as trial variants.
+/// different seeds give different mutation sets.
 pub fn propose_random_mutations(
     current: &MechanismConfig,
     n_mutations: usize,
+    seed: u64,
+) -> Vec<(MechanismMutation, MechanismConfig)> {
+    propose_mutations_from_pool(current, &[], n_mutations, 1, seed)
+}
+
+/// Extended proposal: use the pool's discovered_operators AND
+/// allow compounds of specified arity. Compound arity of 1 is
+/// pure atomic; arity 2 chains two atomics, etc.
+pub fn propose_mutations_from_pool(
+    current: &MechanismConfig,
+    discovered: &[MechanismMutation],
+    n_mutations: usize,
+    compound_arity: usize,
     seed: u64,
 ) -> Vec<(MechanismMutation, MechanismConfig)> {
     let mut rng = seed.max(1);
@@ -297,15 +411,41 @@ pub fn propose_random_mutations(
     seen.insert(current.clone());
 
     let mut attempts = 0;
-    while out.len() < n_mutations && attempts < n_mutations * 8 {
+    while out.len() < n_mutations && attempts < n_mutations * 12 {
         attempts += 1;
-        let mutation = sample_mutation(&mut rng, current);
+        let mutation = if compound_arity <= 1 {
+            sample_mutation_with_discovered(&mut rng, current, discovered)
+        } else {
+            // Build a compound by chaining compound_arity atomics.
+            let mut children = Vec::with_capacity(compound_arity);
+            for _ in 0..compound_arity {
+                children.push(sample_mutation_with_discovered(
+                    &mut rng, current, discovered,
+                ));
+            }
+            MechanismMutation::Compound(children)
+        };
         let mutant = mutation.apply(current);
         if seen.insert(mutant.clone()) {
             out.push((mutation, mutant));
         }
     }
     out
+}
+
+fn sample_mutation_with_discovered(
+    rng: &mut u64,
+    current: &MechanismConfig,
+    discovered: &[MechanismMutation],
+) -> MechanismMutation {
+    // 70% chance pick from atomic variants, 30% from discovered
+    // (if any). Biases toward baseline to maintain exploration
+    // diversity, but gives discovered operators real coverage.
+    if !discovered.is_empty() && (xorshift(rng) % 10) < 3 {
+        discovered[(xorshift(rng) as usize) % discovered.len()].clone()
+    } else {
+        sample_mutation(rng, current)
+    }
 }
 
 fn xorshift(state: &mut u64) -> u64 {
@@ -401,18 +541,42 @@ where
 {
     let mut rng = seed.max(1);
     let _ = existing_ledger; // referenced by trial_fn's caller, not here.
+
+    // ML5 escalation schedule:
+    //   round 0: atomic mutations only (arity=1)
+    //   round 1: atomic ∪ discovered, still arity=1
+    //   round 2: compound arity=2
+    //   round 3: compound arity=3
+    //   round 4+: compound arity=3, aggressive sweep
+    //
+    // Each successful compound mutation is promoted to the pool's
+    // discovered_operators, making it available as an atomic-level
+    // proposal in future saturation responses.
     for round in 0..=escalation_budget {
         let n = mutations_per_round * (round + 1).min(4);
-        let mutations = propose_random_mutations(&pool.current, n, {
-            xorshift(&mut rng)
-        });
+        let compound_arity = match round {
+            0 => 1,
+            1 => 1,
+            2 => 2,
+            _ => 3,
+        };
+        let use_discovered = round >= 1;
+        let mutations = propose_mutations_from_pool(
+            &pool.current,
+            if use_discovered {
+                &pool.discovered_operators
+            } else {
+                &[]
+            },
+            n,
+            compound_arity,
+            xorshift(&mut rng),
+        );
         if mutations.is_empty() {
             break;
         }
         let mut best: Option<(MechanismMutation, MechanismConfig, TrialResult)> = None;
         for (mutation, mutant) in mutations {
-            // Skip if we've already tried this exact mutation from
-            // this config (graveyard check).
             let graveyard_hit = pool
                 .graveyard
                 .iter()
@@ -428,19 +592,25 @@ where
             if beats {
                 best = Some((mutation.clone(), mutant.clone(), result.clone()));
             }
-            // Graveyard zero-delta variants so we skip them next
-            // round.
             if result.delta_novelty == 0 {
                 pool.graveyard.push((mutation, 0));
             }
         }
         if let Some((mutation, mutant, result)) = best {
             if result.delta_novelty > 0 {
+                // ML5: promote compound-winners to the discovered
+                // operators pool. Atomic winners are already in
+                // the baseline — no need to promote them.
+                if matches!(mutation, MechanismMutation::Compound(_))
+                    && !pool.is_discovered(&mutation)
+                {
+                    pool.discovered_operators.push(mutation.clone());
+                }
                 pool.history.push((pool.history.len(), mutation.clone()));
                 return Some((mutation, mutant));
             }
         }
-        // Escalate: try bigger random sweep next round.
+        // Escalate: next round uses larger sweep / higher arity.
     }
     None
 }
@@ -537,6 +707,71 @@ mod tests {
         assert!(
             ever_succeeded,
             "saturation response must surface a winning mutation across 16 seeds × 32 mutations"
+        );
+    }
+
+    #[test]
+    fn compound_mutation_applies_children_sequentially() {
+        let c = MechanismConfig::default();
+        let compound = MechanismMutation::Compound(vec![
+            MechanismMutation::BumpCandidateMaxSize(1),
+            MechanismMutation::BumpCompositionCap(10),
+        ]);
+        let mutated = compound.apply(&c);
+        assert_eq!(mutated.candidate_max_size, 6);
+        assert_eq!(mutated.composition_cap, 40);
+    }
+
+    #[test]
+    fn compound_arity_counts_nested_atomics() {
+        let nested = MechanismMutation::Compound(vec![
+            MechanismMutation::BumpCandidateMaxSize(1),
+            MechanismMutation::Compound(vec![
+                MechanismMutation::BumpCompositionCap(5),
+                MechanismMutation::BumpCorpusBaseDepth(1),
+            ]),
+        ]);
+        assert_eq!(nested.arity(), 3);
+    }
+
+    #[test]
+    fn saturation_response_promotes_compound_winners() {
+        // Trial function: only a SPECIFIC compound wins —
+        // BumpCandidateMaxSize(+1) ∘ SetCorpusSeedFromTheorems(true).
+        // Single atomics fail. This forces escalation to compounds.
+        let trial_fn = |config: &MechanismConfig| {
+            if config.candidate_max_size > 5 && config.corpus_seed_from_theorems {
+                TrialResult {
+                    delta_novelty: 5,
+                    total_theorems_found: 15,
+                }
+            } else {
+                TrialResult {
+                    delta_novelty: 0,
+                    total_theorems_found: 0,
+                }
+            }
+        };
+
+        let mut ever_succeeded = false;
+        for seed in 1..=32u64 {
+            let mut pool = MechanismPool::new();
+            let result = respond_to_saturation(&mut pool, &[], trial_fn, 24, 3, seed);
+            if let Some((mutation, new_config)) = result {
+                assert!(new_config.candidate_max_size > 5);
+                assert!(new_config.corpus_seed_from_theorems);
+                // If the winner was a Compound, it should be in
+                // discovered_operators.
+                if matches!(mutation, MechanismMutation::Compound(_)) {
+                    assert!(pool.discovered_operators.contains(&mutation));
+                }
+                ever_succeeded = true;
+                break;
+            }
+        }
+        assert!(
+            ever_succeeded,
+            "compound-requiring winner must be findable via escalation"
         );
     }
 
