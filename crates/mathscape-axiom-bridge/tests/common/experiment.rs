@@ -63,6 +63,18 @@ pub enum CorpusFamily {
     /// Mixed: procedural + one zoo corpus (compositional). Midway
     /// between pure procedural and full zoo.
     MixedOperators,
+    /// Full arithmetic: {add=2, mul=3, sub=5, div=6} mixed.
+    /// Expanded operator vocabulary — produces patterns the
+    /// 3-operator families cannot.
+    FullArithmetic,
+    /// Peano symmetric: {succ=4, pred=7} alternating chains.
+    /// Probes inverse-pair patterns (pred(succ(x))) that the
+    /// succ-only corpus cannot expose.
+    PeanoSymmetric,
+    /// Cross-operator distributivity scaffold: mul(x, add(y, z))
+    /// patterns. Primes distributivity discovery without
+    /// asserting the law.
+    DistributivityScaffold,
 }
 
 impl CorpusFamily {
@@ -168,6 +180,102 @@ impl CorpusFamily {
                 out.push(("cross-op".into(), cross_op()));
                 out
             }
+            CorpusFamily::FullArithmetic => {
+                // Extended vocab: {add=2, mul=3, sub=5, div=6}.
+                let mut out = Vec::with_capacity(budget);
+                for i in 1..=budget as u64 {
+                    let s = seed.wrapping_add(i);
+                    let mut terms = Vec::new();
+                    for n in 1..=6u64 {
+                        terms.push(apply(var(2), vec![nat(n), nat(0)]));
+                        terms.push(apply(var(5), vec![nat(n), nat(0)]));
+                        terms.push(apply(var(5), vec![nat(n), nat(n)]));
+                        terms.push(apply(var(3), vec![nat(n), nat(1)]));
+                        terms.push(apply(var(6), vec![nat(n), nat(1)]));
+                        terms.push(apply(var(6), vec![nat(n), nat(n)]));
+                        terms.push(apply(
+                            var(5),
+                            vec![apply(var(2), vec![nat(n), nat(n)]), nat(n)],
+                        ));
+                        terms.push(apply(
+                            var(6),
+                            vec![apply(var(3), vec![nat(n), nat(n)]), nat(n)],
+                        ));
+                    }
+                    let rot = (s as usize) % terms.len();
+                    terms.rotate_left(rot);
+                    out.push((format!("full-arith-s{s}"), terms));
+                }
+                out
+            }
+            CorpusFamily::PeanoSymmetric => {
+                // {succ=4, pred=7} alternating chains.
+                let mut out = Vec::with_capacity(budget);
+                for i in 1..=budget as u64 {
+                    let s = seed.wrapping_add(i);
+                    let d = (depth + (i as usize % 3)).min(8);
+                    let mut terms = Vec::new();
+                    for base in 0..=4u64 {
+                        for k in 1..=d {
+                            // succ(succ(...pred(pred(base))))
+                            let mut t = nat(base);
+                            for step in 0..k {
+                                let op = if step % 2 == 0 { 4 } else { 7 };
+                                t = apply(var(op), vec![t]);
+                            }
+                            terms.push(t);
+                            // pred(succ(base))
+                            let inv = apply(
+                                var(7),
+                                vec![apply(var(4), vec![nat(base)])],
+                            );
+                            terms.push(inv);
+                            // succ(pred(base))
+                            let inv2 = apply(
+                                var(4),
+                                vec![apply(var(7), vec![nat(base)])],
+                            );
+                            terms.push(inv2);
+                        }
+                    }
+                    let rot = (s as usize) % terms.len();
+                    terms.rotate_left(rot);
+                    out.push((format!("peano-s{s}-d{d}"), terms));
+                }
+                out
+            }
+            CorpusFamily::DistributivityScaffold => {
+                // mul(x, add(y, z)) + add(mul(x, y), mul(x, z)) shapes.
+                let mut out = Vec::with_capacity(budget);
+                for i in 1..=budget as u64 {
+                    let s = seed.wrapping_add(i);
+                    let mut terms = Vec::new();
+                    for x in 1..=4u64 {
+                        for y in 1..=4u64 {
+                            for z in 1..=2u64 {
+                                terms.push(apply(
+                                    var(3),
+                                    vec![
+                                        nat(x),
+                                        apply(var(2), vec![nat(y), nat(z)]),
+                                    ],
+                                ));
+                                terms.push(apply(
+                                    var(2),
+                                    vec![
+                                        apply(var(3), vec![nat(x), nat(y)]),
+                                        apply(var(3), vec![nat(x), nat(z)]),
+                                    ],
+                                ));
+                            }
+                        }
+                    }
+                    let rot = (s as usize) % terms.len();
+                    terms.rotate_left(rot);
+                    out.push((format!("distrib-s{s}"), terms));
+                }
+                out
+            }
         }
     }
 }
@@ -216,6 +324,54 @@ pub struct ExperimentReport {
     pub top_universals: Vec<(String, usize, usize)>,
     /// Rules appearing in canonical? Count.
     pub canonical_apex_size: usize,
+}
+
+/// Fast single-traversal runner for the dense-campaign hot path.
+/// Lighter than `run_one`: 1 Discover + 1 Reinforce per corpus
+/// (instead of 3+1), no meta-gen by default, no registry-full
+/// bookkeeping beyond axiomatized rule extraction. Returns just
+/// the axiomatized rule list.
+///
+/// Runtime at the default settings: ~1-3ms per call. Thread-safe
+/// — no shared mutable state; each call spins up its own Epoch.
+pub fn run_probe_fast(
+    apparatus_src: &str,
+    corpus: &[(String, Vec<Term>)],
+    extract_config: &ExtractConfig,
+    min_score: f64,
+) -> Vec<RewriteRule> {
+    let base = CompressionGenerator::new(extract_config.clone(), 1);
+    let prover = {
+        let base_prover = StatisticalProver::new(
+            mathscape_reward::reward::RewardConfig::default(),
+            min_score,
+        );
+        if apparatus_src.is_empty() {
+            base_prover
+        } else {
+            let form = match mathscape_reward::parse_reward(apparatus_src) {
+                Ok(f) => f,
+                Err(_) => return Vec::new(),
+            };
+            base_prover.with_reward_form(form)
+        }
+    };
+    let mut epoch = Epoch::new(base, prover, RuleEmitter, InMemoryRegistry::new());
+    for (_, c) in corpus {
+        let _ = epoch.step_with_action(c, EpochAction::Discover);
+        let _ = epoch.step_with_action(c, EpochAction::Reinforce);
+    }
+    let mut rules = Vec::new();
+    for artifact in epoch.registry.all() {
+        let s = epoch
+            .registry
+            .status_of(artifact.content_hash)
+            .unwrap_or_else(|| artifact.certificate.status.clone());
+        if matches!(s, ProofStatus::Axiomatized) {
+            rules.push(artifact.rule.clone());
+        }
+    }
+    rules
 }
 
 /// Single-traversal runner — one apparatus, one seed, one corpus

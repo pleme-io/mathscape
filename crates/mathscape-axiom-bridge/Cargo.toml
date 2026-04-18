@@ -14,3 +14,4 @@ axiom-forge = { git = "https://github.com/pleme-io/axiom-forge" }
 mathscape-core = { workspace = true, features = ["test-helpers"] }
 mathscape-compress.workspace = true
 mathscape-reward.workspace = true
+rayon = { workspace = true }

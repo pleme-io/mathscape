@@ -87,6 +87,9 @@ prost-build = "0.13"
 # Time
 chrono = { version = "0.4", features = ["serde"] }
 
+# Parallelism — used by discovery campaigns that sweep 10k+ probes
+rayon = "1"
+
 # Async trait
 async-trait = "0.1"
 
