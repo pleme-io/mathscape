@@ -107,6 +107,7 @@ unchanged).
 | **R6** (constant folding) | `Apply(add, [3, 5]) ≠ Number(8)` — fold reducible Applys via registry's eval rule |
 | **C3** (Fn param binding) | anonymization cloned params verbatim while renumbering body vars, breaking lexical bindings |
 | **R7** (Value::Int + Int builtins) | `Value` nominally extensible but never extended. Now has Int(i64) second variant, 5 Int builtins (int_zero/succ/add/mul, neg) domain-disjoint from Nat, parser recognizes Int literals (-N, iN) and builtin names |
+| **R8** (Tensor shape detector) | Answering "can we detect when the machine naturally develops the tensor?" — YES. Distributivity is the gateway tensor: mul bilinear over add is rank-2 tensor structure. `tensor.rs` pattern-matches rule shapes in the library, reports density + distributive / meta-distributive counts. Traversal report now prints tensor emergence alongside lynchpin. Baseline: Peano-only corpora produce 0 tensor rules (machine hasn't discovered full distributivity yet); a regression pin asserts this. When it flips to nonzero, tensor structure has emerged autonomously |
 
 **R1 (AC-absorbing alpha_equivalent)** probed and deferred
 2026-04-18. Canonicalizing both rules before anonymization is the

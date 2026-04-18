@@ -66,6 +66,14 @@ pub struct TraversalReport {
     pub verified_count: usize,
     pub conjectured_count: usize,
     pub fragile_rules: Vec<(String, usize)>, // (name, cross_corpus_count) — anything < 2
+    /// R8: tensor-shape detection. Library-wide density of rules
+    /// with tensor structure (distributivity or meta-
+    /// distributivity). Zero means no tensor emergence; nonzero
+    /// means the machine's discoveries include bilinear maps —
+    /// the gateway to rank-2 tensor structure.
+    pub tensor_density: f64,
+    pub tensor_distributive_count: usize,
+    pub tensor_meta_count: usize,
 }
 
 impl TraversalReport {
@@ -114,6 +122,21 @@ impl TraversalReport {
             for (name, s) in &self.fragile_rules {
                 println!("    {name} cross={s}");
             }
+        }
+
+        println!("\n▶ Tensor emergence (R8)");
+        println!(
+            "  density            : {:.1}% ({} of {} rules are tensor-shaped)",
+            self.tensor_density * 100.0,
+            self.tensor_distributive_count + self.tensor_meta_count,
+            self.library_final_size,
+        );
+        println!("  distributive       : {}", self.tensor_distributive_count);
+        println!("  meta-distributive  : {}", self.tensor_meta_count);
+        if self.tensor_distributive_count == 0 && self.tensor_meta_count == 0 {
+            println!("  status             : no tensor structure detected yet");
+        } else {
+            println!("  status             : TENSOR EMERGED — bilinear structure in the library");
         }
     }
 }
@@ -287,6 +310,17 @@ pub fn run_traversal(procedural_budget: usize, max_depth: usize) -> TraversalRep
         }
     }
 
+    // R8 tensor shape scan — classify every rule in the library.
+    let library_rules: Vec<_> = epoch
+        .registry
+        .all()
+        .into_iter()
+        .map(|a| a.rule.clone())
+        .collect();
+    let (tensor_distributive_count, tensor_meta_count, _none) =
+        mathscape_core::tensor::shape_counts(&library_rules);
+    let tensor_density = mathscape_core::tensor::tensor_density(&library_rules);
+
     TraversalReport {
         total_corpora: zoo.len(),
         library_final_size: epoch.registry.all().len(),
@@ -300,6 +334,9 @@ pub fn run_traversal(procedural_budget: usize, max_depth: usize) -> TraversalRep
         verified_count,
         conjectured_count,
         fragile_rules,
+        tensor_density,
+        tensor_distributive_count,
+        tensor_meta_count,
     }
 }
 
@@ -353,6 +390,33 @@ fn autonomous_traverse_small() {
     report.narrate();
     assert_autonomous_traversal_invariants(&report);
     assert!(report.total_corpora == 12);
+}
+
+#[test]
+fn tensor_detector_reports_on_current_library_state() {
+    // R8 regression pin: at small scale with the current Peano-
+    // only corpora, the machine discovers identity / commutativity
+    // / successor laws but NOT full distributivity (which requires
+    // variables in both positions that get distributed). Therefore
+    // tensor_density must be 0 in the current baseline.
+    //
+    // When the machine discovers full distributivity
+    // `mul(add(?a, ?b), ?c) = add(mul(?a, ?c), mul(?b, ?c))` with
+    // fully-variable args, this assertion is expected to FLIP:
+    //   - tensor_distributive_count >= 1
+    //   - tensor_density > 0.0
+    //
+    // That flip is the "tensor emerged" signal. Updating this
+    // test when it fires is how we pin the moment.
+    let report = run_traversal(5, 3);
+    assert_eq!(
+        report.tensor_distributive_count, 0,
+        "baseline: Peano traversal hasn't discovered full distributivity yet — \
+         if this fails, the machine just developed tensor structure, update the \
+         landmarks doc"
+    );
+    assert_eq!(report.tensor_meta_count, 0);
+    assert_eq!(report.tensor_density, 0.0);
 }
 
 #[test]
@@ -3454,6 +3518,17 @@ fn run_traversal_pure_procedural(
         }
     }
 
+    // R8 tensor shape scan — classify every rule in the library.
+    let library_rules: Vec<_> = epoch
+        .registry
+        .all()
+        .into_iter()
+        .map(|a| a.rule.clone())
+        .collect();
+    let (tensor_distributive_count, tensor_meta_count, _none) =
+        mathscape_core::tensor::shape_counts(&library_rules);
+    let tensor_density = mathscape_core::tensor::tensor_density(&library_rules);
+
     TraversalReport {
         total_corpora: zoo.len(),
         library_final_size: epoch.registry.all().len(),
@@ -3467,6 +3542,9 @@ fn run_traversal_pure_procedural(
         verified_count,
         conjectured_count,
         fragile_rules,
+        tensor_density,
+        tensor_distributive_count,
+        tensor_meta_count,
     }
 }
 

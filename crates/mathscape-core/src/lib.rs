@@ -19,6 +19,7 @@ pub mod orchestrator;
 pub mod promotion;
 pub mod promotion_gate;
 pub mod reduction;
+pub mod tensor;
 pub mod term;
 pub mod trap;
 #[cfg(any(test, feature = "test-helpers"))]
@@ -55,5 +56,6 @@ pub use reduction::{
     reduction_pressure, ReductionBarrier, ReductionPolicy, ReductionSummary,
     ReductionVerdict,
 };
+pub use tensor::{classify, shape_counts, tensor_density, TensorShape};
 pub use term::{StoredTerm, SymbolId, Term};
 pub use value::Value;
