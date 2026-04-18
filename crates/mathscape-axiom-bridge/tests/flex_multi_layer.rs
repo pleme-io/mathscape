@@ -65,16 +65,56 @@ fn mixed_corpus() -> Vec<Term> {
     v
 }
 
+/// Nested-identity corpus — `add(add(n, 0), 0)`. Two layers of the
+/// same identity. Layer 0 should mint `S_001 = add(?x, 0) => ?x`.
+/// After that primitive migrates back, the corpus rewrites to
+/// `add(n, 0)` — which is ALSO pattern-matched by S_001. So layer 1
+/// should observe full reduction via pure reuse (no new primitives).
+/// That's the "reinforcement-dominant" regime: no discovery needed,
+/// existing library already covers the collapsed form.
+fn nested_identity_corpus() -> Vec<Term> {
+    (1..=8)
+        .map(|n| {
+            let inner = apply(var(2), vec![nat(n), nat(0)]);
+            apply(var(2), vec![inner, nat(0)])
+        })
+        .collect()
+}
+
+/// Compositional corpus — mixes nested and flat add-identity,
+/// plus mul-identity. Forces the discovery engine to fan across
+/// heterogeneous structure within a single epoch:
+///   add(n, 0), add(add(n, 0), 0), mul(n, 1), mul(mul(n, 1), 1)
+/// Two family classes, each at two depths. Observation: how many
+/// primitives fire; whether the deeper nests collapse via reuse or
+/// whether the system mints a specialized nested primitive.
+fn compositional_corpus() -> Vec<Term> {
+    let mut v = Vec::new();
+    for n in 1..=6 {
+        v.push(apply(var(2), vec![nat(n), nat(0)]));
+        v.push(apply(var(2), vec![apply(var(2), vec![nat(n), nat(0)]), nat(0)]));
+        v.push(apply(var(3), vec![nat(n), nat(1)]));
+        v.push(apply(var(3), vec![apply(var(3), vec![nat(n), nat(1)]), nat(1)]));
+    }
+    v
+}
+
 // ── Helpers ─────────────────────────────────────────────────────
 
 fn build_epoch() -> Epoch<CompressionGenerator, StatisticalProver, RuleEmitter, InMemoryRegistry>
 {
+    build_epoch_with(3)
+}
+
+fn build_epoch_with(
+    max_new_rules: usize,
+) -> Epoch<CompressionGenerator, StatisticalProver, RuleEmitter, InMemoryRegistry> {
     Epoch::new(
         CompressionGenerator::new(
             ExtractConfig {
                 min_shared_size: 2,
                 min_matches: 2,
-                max_new_rules: 3,
+                max_new_rules,
             },
             1,
         ),
@@ -149,12 +189,22 @@ fn build_observational_hook(
 }
 
 fn run_flex(label: &str, corpus: Vec<Term>, max_layers: u32, max_epochs_per_layer: usize) {
+    run_flex_with(label, corpus, max_layers, max_epochs_per_layer, 3);
+}
+
+fn run_flex_with(
+    label: &str,
+    corpus: Vec<Term>,
+    max_layers: u32,
+    max_epochs_per_layer: usize,
+    max_new_rules: usize,
+) {
     println!("\n╔══════════════════════════════════════════════════════╗");
     println!("║ FLEX: {:<47}║", label);
     println!("╚══════════════════════════════════════════════════════╝");
 
     let mut runner = MultiLayerRunner {
-        epoch: build_epoch(),
+        epoch: build_epoch_with(max_new_rules),
         allocator: Allocator::new(
             RealizationPolicy::default(),
             RewardEstimator::new(0.3),
@@ -259,6 +309,280 @@ fn flex_mixed_corpus() {
         5,
         20,
     );
+}
+
+#[test]
+fn flex_nested_identity_corpus() {
+    run_flex(
+        "nested additive identity (add(add(_,0),0))",
+        nested_identity_corpus(),
+        5,
+        20,
+    );
+}
+
+#[test]
+fn flex_compositional_corpus() {
+    // max_new_rules=5 so anti-unification has room for all four
+    // pattern classes (flat-add, nested-add, flat-mul, nested-mul).
+    // With cap=3 the machine discovers 3 and silently drops one —
+    // observed: flat-mul got crowded out of the first epoch.
+    run_flex_with(
+        "compositional — nested + flat × add + mul",
+        compositional_corpus(),
+        6,
+        25,
+        5,
+    );
+}
+
+#[test]
+#[ignore = "extreme-depth probe — run explicitly with --ignored"]
+fn flex_extreme_depth_probe() {
+    // Probe: push far past the point where normal discovery should
+    // terminate. If the library becomes frozen, extra epochs are
+    // pure overhead and the machine is at rest. If something new
+    // emerges at depth — a late reinforcement cascade, a meta
+    // pattern that only materializes after many subsumption passes
+    // — that's a finding worth capturing.
+    //
+    // This is observational, not an assertion. Run with:
+    //   cargo test -p mathscape-axiom-bridge flex_extreme_depth_probe \
+    //     -- --ignored --nocapture
+    use std::time::Instant;
+
+    let corpus = compositional_corpus();
+    let depths = [(1_000usize, 20u32), (5_000, 30), (20_000, 40)];
+
+    println!("\n╔══════════════════════════════════════════════════════╗");
+    println!("║ EXTREME DEPTH PROBE                                  ║");
+    println!("╚══════════════════════════════════════════════════════╝");
+    println!(
+        "\n{:>10} {:>7} {:>8} {:>10} {:>10} {:>8}",
+        "epochs/L", "layers", "lib_sz", "root", "prim#", "ms"
+    );
+    println!("{}", "─".repeat(70));
+
+    for (ep, lay) in depths {
+        let mut runner = MultiLayerRunner {
+            epoch: build_epoch_with(5),
+            allocator: Allocator::new(
+                RealizationPolicy::default(),
+                RewardEstimator::new(0.3),
+            ),
+            per_layer_max_epochs: ep,
+            max_layers: lay,
+            policy: ReductionPolicy::layer_0_default(),
+        };
+        let fired = Rc::new(RefCell::new(Vec::new()));
+        let hook = build_observational_hook(fired);
+        let t0 = Instant::now();
+        let _report = runner.run(&corpus, hook);
+        let elapsed_ms = t0.elapsed().as_millis();
+
+        let root = runner.epoch.registry.root();
+        let lib = runner.epoch.registry.all();
+        let prim_count = lib
+            .iter()
+            .filter(|a| {
+                let s = runner
+                    .epoch
+                    .registry
+                    .status_of(a.content_hash)
+                    .unwrap_or_else(|| a.certificate.status.clone());
+                matches!(s, ProofStatus::Primitive(_))
+            })
+            .count();
+        println!(
+            "{:>10} {:>7} {:>8} {:>10} {:>10} {:>8}",
+            ep,
+            lay,
+            lib.len(),
+            format!("{root}").chars().take(8).collect::<String>(),
+            prim_count,
+            elapsed_ms,
+        );
+    }
+
+    println!("\n  interpretation: if ms stays flat and lib_sz stays constant across");
+    println!("  depth tiers, the machine is at rest after initial discovery — the");
+    println!("  meta-optimizer/kicker is not wired; extra budget is pure overhead.");
+}
+
+#[test]
+fn flex_wipe_and_rev_depth_sweep() {
+    // Honest question: does wipe-and-rev convergence hold as epoch
+    // budget grows? At shallow depth the answer is trivially yes
+    // (deterministic machinery). At deeper budgets, allocator EWMA
+    // accumulates state, the reduction meter integrates over more
+    // data, and any non-determinism (hash-map iteration, f64
+    // accumulation order) has more chances to surface. This test
+    // sweeps depth and reports what it finds, without asserting
+    // convergence — just observes.
+    let corpus = compositional_corpus();
+
+    fn rev_with_depth(
+        corpus: &[Term],
+        per_layer_max_epochs: usize,
+        max_layers: u32,
+    ) -> (TermRef, usize, Vec<String>) {
+        let mut runner = MultiLayerRunner {
+            epoch: build_epoch_with(5),
+            allocator: Allocator::new(
+                RealizationPolicy::default(),
+                RewardEstimator::new(0.3),
+            ),
+            per_layer_max_epochs,
+            max_layers,
+            policy: ReductionPolicy::layer_0_default(),
+        };
+        let fired = Rc::new(RefCell::new(Vec::new()));
+        let hook = build_observational_hook(fired);
+        let _report = runner.run(corpus, hook);
+        let root = runner.epoch.registry.root();
+        let lib_size = runner.epoch.registry.all().len();
+        let mut prim_hashes: Vec<String> = runner
+            .epoch
+            .registry
+            .all()
+            .iter()
+            .filter(|a| {
+                let status = runner
+                    .epoch
+                    .registry
+                    .status_of(a.content_hash)
+                    .unwrap_or_else(|| a.certificate.status.clone());
+                matches!(status, ProofStatus::Primitive(_))
+            })
+            .map(|a| a.content_hash.to_string())
+            .collect();
+        prim_hashes.sort();
+        (root, lib_size, prim_hashes)
+    }
+
+    println!("\n╔══════════════════════════════════════════════════════╗");
+    println!("║ WIPE-AND-REV — DEPTH SWEEP                           ║");
+    println!("║   corpus = compositional (4 families × 6 samples)    ║");
+    println!("╚══════════════════════════════════════════════════════╝");
+    println!(
+        "\n{:>10} {:>8} {:>10} {:>10} {}",
+        "epochs/L", "layers", "rev-A root", "rev-B root", "converged?"
+    );
+    println!("{}", "─".repeat(70));
+
+    let depth_grid = [
+        (10usize, 3u32),
+        (25, 6),
+        (50, 8),
+        (100, 10),
+        (250, 12),
+    ];
+    let mut divergences = Vec::new();
+    for (ep, lay) in depth_grid {
+        let (root_a, size_a, prims_a) = rev_with_depth(&corpus, ep, lay);
+        let (root_b, size_b, prims_b) = rev_with_depth(&corpus, ep, lay);
+        let conv = root_a == root_b && prims_a == prims_b && size_a == size_b;
+        println!(
+            "{:>10} {:>8} {:>10} {:>10}  {}",
+            ep,
+            lay,
+            format!("{root_a}").chars().take(8).collect::<String>(),
+            format!("{root_b}").chars().take(8).collect::<String>(),
+            if conv { "✓ yes" } else { "✗ DIVERGED" }
+        );
+        if !conv {
+            divergences.push((ep, lay, root_a, root_b, prims_a, prims_b, size_a, size_b));
+        }
+    }
+
+    if divergences.is_empty() {
+        println!("\n✓ convergence holds across all sweeped depths.");
+    } else {
+        println!("\n✗ divergences observed at:");
+        for (ep, lay, ra, rb, pa, pb, sa, sb) in divergences {
+            println!(
+                "  epochs/L={ep} layers={lay}\n    rev-A root={ra} lib_size={sa} prims={pa:?}\n    rev-B root={rb} lib_size={sb} prims={pb:?}"
+            );
+        }
+        panic!("wipe-and-rev convergence failed at deeper depths — see table");
+    }
+}
+
+#[test]
+fn flex_wipe_and_rev_convergence() {
+    // Convergence invariant: two independent wipes (fresh epoch,
+    // fresh registry, fresh allocator, fresh promotion-hook state)
+    // driven by the same corpus must land at the same final
+    // registry root AND the same set of Primitive rule hashes.
+    //
+    // This is stronger than replay determinism: it asserts that the
+    // discoveries themselves are a function of the corpus, not of
+    // accumulated state across calls to the runner. What emerges,
+    // re-emerges.
+    let corpus = compositional_corpus();
+
+    fn rev(corpus: &[Term]) -> (TermRef, Vec<(String, String)>) {
+        let mut runner = MultiLayerRunner {
+            epoch: build_epoch_with(5),
+            allocator: Allocator::new(
+                RealizationPolicy::default(),
+                RewardEstimator::new(0.3),
+            ),
+            per_layer_max_epochs: 25,
+            max_layers: 6,
+            policy: ReductionPolicy::layer_0_default(),
+        };
+        let fired = Rc::new(RefCell::new(Vec::new()));
+        let hook = build_observational_hook(fired);
+        let _report = runner.run(corpus, hook);
+
+        let root = runner.epoch.registry.root();
+        let mut primitives: Vec<(String, String)> = runner
+            .epoch
+            .registry
+            .all()
+            .iter()
+            .filter(|a| {
+                let status = runner
+                    .epoch
+                    .registry
+                    .status_of(a.content_hash)
+                    .unwrap_or_else(|| a.certificate.status.clone());
+                matches!(status, ProofStatus::Primitive(_))
+            })
+            .map(|a| (a.rule.name.clone(), a.content_hash.to_string()))
+            .collect();
+        primitives.sort();
+        (root, primitives)
+    }
+
+    println!("\n╔══════════════════════════════════════════════════════╗");
+    println!("║ WIPE-AND-REV CONVERGENCE (compositional)             ║");
+    println!("╚══════════════════════════════════════════════════════╝");
+
+    let (root_a, prims_a) = rev(&corpus);
+    println!("\n▶ rev A");
+    println!("  final registry root : {root_a}");
+    for (name, hash) in &prims_a {
+        println!("    Primitive [{name}] {hash}");
+    }
+
+    let (root_b, prims_b) = rev(&corpus);
+    println!("\n▶ rev B (post-wipe)");
+    println!("  final registry root : {root_b}");
+    for (name, hash) in &prims_b {
+        println!("    Primitive [{name}] {hash}");
+    }
+
+    assert_eq!(
+        root_a, root_b,
+        "wipe-and-rev must converge to same registry root"
+    );
+    assert_eq!(
+        prims_a, prims_b,
+        "wipe-and-rev must mint the same Primitive set (same hashes)"
+    );
+    println!("\n✓ two independent wipes converge: {} primitives, root={root_a}", prims_a.len());
 }
 
 #[test]
