@@ -284,6 +284,19 @@ pub fn anonymize_rule(rule: &RewriteRule) -> RewriteRule {
 /// stricter than `proper_subsumes` (which allows asymmetric
 /// subsumption). When this returns true, the two rules are THE SAME
 /// rule modulo naming.
+///
+/// Note on AC-equivalence (2026-04-18): this does NOT currently
+/// absorb AC rearrangement — `add(?a, ?b) → ?a` and `add(?b, ?a)
+/// → ?a` read as DISTINCT rules here, matching the pre-R3 system
+/// behavior. Adding `.canonical()` to both sides before
+/// anonymization would fold AC-equivalent rules together (closing
+/// the explicit gap documented in `mathscape-compress::egraph::
+/// check_rule_equivalence`), but that change shifts the apex
+/// fingerprint the autonomous_traverse milestone was pinned on at
+/// 2026-04-17 (from {S_10000, S_040} to {S_10000, S_042} with
+/// S_042 carrying only 2/12 cross-support at small scale — below
+/// the apex threshold). Per the traversal skill, apex shifts
+/// require structural investigation before commit. Deferred.
 #[must_use]
 pub fn alpha_equivalent(r1: &RewriteRule, r2: &RewriteRule) -> bool {
     let a1 = anonymize_rule(r1);
