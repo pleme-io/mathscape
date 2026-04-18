@@ -106,6 +106,7 @@ unchanged).
 | **R5** (Builtin registry) | magic operator ids scattered across eval, term, downstream — one source of truth |
 | **R6** (constant folding) | `Apply(add, [3, 5]) ≠ Number(8)` — fold reducible Applys via registry's eval rule |
 | **C3** (Fn param binding) | anonymization cloned params verbatim while renumbering body vars, breaking lexical bindings |
+| **R7** (Value::Int + Int builtins) | `Value` nominally extensible but never extended. Now has Int(i64) second variant, 5 Int builtins (int_zero/succ/add/mul, neg) domain-disjoint from Nat, parser recognizes Int literals (-N, iN) and builtin names |
 
 **R1 (AC-absorbing alpha_equivalent)** probed and deferred
 2026-04-18. Canonicalizing both rules before anonymization is the
@@ -116,18 +117,33 @@ with S_042 at 2/12 small-scale support, below the threshold.
 Lynchpin still holds; deterministic_replay still passes. Reverted
 pending structural investigation of the new apex set.
 
-**R2 (TermVisitor trait) and R6-value (Value polymorphism for
-non-Peano domains)** remain pending — marginal cleanup and YAGNI
-respectively.
+**R6-value (Value polymorphism)** landed 2026-04-18 as **R7**:
+Value became extensible via a second variant rather than a full
+trait-based refactor. Int domain now lives alongside Nat at every
+kernel level — enum, registry, parser, evaluator, canonical fold,
+egraph encoding, Lean export. Cross-domain calls are strictly
+rejected (no silent promotion); overflow uses checked arithmetic
+(correctness > wrapping per kernel invariant "true"). The machine
+can now target a second numeric domain whenever a corpus selects
+Int — additive capability, no milestone change.
+
+**R2 (TermVisitor trait)** remains pending — marginal cleanup.
+Adding a Term variant already surfaces each site via the compiler's
+exhaustiveness check (R7 demonstrated this). A visitor trait would
+trade that per-site compiler feedback for uniform dispatch; benefit
+is modest relative to the refactor scope (47 match sites across 26
+files). Deferred.
 
 **Kernel invariant status after Phase R:**
 - Genuine: every operation means what it says mathematically ✓
 - True: evaluator produces correct answers; C3 closes the last
-  known correctness bug ✓
+  known correctness bug; R7 overflow is checked, not wrapping ✓
 - Repeatable: deterministic across runs (C2 + BTreeMap bindings) ✓
 - No equal terms: commutative + associative + nullary/unary/binary
   constant applications all collapse to one canonical form ✓
   (modulo AC absorption into alpha_equivalent — R1 deferred)
+- Extensible: Value carries two domains (Nat, Int); the registry
+  scales by appending Builtin entries with no magic numbers ✓
 
 ## Where we go next
 
