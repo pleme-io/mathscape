@@ -2086,6 +2086,7 @@ dependencies = [
  "mathscape-core",
  "mathscape-store",
  "serde",
+ "tatara-lisp",
 ]
 
 [[package]]

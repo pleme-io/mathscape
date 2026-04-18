@@ -151,7 +151,148 @@ impl Default for MechanismConfig {
     }
 }
 
+// ── M1: Lisp Sexp round-trip ─────────────────────────────────────
+//
+// Every mutable parameter is now also expressible as a
+// tatara-lisp Sexp form. The Sexp form IS the authoritative
+// serialization; Rust struct is the runtime cache. The machine's
+// own apparatus-mutation loop can operate on the Sexp directly,
+// and from here on any migration to Lisp-evaluated fitness
+// functions or mutation operators uses this round-trip as the
+// shared boundary.
+
 impl MechanismConfig {
+    /// Serialize to a Sexp form:
+    /// `(config :candidate-max-size 5 :composition-cap 30 ...)`
+    pub fn to_sexp(&self) -> tatara_lisp::ast::Sexp {
+        use tatara_lisp::ast::Sexp;
+        let mut items: Vec<Sexp> = vec![Sexp::symbol("config")];
+        items.push(Sexp::keyword("candidate-max-size"));
+        items.push(Sexp::int(self.candidate_max_size as i64));
+        items.push(Sexp::keyword("candidate-vocab"));
+        items.push(Sexp::List(
+            self.candidate_vocab
+                .iter()
+                .map(|v| Sexp::int(*v as i64))
+                .collect(),
+        ));
+        items.push(Sexp::keyword("composition-cap"));
+        items.push(Sexp::int(self.composition_cap as i64));
+        items.push(Sexp::keyword("candidate-constants"));
+        items.push(Sexp::List(
+            self.candidate_constants
+                .iter()
+                .map(|v| Sexp::int(*v as i64))
+                .collect(),
+        ));
+        items.push(Sexp::keyword("corpus-vocab"));
+        items.push(Sexp::List(
+            self.corpus_vocab
+                .iter()
+                .map(|v| Sexp::int(*v as i64))
+                .collect(),
+        ));
+        items.push(Sexp::keyword("corpus-base-depth"));
+        items.push(Sexp::int(self.corpus_base_depth as i64));
+        items.push(Sexp::keyword("corpus-seed-from-theorems"));
+        items.push(Sexp::boolean(self.corpus_seed_from_theorems));
+        items.push(Sexp::keyword("corpus-max-value"));
+        items.push(Sexp::int(self.corpus_max_value as i64));
+        items.push(Sexp::keyword("extract-min-shared-size"));
+        items.push(Sexp::int(self.extract_min_shared_size as i64));
+        items.push(Sexp::keyword("extract-min-matches"));
+        items.push(Sexp::int(self.extract_min_matches as i64));
+        items.push(Sexp::keyword("extract-max-new-rules"));
+        items.push(Sexp::int(self.extract_max_new_rules as i64));
+        items.push(Sexp::keyword("validator-samples"));
+        items.push(Sexp::int(self.validator_samples as i64));
+        items.push(Sexp::keyword("validator-max-value"));
+        items.push(Sexp::int(self.validator_max_value as i64));
+        items.push(Sexp::keyword("validator-step-limit"));
+        items.push(Sexp::int(self.validator_step_limit as i64));
+        Sexp::List(items)
+    }
+
+    /// Parse from a Sexp form. Returns `None` if the form is
+    /// malformed or missing required fields — the caller must
+    /// handle invalid forms (treat as a failed mutation).
+    pub fn from_sexp(sexp: &tatara_lisp::ast::Sexp) -> Option<Self> {
+        use tatara_lisp::ast::Sexp;
+        let items = sexp.as_list()?;
+        if items.is_empty() || items[0].as_symbol() != Some("config") {
+            return None;
+        }
+        let mut out = Self::default();
+        let mut i = 1;
+        while i + 1 < items.len() {
+            let key = items[i].as_keyword()?;
+            let val = &items[i + 1];
+            match key {
+                "candidate-max-size" => {
+                    out.candidate_max_size = val.as_int()? as usize;
+                }
+                "candidate-vocab" => {
+                    out.candidate_vocab = val
+                        .as_list()?
+                        .iter()
+                        .filter_map(|s| s.as_int().map(|n| n as u32))
+                        .collect();
+                }
+                "composition-cap" => {
+                    out.composition_cap = val.as_int()? as usize;
+                }
+                "candidate-constants" => {
+                    out.candidate_constants = val
+                        .as_list()?
+                        .iter()
+                        .filter_map(|s| s.as_int().map(|n| n as u64))
+                        .collect();
+                }
+                "corpus-vocab" => {
+                    out.corpus_vocab = val
+                        .as_list()?
+                        .iter()
+                        .filter_map(|s| s.as_int().map(|n| n as u32))
+                        .collect();
+                }
+                "corpus-base-depth" => {
+                    out.corpus_base_depth = val.as_int()? as usize;
+                }
+                "corpus-seed-from-theorems" => {
+                    out.corpus_seed_from_theorems = matches!(
+                        val,
+                        Sexp::Atom(tatara_lisp::ast::Atom::Bool(true))
+                    );
+                }
+                "corpus-max-value" => {
+                    out.corpus_max_value = val.as_int()? as u64;
+                }
+                "extract-min-shared-size" => {
+                    out.extract_min_shared_size = val.as_int()? as usize;
+                }
+                "extract-min-matches" => {
+                    out.extract_min_matches = val.as_int()? as usize;
+                }
+                "extract-max-new-rules" => {
+                    out.extract_max_new_rules = val.as_int()? as usize;
+                }
+                "validator-samples" => {
+                    out.validator_samples = val.as_int()? as usize;
+                }
+                "validator-max-value" => {
+                    out.validator_max_value = val.as_int()? as u64;
+                }
+                "validator-step-limit" => {
+                    out.validator_step_limit = val.as_int()? as usize;
+                }
+                _ => {}
+            }
+            i += 2;
+        }
+        out.clamp();
+        Some(out)
+    }
+
     /// Bounded: enforce hard limits so pathological mutations
     /// don't corrupt subsequent trials.
     pub fn clamp(&mut self) {
@@ -618,6 +759,67 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sexp_round_trip_preserves_default_config() {
+        // M1 gold test: the Lisp Sexp form IS the authoritative
+        // representation. Serialize-then-parse must preserve
+        // every field at every value the default can take.
+        let original = MechanismConfig::default();
+        let sexp = original.to_sexp();
+        let reparsed = MechanismConfig::from_sexp(&sexp)
+            .expect("default config must round-trip");
+        assert_eq!(original, reparsed);
+    }
+
+    #[test]
+    fn sexp_round_trip_preserves_mutated_config() {
+        // Same gold test for a mutant — every migration path must
+        // work on configs that mutations have already perturbed.
+        let mut cfg = MechanismConfig::default();
+        cfg = MechanismMutation::BumpCandidateMaxSize(2).apply(&cfg);
+        cfg = MechanismMutation::AddCorpusVocabOp(8).apply(&cfg);
+        cfg = MechanismMutation::SetCorpusSeedFromTheorems(true).apply(&cfg);
+        cfg = MechanismMutation::RemoveCandidateVocabOp(2).apply(&cfg);
+        let sexp = cfg.to_sexp();
+        let reparsed =
+            MechanismConfig::from_sexp(&sexp).expect("mutated config round-trips");
+        assert_eq!(cfg, reparsed);
+    }
+
+    #[test]
+    fn sexp_parse_rejects_malformed_input() {
+        use tatara_lisp::ast::Sexp;
+        // Wrong head symbol.
+        let bad = Sexp::List(vec![Sexp::symbol("not-config")]);
+        assert!(MechanismConfig::from_sexp(&bad).is_none());
+        // Not a list.
+        let bad = Sexp::int(42);
+        assert!(MechanismConfig::from_sexp(&bad).is_none());
+    }
+
+    #[test]
+    fn sexp_serialization_uses_kebab_case_keywords() {
+        // Human-readable keyword naming. Fields in the Rust struct
+        // use snake_case; the Sexp uses kebab-case keywords per
+        // Lisp convention.
+        let cfg = MechanismConfig::default();
+        let sexp = cfg.to_sexp();
+        let items = sexp.as_list().unwrap();
+        let mut found_kebab = false;
+        for item in items {
+            if let Some(k) = item.as_keyword() {
+                if k.contains('-') {
+                    found_kebab = true;
+                    break;
+                }
+            }
+        }
+        assert!(
+            found_kebab,
+            "sexp must use kebab-case keywords (for Lisp convention)"
+        );
+    }
 
     #[test]
     fn default_config_is_current_hardcoded_values() {

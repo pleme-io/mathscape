@@ -11,5 +11,12 @@ mathscape-core.workspace = true
 mathscape-store.workspace = true
 serde.workspace = true
 
+# M1 of the full Lisp port (docs/arch/lisp-port-plan.md).
+# The mechanism layer — config, mutation operators, fitness
+# functions — migrates from Rust structs/enums to Lisp Sexp
+# forms evaluated by the tatara-lisp terreiro. Rust retains only
+# the kernel (primitives, evaluator, identity types).
+tatara-lisp = { git = "https://github.com/pleme-io/tatara" }
+
 [dev-dependencies]
 mathscape-core = { workspace = true, features = ["test-helpers"] }
