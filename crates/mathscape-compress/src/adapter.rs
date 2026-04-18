@@ -25,7 +25,7 @@ use mathscape_core::{
 /// Step-bounded to avoid pathological non-termination from a
 /// mis-designed library (shouldn't happen with the lattice's
 /// current semantics, but cheap insurance).
-fn rewrite_fixed_point(term: &Term, library: &[RewriteRule], max_steps: usize) -> Term {
+pub fn rewrite_fixed_point(term: &Term, library: &[RewriteRule], max_steps: usize) -> Term {
     let mut current = rewrite_children(term, library, max_steps);
     for _ in 0..max_steps {
         let next = rewrite_root_once(&current, library);

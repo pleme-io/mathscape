@@ -3858,3 +3858,212 @@ fn count_zero_positions(
     }
     (left, right)
 }
+
+#[test]
+#[ignore = "phase L-min: self-feeding traversal — library residue as next corpus. ~20s, --ignored"]
+fn phase_l_self_feeding_traversal() {
+    // Phase L-minimal: close the corpus feedback loop. No new
+    // machinery, no term generator, no external vocabulary. Just
+    // wire the library-reduced residue of each layer's corpus
+    // back as the NEXT layer's corpus. The machine observes its
+    // own output and compresses THAT.
+    //
+    // Design criterion (Gödel move): structural self-reference.
+    // The machine looks at the residue of its own reductions —
+    // what IT couldn't compress — and asks "what patterns do I
+    // see here that weren't visible in the source?" This is
+    // exactly the diagonal that makes Gödel-style novelty
+    // possible: the input includes the output of the previous
+    // pass.
+    //
+    // What we're measuring:
+    //   - Library growth per layer. If layer N adds rules that
+    //     layer N-1 didn't, self-feeding is generative.
+    //   - Convergence. Does the residue shrink to empty? Does it
+    //     oscillate? Does the library stabilize at a deeper
+    //     fixed point than the one-shot baseline?
+    //   - Structural character of new rules. What do they look
+    //     like? Same Symbol-naming trivialities as the baseline
+    //     bettyfine, or something qualitatively different?
+    //
+    // Surprise = structure we didn't anticipate. Anticipated
+    // convergence = we learn something about the apparatus's
+    // reach. Either result is informative.
+    use mathscape_compress::adapter::rewrite_fixed_point;
+    use mathscape_compress::extract::ExtractConfig as EC;
+    use mathscape_core::control::EpochAction;
+    use mathscape_core::eval::RewriteRule;
+    use mathscape_core::term::Term;
+    use mathscape_core::test_helpers::{apply, nat, var};
+
+    // Seed corpus: NESTED structures so the library has layers
+    // to peel. Mix of zero-right, zero-left, nested arithmetic.
+    // The nesting is critical — flat corpora have no depth for
+    // residue to be interesting.
+    let seed: Vec<Term> = vec![
+        // (mul (add x 0) y) — add-identity reduces, leaves mul
+        apply(var(3), vec![apply(var(2), vec![nat(3), nat(0)]), nat(5)]),
+        apply(var(3), vec![apply(var(2), vec![nat(5), nat(0)]), nat(7)]),
+        apply(var(3), vec![apply(var(2), vec![nat(2), nat(0)]), nat(4)]),
+        // (add (mul x 1) y) — pretend mul-identity exists
+        apply(var(2), vec![apply(var(3), vec![nat(4), nat(1)]), nat(6)]),
+        apply(var(2), vec![apply(var(3), vec![nat(3), nat(1)]), nat(8)]),
+        apply(var(2), vec![apply(var(3), vec![nat(7), nat(1)]), nat(2)]),
+        // (succ (succ (succ zero))) — pure successor chains
+        apply(var(4), vec![apply(var(4), vec![apply(var(4), vec![nat(0)])])]),
+        apply(var(4), vec![apply(var(4), vec![apply(var(4), vec![apply(var(4), vec![nat(0)])])])]),
+        // (mul (add x 0) (add y 0)) — both children need add-identity
+        apply(
+            var(3),
+            vec![
+                apply(var(2), vec![nat(3), nat(0)]),
+                apply(var(2), vec![nat(5), nat(0)]),
+            ],
+        ),
+        apply(
+            var(3),
+            vec![
+                apply(var(2), vec![nat(7), nat(0)]),
+                apply(var(2), vec![nat(2), nat(0)]),
+            ],
+        ),
+    ];
+
+    let config = EC {
+        min_shared_size: 2,
+        min_matches: 2,
+        max_new_rules: 8,
+    };
+    let base = CompressionGenerator::new(config.clone(), 1);
+    let meta = MetaPatternGenerator::new(
+        EC {
+            min_shared_size: 1,
+            min_matches: 2,
+            max_new_rules: 8,
+        },
+        10_000,
+    );
+    let mut epoch = Epoch::new(
+        CompositeGenerator::new(base, meta),
+        mathscape_reward::StatisticalProver::new(
+            mathscape_reward::reward::RewardConfig::default(),
+            0.0,
+        ),
+        RuleEmitter,
+        InMemoryRegistry::new(),
+    );
+
+    let mut current_corpus = seed.clone();
+    let mut history: Vec<(usize, usize, usize, usize)> = Vec::new();
+    const MAX_LAYERS: usize = 8;
+    let mut previous_lib_size = 0usize;
+
+    println!();
+    println!("phase L-min: self-feeding traversal — {} seed terms", seed.len());
+    println!("──────────────────────────────────────────────────────");
+
+    for layer in 0..MAX_LAYERS {
+        // Run a proper epoch: multiple Discover then one Reinforce.
+        for _ in 0..3 {
+            let _ = epoch.step_with_action(&current_corpus, EpochAction::Discover);
+        }
+        let _ = epoch.step_with_action(&current_corpus, EpochAction::Reinforce);
+
+        let lib: Vec<RewriteRule> =
+            epoch.registry.all().iter().map(|a| a.rule.clone()).collect();
+        let lib_size = lib.len();
+        let new_rules = lib_size.saturating_sub(previous_lib_size);
+
+        // Compute library-reduced residue. Each term → fixed
+        // point under the current library. The RESIDUE is that
+        // reduced form, deduped.
+        let reduced: Vec<Term> = current_corpus
+            .iter()
+            .map(|t| rewrite_fixed_point(t, &lib, 64))
+            .collect();
+        let mut uniq_reduced: Vec<Term> = Vec::new();
+        for r in &reduced {
+            if !uniq_reduced.contains(r) {
+                uniq_reduced.push(r.clone());
+            }
+        }
+        let residue_size = uniq_reduced.len();
+
+        // How many terms reduced *at all*? Indicator of library
+        // coverage on this layer.
+        let reductions = current_corpus
+            .iter()
+            .zip(reduced.iter())
+            .filter(|(a, b)| a != b)
+            .count();
+
+        history.push((layer, lib_size, residue_size, reductions));
+        println!(
+            "  layer {layer}: lib={lib_size:3}  +new={new_rules:2}  residue={residue_size:2}  reduced={reductions}/{}",
+            current_corpus.len()
+        );
+
+        previous_lib_size = lib_size;
+
+        // Termination: library stops growing AND residue is
+        // stable (fixed point of self-feeding).
+        if new_rules == 0 && layer > 0 {
+            println!("  → library stable at layer {layer}");
+            break;
+        }
+
+        // Guard: if residue is empty (library reduces everything
+        // to a single canonical form), stop — there's nothing
+        // left to look at.
+        if uniq_reduced.is_empty() {
+            println!("  → residue collapsed to empty at layer {layer}");
+            break;
+        }
+
+        // Feed residue back as next corpus. This is the Gödel
+        // diagonal: the input now contains the output of the
+        // previous epoch's compression.
+        current_corpus = uniq_reduced;
+    }
+
+    println!();
+    println!("library at termination:");
+    for artifact in epoch.registry.all() {
+        let status = epoch
+            .registry
+            .status_of(artifact.content_hash)
+            .unwrap_or_else(|| artifact.certificate.status.clone());
+        println!(
+            "  {} [{:?}] lhs={} rhs={}",
+            artifact.rule.name,
+            status,
+            format_term(&artifact.rule.lhs),
+            format_term(&artifact.rule.rhs),
+        );
+    }
+
+    // Observational assertions. Convergence is the expected
+    // behavior (machine finds fixed point); growth is the
+    // surprising behavior (self-feeding exposed new structure).
+    // Report either, assert only that we terminated without
+    // panic.
+    println!();
+    let growth: Vec<usize> = history.windows(2).map(|w| w[1].1 - w[0].1).collect();
+    let total_growth_past_layer0: usize = growth.iter().sum();
+    if total_growth_past_layer0 > 0 {
+        println!(
+            "  ✓ SELF-FEEDING GENERATED {total_growth_past_layer0} NEW RULE(S) \
+             beyond layer-0 output"
+        );
+        println!("    the feedback edge exposed patterns the one-shot missed.");
+        println!("    this is structural novelty — the machine discovered");
+        println!("    by looking at its own reductions.");
+    } else {
+        println!("  ∘ self-feeding converged at layer 0 — residue does not");
+        println!("    expose new patterns within the current extract/prover");
+        println!("    budget. the one-shot bettyfine IS the self-feeding fixed");
+        println!("    point on this corpus. the apparatus has limits where");
+        println!("    self-reference alone doesn't unlock further structure.");
+    }
+    assert!(!history.is_empty(), "at least one layer must run");
+}
