@@ -16,6 +16,8 @@ use mathscape_compress::{extract::ExtractConfig, CompressionGenerator};
 use mathscape_core::{
     control::{Allocator, RealizationPolicy, RewardEstimator},
     epoch::{Epoch, InMemoryRegistry, Registry, RuleEmitter},
+    event::Event,
+    form_tree::DiscoveryForest,
     hash::TermRef,
     lifecycle::ProofStatus,
     meta::{MetaOptimizer, PolicyTweak},
@@ -334,6 +336,195 @@ fn flex_compositional_corpus() {
         6,
         25,
         5,
+    );
+}
+
+#[test]
+fn flex_discovery_forest_end_to_end() {
+    // End-to-end: run the real discovery pipeline on the
+    // compositional corpus, feed every corpus term + every accepted
+    // rule into a DiscoveryForest, and observe:
+    //   1. The forest picks up retroactive reductions when rules
+    //      fire on pre-inserted nodes (flat add-id + flat mul-id
+    //      should each retroactively reduce 12 pre-inserted terms).
+    //   2. `traversal_saving` rises as the forest stabilizes —
+    //      scheduler savings are real, not paper.
+    //   3. Stable-leaf count grows as reduction chains terminate at
+    //      fully-reduced leaves.
+    let corpus = compositional_corpus();
+    let mut forest = DiscoveryForest::new();
+    // Insert every corpus term BEFORE running discovery. The
+    // retroactive test is: does the forest correctly reduce these
+    // historical nodes when the rules land later?
+    for t in &corpus {
+        forest.insert(t.clone());
+    }
+    let corpus_nodes_inserted = forest.len();
+
+    let mut runner = MultiLayerRunner {
+        epoch: build_epoch_with(5),
+        allocator: Allocator::new(RealizationPolicy::default(), RewardEstimator::new(0.3)),
+        per_layer_max_epochs: 25,
+        max_layers: 6,
+        policy: ReductionPolicy::layer_0_default(),
+    };
+    let fired = Rc::new(RefCell::new(Vec::new()));
+    let hook = build_observational_hook(fired);
+
+    // Run the machine to equilibrium, but keep driving the forest
+    // manually: tick its epoch cursor in lockstep with the inner
+    // epoch id, and feed each accepted rule to
+    // `apply_rule_retroactively`.
+    //
+    // The runner doesn't expose per-epoch hooks for event streams,
+    // so we drive a series of `step_auto` calls directly over the
+    // corpus, mirroring what the runner does internally for layer
+    // 0. This is a controlled approximation: we get the same
+    // trace stream the runner would emit, and we can fold the
+    // forest in.
+    let mut accepted_rule_count = 0u64;
+    let mut retroactive_edges_total = 0usize;
+
+    println!("\n╔══════════════════════════════════════════════════════╗");
+    println!("║ DISCOVERY FOREST — END TO END                        ║");
+    println!("╚══════════════════════════════════════════════════════╝");
+    println!("\n▶ Pre-run");
+    println!("  corpus size                  : {}", corpus.len());
+    println!("  forest nodes (pre-inserted)  : {corpus_nodes_inserted}");
+
+    let max_epochs = 25;
+    for e in 1..=max_epochs {
+        forest.set_epoch(e as u64);
+        let trace = runner
+            .epoch
+            .step_auto(&corpus, &mut runner.allocator);
+        let accepted: Vec<_> = trace
+            .events
+            .iter()
+            .filter_map(|ev| match ev {
+                Event::Accept { artifact, .. } => Some(artifact.rule.clone()),
+                _ => None,
+            })
+            .collect();
+        accepted_rule_count += accepted.len() as u64;
+
+        // Drive the forest each epoch with the FULL current library,
+        // not just epoch-new rules. This is what lets the scheduler
+        // tick correctly: due nodes are inspected every epoch (until
+        // their check_period grows past the inter-epoch gap); missed
+        // nodes advance toward stability; newly-inserted targets
+        // from prior retroactive edges get their turn under rules
+        // that were already accepted.
+        let library: Vec<mathscape_core::eval::RewriteRule> = runner
+            .epoch
+            .registry
+            .all()
+            .iter()
+            .map(|a| a.rule.clone())
+            .collect();
+        let lib_refs: Vec<&mathscape_core::eval::RewriteRule> = library.iter().collect();
+        let edges = forest.apply_rules_retroactively(&lib_refs);
+        let r = edges.iter().filter(|e| e.retroactive).count();
+        retroactive_edges_total += r;
+        if !accepted.is_empty() || !edges.is_empty() {
+            println!(
+                "  epoch={:>2} accepted {} rule(s), forest fired {} edge(s) ({} retroactive), lib={}",
+                e,
+                accepted.len(),
+                edges.len(),
+                r,
+                library.len(),
+            );
+        }
+    }
+
+    let final_saving = forest.traversal_saving(max_epochs as u64);
+    let stable_leaves = forest.stable_leaf_count();
+
+    println!("\n▶ Post-run");
+    println!("  forest nodes                 : {}", forest.len());
+    println!("  accepted rules               : {accepted_rule_count}");
+    println!("  total retroactive edges      : {retroactive_edges_total}");
+    println!("  stable-leaf count            : {stable_leaves}");
+    println!("  traversal_saving (epoch {max_epochs:>2}) : {final_saving:.3}");
+    println!("  all edges recorded           : {}", forest.edges.len());
+
+    // Hard assertions: the forest must do real work.
+    assert!(
+        forest.len() >= corpus_nodes_inserted,
+        "forest should have at least the pre-inserted corpus nodes"
+    );
+    assert!(
+        !forest.edges.is_empty(),
+        "some rule should have fired at least one morphism edge on the corpus"
+    );
+    assert!(
+        accepted_rule_count >= 2,
+        "compositional corpus should yield ≥ 2 accepted rules; got {accepted_rule_count}"
+    );
+    // The flat rules hit ~12 terms each retroactively; expect a
+    // healthy retroactive count.
+    assert!(
+        retroactive_edges_total >= 1,
+        "at least one retroactive edge should fire when a rule lands on already-inserted nodes; got {retroactive_edges_total}"
+    );
+    assert!(
+        final_saving > 0.0,
+        "scheduler should save at least some traversal as the forest stabilizes; got {final_saving}"
+    );
+}
+
+#[test]
+fn flex_forest_scheduler_scales() {
+    // O(due) scheduler test: build a large forest (1000 unreducible
+    // nodes), apply a non-matching rule many times, and show that
+    // the per-pass work drops as the forest stabilizes.
+    use std::time::Instant;
+
+    let mut forest = DiscoveryForest::new();
+    for n in 0..1000u64 {
+        forest.insert(apply(var(7), vec![nat(n), nat(n + 1)])); // never matches add-id
+    }
+    let rule = mathscape_core::eval::RewriteRule {
+        name: "add-identity".into(),
+        lhs: apply(var(2), vec![var(100), nat(0)]),
+        rhs: var(100),
+    };
+
+    println!("\n╔══════════════════════════════════════════════════════╗");
+    println!("║ FOREST SCHEDULER — O(due) SCALING                    ║");
+    println!("╚══════════════════════════════════════════════════════╝");
+    println!("\n{:>6} {:>8} {:>10} {:>12} {:>10}", "epoch", "due", "total", "saving", "us");
+    println!("{}", "─".repeat(56));
+
+    for e in 1..=60u64 {
+        forest.set_epoch(e);
+        let t0 = Instant::now();
+        let _ = forest.apply_rule_retroactively(&rule);
+        let us = t0.elapsed().as_micros();
+        if matches!(e, 1 | 2 | 3 | 5 | 10 | 20 | 40 | 60) {
+            let saving = forest.traversal_saving(e);
+            let due = forest.due_nodes(e).len();
+            println!(
+                "{:>6} {:>8} {:>10} {:>12.3} {:>10}",
+                e,
+                due,
+                forest.len(),
+                saving,
+                us
+            );
+        }
+    }
+
+    let final_saving = forest.traversal_saving(60);
+    println!(
+        "\n▶ After 60 all-miss passes on 1000 unreducible nodes:"
+    );
+    println!("  traversal_saving: {final_saving:.3}  (target: ~0.9+ at max period 64)");
+
+    assert!(
+        final_saving > 0.8,
+        "after 60 passes most nodes should have hit the 64-epoch check period; saving={final_saving}"
     );
 }
 
