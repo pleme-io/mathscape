@@ -16,6 +16,7 @@ pub mod hash;
 pub mod lifecycle;
 pub mod meta;
 pub mod migration;
+pub mod optimizer;
 pub mod parse;
 pub mod orchestrator;
 pub mod promotion;
@@ -46,6 +47,7 @@ pub use epoch::{
     InMemoryRegistry, Prover, Registry, Rejection, RuleEmitter, Verdict,
 };
 pub use autograd::symbolic_derivative;
+pub use optimizer::{sgd_step_int, sgd_step_tensor};
 pub use bettyfine::{bettyfine_library, standard_bettyfine_cardinality, OperatorSpec};
 pub use event::{Event, EventCategory, StatusAdvance};
 pub use form_tree::{

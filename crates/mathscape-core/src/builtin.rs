@@ -76,6 +76,12 @@ pub const TENSOR_DOT: u32 = 23;
 pub const TENSOR_NEG: u32 = 24;
 pub const TENSOR_SCALE: u32 = 25;
 
+// R16 (2026-04-18): 2D tensor ops. Complete the compute-layer
+// width with the primitives linear-algebra depends on.
+pub const TENSOR_MATMUL: u32 = 26;
+pub const TENSOR_TRANSPOSE: u32 = 27;
+pub const TENSOR_RESHAPE: u32 = 28;
+
 /// A builtin operator — the atomic primitives the evaluator knows
 /// how to reduce directly. Fields are the declaration; `eval` is
 /// the reduction rule.
@@ -290,6 +296,98 @@ fn eval_tensor_neg(args: &[Term]) -> Option<Term> {
     }))
 }
 
+// ── R16 (2026-04-18): 2D tensor ops ───────────────────────────────
+
+fn eval_tensor_matmul(args: &[Term]) -> Option<Term> {
+    // 2D matrix multiplication: A[m,n] @ B[n,p] = C[m,p].
+    // Returns None on non-2D shapes or mismatched inner dim.
+    if args.len() != 2 {
+        return None;
+    }
+    let (sa, da) = args[0].as_tensor_val()?;
+    let (sb, db) = args[1].as_tensor_val()?;
+    if sa.len() != 2 || sb.len() != 2 {
+        return None;
+    }
+    let (m, n_a) = (sa[0], sa[1]);
+    let (n_b, p) = (sb[0], sb[1]);
+    if n_a != n_b {
+        return None;
+    }
+    let n = n_a;
+    let mut out = vec![0i64; m * p];
+    // C[i, j] = sum_k A[i, k] * B[k, j]
+    for i in 0..m {
+        for j in 0..p {
+            let mut acc: i64 = 0;
+            for k in 0..n {
+                let a_ik = da[i * n + k];
+                let b_kj = db[k * p + j];
+                let prod = a_ik.checked_mul(b_kj)?;
+                acc = acc.checked_add(prod)?;
+            }
+            out[i * p + j] = acc;
+        }
+    }
+    Some(Term::Number(Value::Tensor {
+        shape: vec![m, p],
+        data: out,
+    }))
+}
+
+fn eval_tensor_transpose(args: &[Term]) -> Option<Term> {
+    // 2D transpose: T[i, j] → T^T[j, i]. Shape [m, n] → [n, m].
+    if args.len() != 1 {
+        return None;
+    }
+    let (s, d) = args[0].as_tensor_val()?;
+    if s.len() != 2 {
+        return None;
+    }
+    let (m, n) = (s[0], s[1]);
+    let mut out = vec![0i64; m * n];
+    for i in 0..m {
+        for j in 0..n {
+            // T^T[j, i] = T[i, j]
+            out[j * m + i] = d[i * n + j];
+        }
+    }
+    Some(Term::Number(Value::Tensor {
+        shape: vec![n, m],
+        data: out,
+    }))
+}
+
+fn eval_tensor_reshape(args: &[Term]) -> Option<Term> {
+    // Reshape T to a new shape. Second arg is a 1D tensor whose
+    // elements (as usize) are the new dims. Rejects on numel
+    // mismatch between old and new shape.
+    if args.len() != 2 {
+        return None;
+    }
+    let (_old_shape, data) = args[0].as_tensor_val()?;
+    let (shape_spec_shape, shape_spec_data) = args[1].as_tensor_val()?;
+    if shape_spec_shape.len() != 1 {
+        return None;
+    }
+    // All dim values must be non-negative; convert to usize.
+    let mut new_shape: Vec<usize> = Vec::with_capacity(shape_spec_data.len());
+    for v in shape_spec_data {
+        if *v < 0 {
+            return None;
+        }
+        new_shape.push(*v as usize);
+    }
+    let expected: usize = new_shape.iter().product();
+    if expected != data.len() {
+        return None;
+    }
+    Some(Term::Number(Value::Tensor {
+        shape: new_shape,
+        data: data.to_vec(),
+    }))
+}
+
 fn eval_tensor_scale(args: &[Term]) -> Option<Term> {
     // `scale(c, T) = c * T` element-wise. `c` is an Int scalar,
     // `T` is a tensor. The Int ↔ Tensor boundary is explicit —
@@ -456,6 +554,35 @@ pub const BUILTINS: &[Builtin] = &[
         commutative: false,
         associative: false,
         eval: eval_tensor_scale,
+    },
+    // R16: 2D tensor operations. Matmul is bilinear but
+    // NOT commutative (A·B ≠ B·A in general) and NOT
+    // associative as declared here because associativity only
+    // works when shapes match up. Transpose and reshape are
+    // unary.
+    Builtin {
+        id: 26,
+        name: "tensor_matmul",
+        arity: 2,
+        commutative: false,
+        associative: false,
+        eval: eval_tensor_matmul,
+    },
+    Builtin {
+        id: 27,
+        name: "tensor_transpose",
+        arity: 1,
+        commutative: false,
+        associative: false,
+        eval: eval_tensor_transpose,
+    },
+    Builtin {
+        id: 28,
+        name: "tensor_reshape",
+        arity: 2,
+        commutative: false,
+        associative: false,
+        eval: eval_tensor_reshape,
     },
 ];
 
@@ -953,5 +1080,170 @@ mod tests {
         let b = t(vec![1], vec![1]);
         let result = eval_tensor_add(&[a, b]);
         assert!(result.is_none(), "overflow must not wrap");
+    }
+
+    // ── R16: 2D tensor op tests ──────────────────────────────────
+
+    #[test]
+    fn matmul_registered_and_not_ac() {
+        let m = lookup(TENSOR_MATMUL).unwrap();
+        assert_eq!(m.name, "tensor_matmul");
+        assert_eq!(m.arity, 2);
+        assert!(!m.commutative, "A@B != B@A in general");
+    }
+
+    #[test]
+    fn matmul_2x3_by_3x2() {
+        // A = [[1, 2, 3], [4, 5, 6]] — shape [2, 3]
+        // B = [[7, 8], [9, 10], [11, 12]] — shape [3, 2]
+        // C = A @ B — shape [2, 2]
+        //   C[0,0] = 1*7 + 2*9 + 3*11 = 7 + 18 + 33 = 58
+        //   C[0,1] = 1*8 + 2*10 + 3*12 = 8 + 20 + 36 = 64
+        //   C[1,0] = 4*7 + 5*9 + 6*11 = 28 + 45 + 66 = 139
+        //   C[1,1] = 4*8 + 5*10 + 6*12 = 32 + 50 + 72 = 154
+        let a = t(vec![2, 3], vec![1, 2, 3, 4, 5, 6]);
+        let b = t(vec![3, 2], vec![7, 8, 9, 10, 11, 12]);
+        let c = eval_tensor_matmul(&[a, b]).unwrap();
+        assert_eq!(c, t(vec![2, 2], vec![58, 64, 139, 154]));
+    }
+
+    #[test]
+    fn matmul_rejects_mismatched_inner_dim() {
+        // [2, 3] @ [4, 2] — inner dims 3 vs 4 mismatch.
+        let a = t(vec![2, 3], vec![1, 2, 3, 4, 5, 6]);
+        let b = t(vec![4, 2], vec![1, 2, 3, 4, 5, 6, 7, 8]);
+        assert!(eval_tensor_matmul(&[a, b]).is_none());
+    }
+
+    #[test]
+    fn matmul_rejects_non_2d_shapes() {
+        let a = t(vec![3], vec![1, 2, 3]); // 1D
+        let b = t(vec![3, 2], vec![1, 2, 3, 4, 5, 6]);
+        assert!(eval_tensor_matmul(&[a, b]).is_none());
+    }
+
+    #[test]
+    fn transpose_2x3_yields_3x2() {
+        // T = [[1, 2, 3], [4, 5, 6]] shape [2,3]
+        // T^T = [[1, 4], [2, 5], [3, 6]] shape [3,2]
+        let t_in = t(vec![2, 3], vec![1, 2, 3, 4, 5, 6]);
+        let t_out = eval_tensor_transpose(&[t_in]).unwrap();
+        assert_eq!(t_out, t(vec![3, 2], vec![1, 4, 2, 5, 3, 6]));
+    }
+
+    #[test]
+    fn transpose_is_involutive() {
+        // (T^T)^T = T
+        let t_in = t(vec![3, 4], vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
+        let once = eval_tensor_transpose(&[t_in.clone()]).unwrap();
+        let twice = eval_tensor_transpose(&[once]).unwrap();
+        assert_eq!(twice, t_in);
+    }
+
+    #[test]
+    fn reshape_preserves_numel() {
+        // 2x3 → 3x2. Same 6 elements, different shape.
+        let t_in = t(vec![2, 3], vec![1, 2, 3, 4, 5, 6]);
+        let shape_spec = t(vec![2], vec![3, 2]);
+        let t_out = eval_tensor_reshape(&[t_in, shape_spec]).unwrap();
+        assert_eq!(t_out, t(vec![3, 2], vec![1, 2, 3, 4, 5, 6]));
+    }
+
+    #[test]
+    fn reshape_rejects_numel_mismatch() {
+        let t_in = t(vec![2, 3], vec![1, 2, 3, 4, 5, 6]);
+        let bad_shape = t(vec![2], vec![3, 3]); // 9 != 6
+        assert!(eval_tensor_reshape(&[t_in, bad_shape]).is_none());
+    }
+
+    #[test]
+    fn reshape_flattens_to_1d() {
+        // 2x3 → 6 (1D)
+        let t_in = t(vec![2, 3], vec![1, 2, 3, 4, 5, 6]);
+        let flat_spec = t(vec![1], vec![6]);
+        let flat = eval_tensor_reshape(&[t_in, flat_spec]).unwrap();
+        assert_eq!(flat, t(vec![6], vec![1, 2, 3, 4, 5, 6]));
+    }
+
+    // ── PROOF: linear layer via matmul ───────────────────────────
+
+    #[test]
+    fn proof_linear_layer_forward_pass() {
+        // A linear layer: y = W @ x + b
+        // Input x = [1, 2, 3] (shape [3])
+        // But matmul is 2D; we treat x as column vector [3, 1].
+        //   x_col = [[1], [2], [3]]
+        // Weights W: shape [2, 3]
+        //   W = [[1, 2, 3], [4, 5, 6]]
+        // Bias b: shape [2, 1]
+        //   b = [[10], [20]]
+        // y = W @ x + b
+        //   W @ x = [[1+4+9], [4+10+18]] = [[14], [32]]
+        //   y = [[24], [52]]
+        use crate::eval::eval;
+        let w = t(vec![2, 3], vec![1, 2, 3, 4, 5, 6]);
+        let x = t(vec![3, 1], vec![1, 2, 3]);
+        let b = t(vec![2, 1], vec![10, 20]);
+
+        let matmul = Term::Apply(
+            Box::new(Term::Var(TENSOR_MATMUL)),
+            vec![w, x],
+        );
+        let layer_out = Term::Apply(
+            Box::new(Term::Var(TENSOR_ADD)),
+            vec![matmul, b],
+        );
+        let result = eval(&layer_out, &[], 100).unwrap();
+        assert_eq!(result, t(vec![2, 1], vec![24, 52]));
+    }
+
+    #[test]
+    fn proof_matmul_composes_with_transpose() {
+        // Identity: (A @ B)^T = B^T @ A^T
+        // A = 2x3, B = 3x2, A@B = 2x2
+        //   A = [[1, 2, 3], [4, 5, 6]]
+        //   B = [[7, 8], [9, 10], [11, 12]]
+        //   AB = [[58, 64], [139, 154]]
+        //   (AB)^T = [[58, 139], [64, 154]]
+        //   A^T = [[1, 4], [2, 5], [3, 6]]  shape 3x2
+        //   B^T = [[7, 9, 11], [8, 10, 12]] shape 2x3
+        //   B^T @ A^T = shape [2, 2]
+        //     [0,0] = 7*1 + 9*2 + 11*3 = 7 + 18 + 33 = 58
+        //     [0,1] = 7*4 + 9*5 + 11*6 = 28 + 45 + 66 = 139
+        //     [1,0] = 8*1 + 10*2 + 12*3 = 8 + 20 + 36 = 64
+        //     [1,1] = 8*4 + 10*5 + 12*6 = 32 + 50 + 72 = 154
+        //   → [[58, 139], [64, 154]]  matches (AB)^T ✓
+        use crate::eval::eval;
+        let a = t(vec![2, 3], vec![1, 2, 3, 4, 5, 6]);
+        let b = t(vec![3, 2], vec![7, 8, 9, 10, 11, 12]);
+
+        // Left: (A @ B)^T
+        let ab = Term::Apply(
+            Box::new(Term::Var(TENSOR_MATMUL)),
+            vec![a.clone(), b.clone()],
+        );
+        let ab_t = Term::Apply(
+            Box::new(Term::Var(TENSOR_TRANSPOSE)),
+            vec![ab],
+        );
+        let left = eval(&ab_t, &[], 100).unwrap();
+
+        // Right: B^T @ A^T
+        let bt = Term::Apply(
+            Box::new(Term::Var(TENSOR_TRANSPOSE)),
+            vec![b],
+        );
+        let at = Term::Apply(
+            Box::new(Term::Var(TENSOR_TRANSPOSE)),
+            vec![a],
+        );
+        let bt_at = Term::Apply(
+            Box::new(Term::Var(TENSOR_MATMUL)),
+            vec![bt, at],
+        );
+        let right = eval(&bt_at, &[], 100).unwrap();
+
+        assert_eq!(left, right);
+        assert_eq!(left, t(vec![2, 2], vec![58, 139, 64, 154]));
     }
 }
