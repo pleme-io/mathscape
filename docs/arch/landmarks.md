@@ -90,30 +90,55 @@ The same two apex rules climb to Axiomatized at every scale:
 
 Ranked by impact-per-effort. Each extension must preserve the lynchpin.
 
-### Phase H: meta-rule diversity + rank-2 inception
+### Phase H: meta-rule diversity + rank-2 inception — GATE LANDED, INCEPTION WAITING
 
-**The move.** Right now one meta-rule (`S_10000`) subsumes all the
-others via the reinforcement pass — there's only ever ONE rank-1 rule
-alive at a time. For rank-2 discovery to fire, we need multiple
-rank-1 rules coexisting so `MetaPatternGenerator` can anti-unify
-*between* them.
+**Status: gate deployed 2026-04-18, rank-2 not yet surfacing —
+blocked on phase I or J.**
 
-**Mechanism.** Gate subsumption by lineage: a rule minted by
-`MetaPatternGenerator` (origin tag `compress/meta-antiunify`)
-should not be subsumable by another meta-rule. Only rank-0 rules
-can be subsumed under rank-1; rank-1 rules coexist.
+**What landed.** `reduction::detect_subsumption_pairs` now includes
+an irreducibility-aware gate: two meta-rules only subsume each other
+when one STRICTLY generalizes the other (not pattern-equivalent). If
+they're pattern-equivalent, the arbitrary lower-hash tiebreak is
+suppressed — preserves meta-rule diversity for rank-2 anti-unification.
 
-**Signal.** If rank-2 fires, we see a third apex rule emerge with
-operator-variable in a deeper position — e.g. a law about laws.
-The user called this "incepting": layer N developed entirely by
-layers < N's tools.
+**What DIDN'T happen (and why).** The rank-2 inception probe test
+(`rank2_inception_probe`) runs the full zoo, then invokes
+`MetaPatternGenerator` over the library. Result: only ONE active
+meta-rule survives (`S_10000 :: (?op ?x ?id) => ?x`, the flat
+identity-element). All other candidate meta-patterns on this corpus
+(nested identity, successor-chain meta variants) got strictly
+generalized into S_10000 — legitimate subsumption, not arbitrary
+collapse.
 
-**Invariant to preserve.** Lynchpin must still hold. Rank-2 rules
-need cross-corpus support too.
+This tells us something concrete: **the current corpora produce
+meta-patterns that all live in ONE equivalence class after strict
+generalization.** For genuinely orthogonal meta-rules to coexist —
+which is what rank-2 needs as input — we need either:
 
-**Deliverables.** New flex test `flex_rank2_inception_probe`,
-updated `reinforcement` subsumption-detection with lineage gate,
-updated apex fingerprint in this doc if it lands.
+- **Phase I (subterm anti-unification)** so meta-patterns can
+  express shape at varied depths (e.g. commutativity-shape,
+  associativity-shape) beyond root-only matching. Different shapes
+  → different equivalence classes → coexistence.
+- **Phase J (empirical validity)** so meta-patterns carry semantic
+  labels (associative? commutative? idempotent?) that make
+  structurally-similar but semantically-distinct rules
+  non-subsumable.
+
+The gate is CORRECT. The machinery beneath it needs one of the
+below phases to surface enough meta-pattern diversity that the
+gate has real work to do.
+
+**Signal for "it landed".** Before phase H, any second meta-rule
+would be arbitrarily collapsed into the first. After phase H, if a
+future phase I/J produces genuinely orthogonal meta-rules, they
+coexist and `MetaPatternGenerator` over the library can mint a
+rank-2 candidate that generalizes across them. The gate is a
+precondition, not a sufficient condition.
+
+**Deliverables (done).** `is_meta_rule` structural detector in
+`reduction.rs`; gate applied only when `pattern_equivalent`;
+observational test `rank2_inception_probe` pinned in
+`autonomous_traverse.rs`.
 
 ### Phase I: subterm anti-unification
 

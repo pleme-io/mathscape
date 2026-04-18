@@ -300,6 +300,32 @@ pub fn detect_subsumption_pairs(
             if !subsumes(&a_art.rule.lhs, &b_art.rule.lhs) {
                 continue;
             }
+            // Rank-2 inception gate — irreducibility-aware.
+            //
+            // Blanket immunity for meta-rules would be too crude:
+            // meta-rules SHOULD collapse into each other when one
+            // strictly generalizes another (that's genuine library
+            // shortening with no coverage loss — the machine's own
+            // efficiency principle). The case we protect is the
+            // narrow one where neither strictly generalizes:
+            // pattern_equivalent meta-rules. The canonical lower-hash
+            // tiebreak would arbitrarily collapse that diversity,
+            // losing rank-2 anti-unification input for no efficiency
+            // gain.
+            //
+            // Formal statement of the invariant preserved:
+            //   subsume(A, B) legitimate iff A strictly subsumes B
+            //   (subsumes(A, B) && !subsumes(B, A))
+            //
+            // pattern_equivalent(A, B) = subsumes(A, B) && subsumes(B, A)
+            // — so when both are meta AND pattern-equivalent,
+            // neither strictly generalizes: skip.
+            if is_meta_rule(&a_art.rule)
+                && is_meta_rule(&b_art.rule)
+                && pattern_equivalent(&a_art.rule.lhs, &b_art.rule.lhs)
+            {
+                continue;
+            }
             // Check for mutual subsumption (equivalence class).
             if pattern_equivalent(&a_art.rule.lhs, &b_art.rule.lhs) {
                 // Keep only the canonical direction: the lower-hash
@@ -319,6 +345,27 @@ pub fn detect_subsumption_pairs(
             .then_with(|| x.1.as_bytes().cmp(y.1.as_bytes()))
     });
     out
+}
+
+/// Detect a meta-rule by structure: its LHS's top-level function
+/// slot is a Var with id ≥ 100 — the fresh-variable range that
+/// `antiunify` generates when operator positions differ between
+/// anti-unified terms. Concrete operators occupy the low Var id
+/// range (Var(2) = add, Var(3) = mul, Var(4) = succ, and so on
+/// for user-registered operators).
+///
+/// This is a structural heuristic, not a lineage tag. It avoids
+/// plumbing `Candidate::origin` through the Emitter and the
+/// registry, which would be invasive. The structural test is
+/// robust: any rule whose operator position is a fresh variable
+/// IS a meta-rule by construction, regardless of which generator
+/// minted it.
+fn is_meta_rule(rule: &crate::eval::RewriteRule) -> bool {
+    use crate::term::Term;
+    match &rule.lhs {
+        Term::Apply(f, _) => matches!(**f, Term::Var(v) if v >= 100),
+        _ => false,
+    }
 }
 
 /// Convenience summary: a single struct with counts and a verdict
