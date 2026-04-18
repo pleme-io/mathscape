@@ -694,6 +694,158 @@ fn rank2_inception_probe() {
 }
 
 #[test]
+#[ignore = "load-bearing: 256-seed sweep, ~5-10s, run with --ignored"]
+fn oscillation_law_of_large_numbers() {
+    // The load-bearing probe. Run 256 seeds through pure-procedural
+    // traversal and compute distributional statistics at scale:
+    //
+    //   - Total distinct apex fingerprints   — how many attractors
+    //     exist in this slice of the seed space
+    //   - Modal fingerprint frequency         — true attractor weight
+    //     under LLN (if >20% for one, it's a dominant basin)
+    //   - Shannon entropy of the distribution — how "random" the
+    //     outcome really is; low entropy = few attractors dominate
+    //   - Attractor vocabulary                — set of distinct rule
+    //     names seen across ANY seed's apex set; the "possible
+    //     symbols the machine can mint"
+    //   - Per-rule frequency                  — which rules appear in
+    //     what fraction of attractors; this is the "definable
+    //     object with features" the user predicted LLN would surface
+    //   - Mean/std saturation step and library size
+    //
+    // Expected outcome: with 256 seeds the attractor count stabilizes.
+    // If it's bounded (say, 50-150 unique fingerprints out of 256
+    // seeds), we've demonstrated QUANTIZATION — the seed space maps
+    // to a finite set of discrete outcomes. If it grows linearly
+    // with seed count (closer to 256 distinct), the attractor space
+    // is effectively unbounded at this structural scale and we need
+    // bigger corpora or richer machinery to resolve it.
+    use std::collections::HashMap;
+
+    const N_SEEDS: u64 = 256;
+    const BUDGET: usize = 15;
+    const DEPTH: usize = 4;
+
+    let mut apex_fingerprints: HashMap<Vec<String>, usize> = HashMap::new();
+    let mut rule_frequency: HashMap<String, usize> = HashMap::new();
+    let mut library_sizes: Vec<usize> = Vec::new();
+    let mut saturation_steps: Vec<usize> = Vec::new();
+    let mut total_elapsed_ms: u128 = 0;
+
+    let start = std::time::Instant::now();
+    for seed in 1..=N_SEEDS {
+        let report = run_traversal_pure_procedural(seed, BUDGET, DEPTH);
+        let mut apex: Vec<String> = report
+            .axiomatized_rules
+            .iter()
+            .map(|(n, _)| n.clone())
+            .collect();
+        apex.sort();
+        for name in &apex {
+            *rule_frequency.entry(name.clone()).or_default() += 1;
+        }
+        *apex_fingerprints.entry(apex).or_default() += 1;
+        library_sizes.push(report.library_final_size);
+        if let Some(s) = report.saturation_step {
+            saturation_steps.push(s);
+        }
+        total_elapsed_ms += report.elapsed_ms;
+    }
+    let probe_wallclock_ms = start.elapsed().as_millis();
+
+    let distinct_fingerprints = apex_fingerprints.len();
+    let modal = apex_fingerprints.values().copied().max().unwrap_or(0);
+    let modal_frac = modal as f64 / N_SEEDS as f64;
+    let entropy: f64 = apex_fingerprints
+        .values()
+        .map(|&c| {
+            let p = c as f64 / N_SEEDS as f64;
+            if p > 0.0 { -p * p.log2() } else { 0.0 }
+        })
+        .sum();
+
+    let mean_lib_size =
+        library_sizes.iter().sum::<usize>() as f64 / library_sizes.len() as f64;
+    let mean_sat = if saturation_steps.is_empty() {
+        0.0
+    } else {
+        saturation_steps.iter().sum::<usize>() as f64 / saturation_steps.len() as f64
+    };
+
+    let mut rule_vocab: Vec<(String, usize)> = rule_frequency.into_iter().collect();
+    rule_vocab.sort_by(|a, b| b.1.cmp(&a.1));
+
+    println!("\n╔══════════════════════════════════════════════════════╗");
+    println!("║ OSCILLATION — LAW OF LARGE NUMBERS                   ║");
+    println!("║   256 seeds × 15-corpus sweeps × pure procedural     ║");
+    println!("╚══════════════════════════════════════════════════════╝");
+    println!("\n▶ Scale");
+    println!("  seeds                        : {N_SEEDS}");
+    println!("  probe wall-clock             : {}ms", probe_wallclock_ms);
+    println!("  total traversal time (summed): {}ms", total_elapsed_ms);
+    println!("  saturated runs               : {}/{}", saturation_steps.len(), N_SEEDS);
+    println!("  mean library size            : {mean_lib_size:.1}");
+    println!("  mean saturation step         : {mean_sat:.2}");
+
+    println!("\n▶ Attractor statistics");
+    println!("  distinct apex fingerprints   : {distinct_fingerprints}/{N_SEEDS}");
+    println!("  modal support                : {modal}/{N_SEEDS} ({:.1}%)", modal_frac * 100.0);
+    println!("  Shannon entropy (bits)       : {entropy:.3}");
+    let max_entropy = (N_SEEDS as f64).log2();
+    println!(
+        "  normalized entropy           : {:.3} (1.0 = uniform over all {N_SEEDS} seeds)",
+        entropy / max_entropy
+    );
+
+    println!("\n▶ Top-20 rules in attractor vocabulary");
+    println!("{:>12} {:>8} {:>8}", "rule", "count", "fraction");
+    println!("{}", "─".repeat(32));
+    for (name, count) in rule_vocab.iter().take(20) {
+        let frac = *count as f64 / N_SEEDS as f64;
+        println!("{name:>12} {count:>8} {:>8.1}%", frac * 100.0);
+    }
+
+    println!("\n▶ Fingerprint support distribution");
+    let mut support_counts: HashMap<usize, usize> = HashMap::new();
+    for &c in apex_fingerprints.values() {
+        *support_counts.entry(c).or_default() += 1;
+    }
+    let mut support_hist: Vec<(usize, usize)> = support_counts.into_iter().collect();
+    support_hist.sort();
+    println!("{:>10} {:>10}", "support", "n_attractors");
+    for (support, n) in &support_hist {
+        println!("{:>10} {:>10}", support, n);
+    }
+
+    println!("\n▶ Law-of-large-numbers read");
+    if distinct_fingerprints as f64 / N_SEEDS as f64 > 0.95 {
+        println!(
+            "  HIGH UNIQUENESS — nearly every seed gives a distinct \
+             fingerprint. The attractor space at this scale is larger \
+             than the seed set; we haven't saturated measurement."
+        );
+    } else if distinct_fingerprints <= 20 {
+        println!(
+            "  QUANTIZED — the seed space maps onto only {distinct_fingerprints} \
+             distinct attractors. The phenomenon has been resolved into \
+             a finite set of stable states. This IS the 'definable object \
+             with features' the user predicted."
+        );
+    } else {
+        println!(
+            "  PARTIAL QUANTIZATION — {distinct_fingerprints} attractors among \
+             {N_SEEDS} seeds. The distribution is clustering but not yet \
+             discrete at this resolution. Push to 1024+ seeds or modify \
+             the generator to see if quantization sharpens."
+        );
+    }
+
+    // Soft test — the data is the point. Only fail if we somehow
+    // produced zero attractors.
+    assert!(distinct_fingerprints > 0);
+}
+
+#[test]
 fn oscillation_probe_seeded_variance() {
     // Phase M instrumentation: the user's intuition is that
     // irreducibility is not a single-point signal — it's a
