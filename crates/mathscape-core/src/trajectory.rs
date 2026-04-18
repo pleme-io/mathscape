@@ -46,7 +46,7 @@ use crate::term::Term;
 use serde::{Deserialize, Serialize};
 
 /// One step in a traversal — what the machine considered and did.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TrajectoryStep {
     /// Absolute epoch index within the traversal.
     pub epoch: usize,
@@ -230,7 +230,7 @@ fn collect_heads(t: &Term, out: &mut std::collections::BTreeSet<u32>) {
 /// Training data for a scorer. Serializable so it can be persisted
 /// across runs — later work wires this to disk, a wake-sleep loop
 /// trains on archived trajectories between runs.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Trajectory {
     pub steps: Vec<TrajectoryStep>,
     /// The terminal library features — state after all steps.

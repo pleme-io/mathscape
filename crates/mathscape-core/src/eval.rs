@@ -13,7 +13,7 @@ pub use crate::builtin::{ADD as BUILTIN_ADD, MUL as BUILTIN_MUL,
 
 /// A rewrite rule: lhs pattern => rhs template.
 /// Pattern variables (Var) in lhs are matched and substituted into rhs.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RewriteRule {
     pub name: String,
     pub lhs: Term,

@@ -3,6 +3,7 @@
 
 pub mod autograd;
 pub mod bettyfine;
+pub mod bootstrap;
 pub mod builtin;
 pub mod control;
 pub mod corpus;
@@ -47,6 +48,11 @@ pub use epoch::{
     InMemoryRegistry, Prover, Registry, Rejection, RuleEmitter, Verdict,
 };
 pub use autograd::{symbolic_derivative, symbolic_derivative_float};
+pub use bootstrap::{
+    compute_attestation, BootstrapCycle, BootstrapOutcome, CorpusGenerator,
+    DefaultCorpusGenerator, DefaultModelUpdater, IterationSnapshot,
+    LawExtractor, ModelUpdater,
+};
 pub use optimizer::{sgd_step_int, sgd_step_tensor};
 pub use bettyfine::{bettyfine_library, standard_bettyfine_cardinality, OperatorSpec};
 pub use event::{Event, EventCategory, StatusAdvance};
