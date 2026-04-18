@@ -73,9 +73,19 @@ pub fn compute_reward(
 
     // Meta-compression: how compressible is the library itself?
     // Treat library RHS expressions as a mini-corpus and compute CR.
+    //
+    // Clamped to [0, ∞): meta_compression is a reward for genuine
+    // library shrinkage, never a penalty. With small libraries the
+    // full-library cost (`|L|`) dwarfs the tiny rhs-as-corpus, which
+    // drives raw CR strongly negative — that's an accounting
+    // artifact, not a real regression. The canonical definition in
+    // docs/arch/machine-synthesis.md (`1 - |L_new|/|L_expanded|`) is
+    // bounded below by 0; we enforce the same floor here so this
+    // term doesn't crowd out accepted ΔCR + novelty for orthogonal
+    // candidates arriving when the library already holds one rule.
     let lib_corpus: Vec<Term> = full_library.iter().map(|r| r.rhs.clone()).collect();
     let meta_compression = if lib_corpus.len() > 1 {
-        compress_score::compression_ratio(&lib_corpus, full_library)
+        compress_score::compression_ratio(&lib_corpus, full_library).max(0.0)
     } else {
         0.0
     };
