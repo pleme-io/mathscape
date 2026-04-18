@@ -9,6 +9,7 @@ pub mod discovery;
 pub mod lean_export;
 pub mod mechanism;
 pub mod policy_lisp;
+pub mod primitives_lisp;
 pub mod semantic;
 
 pub use discovery::{
@@ -24,6 +25,7 @@ pub use mechanism::{
     MechanismPool, TrialResult,
 };
 pub use policy_lisp::{policy_from_sexp, policy_to_sexp};
+pub use primitives_lisp::{census_to_sexp, primitive_from_sexp, primitive_to_sexp};
 pub use semantic::{
     discover_semantic_projections, discover_semantic_projections_with_config,
     discover_semantic_projections_with_ledger, generate_semantic_candidates,

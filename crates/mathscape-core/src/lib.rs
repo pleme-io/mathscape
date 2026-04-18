@@ -20,6 +20,7 @@ pub mod orchestrator;
 pub mod promotion;
 pub mod promotion_gate;
 pub mod policy;
+pub mod primitives;
 pub mod reduction;
 pub mod tensor;
 pub mod term;
@@ -64,6 +65,9 @@ pub use reduction::{
     ReductionVerdict,
 };
 pub use policy::{rank_states, LinearPolicy, PolicyModel};
+pub use primitives::{
+    census, classify_primitives, IdentityForm, MlPrimitive, PrimitiveCensus,
+};
 pub use tensor::{classify, shape_counts, tensor_density, TensorShape};
 pub use term::{StoredTerm, SymbolId, Term};
 pub use trajectory::{ActionKind, LibraryFeatures, Trajectory, TrajectoryStep};
