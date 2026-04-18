@@ -95,6 +95,16 @@ machine produces the trajectory.
     apparatus layer IS the experimentation substrate, and the
     catalog runner aggregates cross-experiment evidence into
     apparatus-independent claims.
+23. `docs/arch/ml4-mechanism-evolution.md` — **ML4 DESIGN** (2026-04-18).
+    The architectural move that closes the "human-as-compiler" gap.
+    Every bottleneck parameter in the discovery pipeline (corpus
+    generator, candidate enumerator, extract config, validator
+    knobs) becomes a mutable `MechanismConfig` subject to the
+    same evolutionary pressure as the apparatus. Saturation
+    triggers mechanism mutation, not halt. The machine diagnoses
+    its own bottleneck, proposes mutations, keeps winners,
+    resumes. Zero human intervention for parameter-bump
+    saturations. Design only — implementation starts at ML4.1.
 22. `docs/arch/edge-riding.md` — **PERPETUAL DISCOVERY** (2026-04-18).
     The L5 architectural frame. By Gödel's incompleteness, any
     sufficiently-rich substrate has unprovable-from-inside
