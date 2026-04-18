@@ -52,11 +52,13 @@ pub use autograd::{
     symbolic_derivative_float, DomainOps, FloatOps, IntOps, TensorOps,
 };
 pub use bootstrap::{
-    compute_attestation, deduplicate_library, execute_spec_core, AlphaDeduper,
-    BootstrapCycle, BootstrapCycleSpec, BootstrapOutcome, CanonicalDeduper,
-    CorpusGenerator, DefaultCorpusGenerator, DefaultModelUpdater,
-    IterationSnapshot, LawExtractor, LibraryDeduper, ModelUpdater, NoDedup,
-    SpecExecutionError, SubsumptionDeduper,
+    compute_attestation, deduplicate_library, execute_scenario_core,
+    execute_spec_core, AlphaDeduper, BootstrapCycle, BootstrapCycleSpec,
+    BootstrapOutcome, CanonicalDeduper, CorpusGenerator,
+    DefaultCorpusGenerator, DefaultModelUpdater, ExperimentOutcome,
+    ExperimentScenario, IterationSnapshot, LawExtractor, LibraryDeduper,
+    ModelUpdater, NoDedup, PhaseOutcome, SpecExecutionError,
+    SubsumptionDeduper,
 };
 pub use optimizer::{sgd_step_int, sgd_step_tensor};
 pub use bettyfine::{bettyfine_library, standard_bettyfine_cardinality, OperatorSpec};

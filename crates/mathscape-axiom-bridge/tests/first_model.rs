@@ -348,3 +348,74 @@ fn two_cycles_produce_identical_m0() {
     assert_eq!(a.final_policy, b.final_policy);
     assert_eq!(a.attestation, b.attestation);
 }
+
+#[test]
+fn m0_through_mn_from_a_lisp_scenario() {
+    // R33 end-to-end: a Lisp scenario describes a multi-phase
+    // training chain. Executor runs the phases. Output is the
+    // final model plus per-phase trace. Input is Lisp; output
+    // is Lisp. The chain attestation pins the full sequence.
+    use mathscape_core::bootstrap::{
+        execute_scenario_core, BootstrapCycleSpec, ExperimentScenario,
+    };
+
+    let base = BootstrapCycleSpec {
+        corpus_generator: "null".into(),
+        law_extractor: "null".into(),
+        model_updater: "default".into(),
+        deduper: "canonical".into(),
+        n_iterations: 2,
+        seed_library: Vec::new(),
+        seed_policy: LinearPolicy::tensor_seeking_prior(),
+    };
+
+    let scenario = ExperimentScenario {
+        name: "M0-through-M3".into(),
+        phases: vec![base.clone(), base.clone(), base.clone(), base],
+    };
+
+    // Convert scenario → Sexp (Lisp-authored experiment).
+    let scen_sexp = mathscape_proof::scenario_to_sexp(&scenario);
+    println!("\n── Lisp scenario (multi-phase training) ─────────────");
+    println!("  experiment name : {}", scenario.name);
+    println!("  phase count     : {}", scenario.phases.len());
+    println!("  (Sexp form suppressed; see scenario_roundtrips_via_sexp test)");
+
+    // Round-trip the scenario through Lisp.
+    let scen_back = mathscape_proof::scenario_from_sexp(&scen_sexp)
+        .expect("valid scenario sexp");
+    assert_eq!(scenario, scen_back);
+
+    // Execute via the core executor.
+    let outcome = execute_scenario_core(&scen_back).unwrap();
+
+    println!("\n── Execution trace ───────────────────────────────────");
+    println!("  phases run      : {}", outcome.phases.len());
+    println!("  chain attest    : {:?}", outcome.chain_attestation);
+    println!("  per-phase growth: {:?}", outcome.per_phase_growth());
+    for (i, phase) in outcome.phases.iter().enumerate() {
+        println!(
+            "  phase {}: lib={} policy-gen={} attest={:?}",
+            i,
+            phase.cycle_outcome.final_library.len(),
+            phase.cycle_outcome.final_policy.generation,
+            phase.cycle_outcome.attestation,
+        );
+    }
+
+    // Each phase trains the policy once — after 4 phases,
+    // generation is 4 (seed was generation 0 → trained 4 times).
+    assert_eq!(outcome.final_model().generation, 4);
+    assert_eq!(outcome.phases.len(), 4);
+
+    // The final model's Sexp form is the end-of-chain
+    // Lisp-describable artifact. Prove it round-trips.
+    let final_model_sexp =
+        mathscape_proof::policy_to_sexp(outcome.final_model());
+    let reloaded = mathscape_proof::policy_from_sexp(&final_model_sexp)
+        .expect("final model Sexp parses");
+    assert_eq!(*outcome.final_model(), reloaded);
+    println!(
+        "\n── Final model (M3) ─ Sexp round-trip verified ──────"
+    );
+}

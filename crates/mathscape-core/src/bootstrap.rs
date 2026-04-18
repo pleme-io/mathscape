@@ -514,6 +514,164 @@ pub fn execute_spec_core(
     Ok(outcome)
 }
 
+// ── R33: ExperimentScenario — multi-phase training chain ─────────
+//
+// Beyond a single BootstrapCycleSpec, an experiment is typically a
+// SEQUENCE of cycles where each cycle consumes the previous's
+// output (library + trained policy) as its seed.
+//
+// ExperimentScenario bundles this sequence as a Lisp-describable
+// recipe. The executor threads phase N's final library and
+// trained policy into phase N+1's `seed_library` and `seed_policy`.
+// After all phases run, an ExperimentOutcome carries the complete
+// trace: each phase's BootstrapOutcome + a phase-level attestation
+// chain.
+//
+// Framing (per 2026-04-18 direction): from here forward, all new
+// work thinks in terms of "making the model exist + train more
+// efficiently." ExperimentScenario is the substrate for those
+// efficiency experiments — swap layer triples across phases,
+// observe attestations, keep what works.
+
+/// A multi-phase training scenario. Each phase is a
+/// `BootstrapCycleSpec` with its own layer triple and iteration
+/// count. Phase N+1 inherits phase N's `final_library` and
+/// `final_policy` — each phase's output seeds the next.
+///
+/// A scenario's `seed_library` and `seed_policy` fields apply
+/// only to the FIRST phase; subsequent phases ignore their own
+/// spec-level seeds in favor of the chained output.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct ExperimentScenario {
+    /// Human-readable name for log output and attestation
+    /// annotation. Not semantically load-bearing.
+    pub name: String,
+    /// Ordered list of phase specs. Each is a
+    /// `BootstrapCycleSpec`; chain semantics described above.
+    pub phases: Vec<BootstrapCycleSpec>,
+}
+
+/// Per-phase outcome within an ExperimentScenario run.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct PhaseOutcome {
+    /// Index of this phase (0-based).
+    pub phase_index: usize,
+    /// The spec that was executed (after chaining inherited the
+    /// previous phase's library + policy).
+    pub spec_used: BootstrapCycleSpec,
+    /// The cycle outcome for this phase.
+    pub cycle_outcome: BootstrapOutcome,
+}
+
+/// Full experiment outcome: phase-level outcomes + chain-level
+/// attestation.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct ExperimentOutcome {
+    /// Per-phase results, in order.
+    pub phases: Vec<PhaseOutcome>,
+    /// BLAKE3 chain attestation: hash of the sequence of phase
+    /// attestations. Two scenarios with identical phase sequences
+    /// produce identical chain attestations.
+    pub chain_attestation: crate::hash::TermRef,
+}
+
+impl ExperimentOutcome {
+    /// The final model — the policy from the last phase.
+    #[must_use]
+    pub fn final_model(&self) -> &LinearPolicy {
+        &self
+            .phases
+            .last()
+            .expect("ExperimentOutcome must have at least one phase")
+            .cycle_outcome
+            .final_policy
+    }
+
+    /// The final library — from the last phase.
+    #[must_use]
+    pub fn final_library(&self) -> &[RewriteRule] {
+        &self
+            .phases
+            .last()
+            .expect("ExperimentOutcome must have at least one phase")
+            .cycle_outcome
+            .final_library
+    }
+
+    /// Per-phase library growth: how many rules each phase added
+    /// on top of the prior phase's library.
+    #[must_use]
+    pub fn per_phase_growth(&self) -> Vec<usize> {
+        let mut prev = 0usize;
+        let mut growth = Vec::new();
+        for phase in &self.phases {
+            let curr = phase.cycle_outcome.final_library.len();
+            growth.push(curr.saturating_sub(prev));
+            prev = curr;
+        }
+        growth
+    }
+}
+
+/// Run an `ExperimentScenario` by chaining phase outputs.
+/// Returns the complete outcome with every phase's trace.
+///
+/// Efficiency note: when phase N+1's spec's `seed_library` and
+/// `seed_policy` are unused (because we chain phase N's outputs
+/// in), the memory cost is one library + one policy + one
+/// trajectory per phase retained in the outcome. For long-running
+/// scenarios, consumers can discard per-phase outcomes they
+/// don't need after reading.
+pub fn execute_scenario_core(
+    scenario: &ExperimentScenario,
+) -> Result<ExperimentOutcome, SpecExecutionError> {
+    if scenario.phases.is_empty() {
+        return Ok(ExperimentOutcome {
+            phases: Vec::new(),
+            chain_attestation: crate::hash::TermRef::from_bytes(b""),
+        });
+    }
+
+    let mut phases: Vec<PhaseOutcome> = Vec::new();
+    let mut carry_library: Vec<RewriteRule> =
+        scenario.phases[0].seed_library.clone();
+    let mut carry_policy: LinearPolicy = scenario.phases[0].seed_policy.clone();
+
+    for (idx, base_spec) in scenario.phases.iter().enumerate() {
+        // For phase 0, seeds come from the spec itself; for later
+        // phases, use the carried-over library + policy from the
+        // previous phase's output. The spec is cloned with its
+        // seed fields overridden.
+        let mut spec = base_spec.clone();
+        if idx > 0 {
+            spec.seed_library = carry_library.clone();
+            spec.seed_policy = carry_policy.clone();
+        }
+        let outcome = execute_spec_core(&spec)?;
+        carry_library = outcome.final_library.clone();
+        carry_policy = outcome.final_policy.clone();
+        phases.push(PhaseOutcome {
+            phase_index: idx,
+            spec_used: spec,
+            cycle_outcome: outcome,
+        });
+    }
+
+    // Chain attestation: BLAKE3 of the concatenated per-phase
+    // attestations. Stable under identical scenario; shifts if any
+    // phase's content changes.
+    let concat: Vec<u8> = phases
+        .iter()
+        .flat_map(|p| p.cycle_outcome.attestation.as_bytes().to_vec())
+        .collect();
+    let chain_attestation = crate::hash::TermRef::from_bytes(&concat);
+
+    Ok(ExperimentOutcome {
+        phases,
+        chain_attestation,
+    })
+}
+
 /// R30: post-process a collection of rules, partitioning them
 /// into (kept, rejected) using the supplied deduper. Useful for
 /// cleaning up a library AFTER it was built (e.g., collected
@@ -1290,6 +1448,154 @@ mod tests {
         let (kept, rejected) = deduplicate_library(input, &NoDedup);
         assert_eq!(kept.len(), 3);
         assert!(rejected.is_empty());
+    }
+
+    // ── R33: ExperimentScenario tests ────────────────────────────
+
+    #[test]
+    fn empty_scenario_produces_empty_outcome() {
+        let scenario = ExperimentScenario {
+            name: "empty".into(),
+            phases: Vec::new(),
+        };
+        let outcome = execute_scenario_core(&scenario).unwrap();
+        assert!(outcome.phases.is_empty());
+    }
+
+    #[test]
+    fn single_phase_scenario_matches_spec_execution() {
+        let spec = BootstrapCycleSpec {
+            corpus_generator: "null".into(),
+            law_extractor: "null".into(),
+            model_updater: "default".into(),
+            deduper: "canonical".into(),
+            n_iterations: 3,
+            seed_library: Vec::new(),
+            seed_policy: LinearPolicy::tensor_seeking_prior(),
+        };
+        let scenario = ExperimentScenario {
+            name: "one-phase".into(),
+            phases: vec![spec.clone()],
+        };
+        let spec_outcome = execute_spec_core(&spec).unwrap();
+        let scen_outcome = execute_scenario_core(&scenario).unwrap();
+        assert_eq!(scen_outcome.phases.len(), 1);
+        assert_eq!(
+            scen_outcome.phases[0].cycle_outcome.final_policy,
+            spec_outcome.final_policy
+        );
+        assert_eq!(
+            scen_outcome.phases[0].cycle_outcome.attestation,
+            spec_outcome.attestation
+        );
+    }
+
+    #[test]
+    fn multi_phase_scenario_chains_library_and_policy() {
+        // Phase 0: run with default updater, no laws added (null
+        // extractor). Produces a policy with generation=1.
+        // Phase 1: chained from phase 0; spec's seed is overridden.
+        // After phase 1, policy.generation should be 2 (trained
+        // twice).
+        let base = BootstrapCycleSpec {
+            corpus_generator: "null".into(),
+            law_extractor: "null".into(),
+            model_updater: "default".into(),
+            deduper: "canonical".into(),
+            n_iterations: 2,
+            seed_library: Vec::new(),
+            seed_policy: LinearPolicy::tensor_seeking_prior(),
+        };
+        let scenario = ExperimentScenario {
+            name: "two-phase".into(),
+            phases: vec![base.clone(), base.clone(), base],
+        };
+        let outcome = execute_scenario_core(&scenario).unwrap();
+        assert_eq!(outcome.phases.len(), 3);
+        // Each phase trains the policy once more.
+        assert_eq!(outcome.phases[0].cycle_outcome.final_policy.generation, 1);
+        assert_eq!(outcome.phases[1].cycle_outcome.final_policy.generation, 2);
+        assert_eq!(outcome.phases[2].cycle_outcome.final_policy.generation, 3);
+        // The final_model helper returns the last policy.
+        assert_eq!(outcome.final_model().generation, 3);
+    }
+
+    #[test]
+    fn scenario_chain_attestation_is_deterministic() {
+        let base = BootstrapCycleSpec {
+            corpus_generator: "null".into(),
+            law_extractor: "null".into(),
+            model_updater: "default".into(),
+            deduper: "none".into(),
+            n_iterations: 1,
+            seed_library: Vec::new(),
+            seed_policy: LinearPolicy::new(),
+        };
+        let scenario = ExperimentScenario {
+            name: "det".into(),
+            phases: vec![base.clone(), base],
+        };
+        let a = execute_scenario_core(&scenario).unwrap();
+        let b = execute_scenario_core(&scenario).unwrap();
+        assert_eq!(a.chain_attestation, b.chain_attestation);
+    }
+
+    #[test]
+    fn scenario_per_phase_growth_reports_increments() {
+        let base = BootstrapCycleSpec {
+            corpus_generator: "null".into(),
+            law_extractor: "null".into(),
+            model_updater: "null".into(),
+            deduper: "canonical".into(),
+            n_iterations: 1,
+            seed_library: vec![dummy_law()],
+            seed_policy: LinearPolicy::new(),
+        };
+        let scenario = ExperimentScenario {
+            name: "growth".into(),
+            phases: vec![base.clone(), base],
+        };
+        let outcome = execute_scenario_core(&scenario).unwrap();
+        // Null extractor adds nothing; growth is 0 per phase after
+        // the initial seed.
+        assert_eq!(outcome.per_phase_growth(), vec![1, 0]);
+    }
+
+    #[test]
+    fn scenario_unknown_layer_propagates_error() {
+        let bad = BootstrapCycleSpec {
+            corpus_generator: "nope-not-a-real-generator".into(),
+            law_extractor: "null".into(),
+            model_updater: "default".into(),
+            deduper: "canonical".into(),
+            n_iterations: 1,
+            seed_library: Vec::new(),
+            seed_policy: LinearPolicy::new(),
+        };
+        let scenario = ExperimentScenario {
+            name: "bad".into(),
+            phases: vec![bad],
+        };
+        let result = execute_scenario_core(&scenario);
+        assert!(matches!(
+            result,
+            Err(SpecExecutionError::UnknownLayer {
+                role: "corpus_generator",
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn scenario_bincode_roundtrip() {
+        let base = BootstrapCycleSpec::default_m0();
+        let scenario = ExperimentScenario {
+            name: "rt".into(),
+            phases: vec![base.clone(), base],
+        };
+        let bytes = bincode::serialize(&scenario).unwrap();
+        let back: ExperimentScenario = bincode::deserialize(&bytes).unwrap();
+        assert_eq!(scenario, back);
     }
 
     #[test]

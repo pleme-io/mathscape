@@ -297,6 +297,51 @@ fn parse_kv_pairs(items: &[Sexp]) -> Option<KvPairs<'_>> {
     Some(KvPairs { pairs })
 }
 
+// ── R33: ExperimentScenario <-> Sexp ────────────────────────────
+
+/// Convert an `ExperimentScenario` to Sexp form:
+/// ```text
+///   (experiment :name "..."
+///     :phases ((bootstrap-spec ...) (bootstrap-spec ...) ...))
+/// ```
+#[must_use]
+pub fn scenario_to_sexp(
+    scenario: &mathscape_core::bootstrap::ExperimentScenario,
+) -> Sexp {
+    Sexp::List(vec![
+        Sexp::symbol("experiment"),
+        Sexp::keyword("name"),
+        Sexp::string(scenario.name.clone()),
+        Sexp::keyword("phases"),
+        Sexp::List(scenario.phases.iter().map(spec_to_sexp).collect()),
+    ])
+}
+
+/// Parse an `ExperimentScenario` from Sexp. `None` on malformed.
+#[must_use]
+pub fn scenario_from_sexp(
+    sexp: &Sexp,
+) -> Option<mathscape_core::bootstrap::ExperimentScenario> {
+    let items = match sexp {
+        Sexp::List(xs) if xs.len() == 5 => xs,
+        _ => return None,
+    };
+    match &items[0] {
+        Sexp::Atom(Atom::Symbol(s)) if s == "experiment" => {}
+        _ => return None,
+    }
+    let fields = parse_kv_pairs(&items[1..])?;
+    Some(mathscape_core::bootstrap::ExperimentScenario {
+        name: fields.get_string("name")?,
+        phases: fields
+            .get("phases")
+            .and_then(|s| match s {
+                Sexp::List(xs) => Some(xs.iter().filter_map(spec_from_sexp).collect()),
+                _ => None,
+            })?,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -347,6 +392,42 @@ mod tests {
         assert!(spec_from_sexp(&Sexp::int(42)).is_none());
         assert!(
             spec_from_sexp(&Sexp::List(vec![Sexp::symbol("wrong-head")]))
+                .is_none()
+        );
+    }
+
+    // ── R33 scenario Sexp tests ───────────────────────────────────
+
+    #[test]
+    fn scenario_roundtrips_via_sexp() {
+        use mathscape_core::bootstrap::{BootstrapCycleSpec, ExperimentScenario};
+        let base = BootstrapCycleSpec::default_m0();
+        let scenario = ExperimentScenario {
+            name: "multi-phase-test".into(),
+            phases: vec![base.clone(), base.clone(), base],
+        };
+        let sexp = scenario_to_sexp(&scenario);
+        let back = scenario_from_sexp(&sexp).expect("valid scenario sexp");
+        assert_eq!(scenario, back);
+    }
+
+    #[test]
+    fn empty_scenario_roundtrips_via_sexp() {
+        use mathscape_core::bootstrap::ExperimentScenario;
+        let scenario = ExperimentScenario {
+            name: "empty".into(),
+            phases: Vec::new(),
+        };
+        let sexp = scenario_to_sexp(&scenario);
+        let back = scenario_from_sexp(&sexp).unwrap();
+        assert_eq!(scenario, back);
+    }
+
+    #[test]
+    fn malformed_scenario_sexp_returns_none() {
+        assert!(scenario_from_sexp(&Sexp::int(42)).is_none());
+        assert!(
+            scenario_from_sexp(&Sexp::List(vec![Sexp::symbol("not-experiment")]))
                 .is_none()
         );
     }
