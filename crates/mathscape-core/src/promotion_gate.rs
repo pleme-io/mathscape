@@ -7,7 +7,7 @@
 
 use crate::{
     epoch::Artifact,
-    eval::{pattern_match, RewriteRule},
+    eval::{pattern_match, subsumes, RewriteRule},
     promotion::{CorpusId, PromotionSignal},
     term::Term,
 };
@@ -109,7 +109,7 @@ impl PromotionGate for ThresholdGate {
 /// upgrade to e-graph saturation is a later phase — see
 /// `docs/arch/realization-plan.md` Phase G+.
 fn subsumes_structurally(candidate: &RewriteRule, other: &RewriteRule) -> bool {
-    pattern_match(&candidate.lhs, &other.lhs).is_some()
+    subsumes(&candidate.lhs, &other.lhs)
 }
 
 // Retained but unused — kept for potential future heuristic fallbacks

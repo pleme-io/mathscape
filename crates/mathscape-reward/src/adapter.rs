@@ -26,6 +26,7 @@ use mathscape_core::{
 
 /// A [`Prover`] that scores each candidate via `compute_reward` and
 /// accepts if the resulting composite score clears `min_score`.
+#[derive(Debug, Clone)]
 pub struct StatisticalProver {
     pub reward_config: RewardConfig,
     /// Minimum `reward` value for acceptance. Maps to

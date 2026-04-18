@@ -9,6 +9,7 @@ pub mod eval;
 pub mod event;
 pub mod hash;
 pub mod lifecycle;
+pub mod meta;
 pub mod migration;
 pub mod parse;
 pub mod orchestrator;

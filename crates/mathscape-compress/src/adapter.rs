@@ -9,12 +9,13 @@
 use crate::extract::{extract_rules, ExtractConfig};
 use mathscape_core::{
     epoch::{Artifact, Candidate, Generator},
-    eval::{pattern_match, RewriteRule},
+    eval::{pattern_equivalent, RewriteRule},
     term::{SymbolId, Term},
 };
 
 /// A [`Generator`] that proposes `RewriteRule` candidates by
 /// anti-unifying the corpus against the current library.
+#[derive(Debug, Clone)]
 pub struct CompressionGenerator {
     pub config: ExtractConfig,
     /// Monotone counter for minting Symbol ids. Lives on the
@@ -67,18 +68,15 @@ impl Generator for CompressionGenerator {
         //
         // Two lhs terms are "pattern-equivalent" iff each
         // pattern-matches the other (equivalence class under
-        // rewriting).
-        let equivalent =
-            |a: &Term, b: &Term| pattern_match(a, b).is_some() && pattern_match(b, a).is_some();
-
+        // rewriting). Centralized in mathscape_core::eval.
         let mut kept: Vec<RewriteRule> = Vec::new();
         for rule in rules {
             // Inter-batch: already in library?
-            if existing.iter().any(|e| equivalent(&rule.lhs, &e.lhs)) {
+            if existing.iter().any(|e| pattern_equivalent(&rule.lhs, &e.lhs)) {
                 continue;
             }
             // Intra-batch: equivalent to a candidate already kept?
-            if kept.iter().any(|k| equivalent(&rule.lhs, &k.lhs)) {
+            if kept.iter().any(|k| pattern_equivalent(&rule.lhs, &k.lhs)) {
                 continue;
             }
             kept.push(rule);

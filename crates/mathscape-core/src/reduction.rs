@@ -26,7 +26,7 @@
 //! for any given layer's notion of reduction.
 
 use crate::epoch::{Artifact, Registry};
-use crate::eval::pattern_match;
+use crate::eval::{pattern_equivalent, subsumes};
 use crate::hash::TermRef;
 use crate::lifecycle::ProofStatus;
 use serde::{Deserialize, Serialize};
@@ -197,8 +197,7 @@ pub fn check_reduction(
                 if ai == bi {
                     continue;
                 }
-                // a subsumes b iff a.lhs pattern-matches b.lhs.
-                if pattern_match(&a_art.rule.lhs, &b_art.rule.lhs).is_some()
+                if subsumes(&a_art.rule.lhs, &b_art.rule.lhs)
                     && reported_subsumed.insert(*bi.as_bytes())
                 {
                     barriers.push(ReductionBarrier::SubsumablePair {
@@ -298,14 +297,11 @@ pub fn detect_subsumption_pairs(
             if ai == bi {
                 continue;
             }
-            // A subsumes B: A.lhs pattern-matches B.lhs.
-            let a_subsumes_b = pattern_match(&a_art.rule.lhs, &b_art.rule.lhs).is_some();
-            if !a_subsumes_b {
+            if !subsumes(&a_art.rule.lhs, &b_art.rule.lhs) {
                 continue;
             }
             // Check for mutual subsumption (equivalence class).
-            let b_subsumes_a = pattern_match(&b_art.rule.lhs, &a_art.rule.lhs).is_some();
-            if b_subsumes_a {
+            if pattern_equivalent(&a_art.rule.lhs, &b_art.rule.lhs) {
                 // Keep only the canonical direction: the lower-hash
                 // representative becomes the subsumer.
                 if ai.as_bytes() > bi.as_bytes() {

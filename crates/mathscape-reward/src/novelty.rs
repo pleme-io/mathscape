@@ -1,6 +1,6 @@
 //! Novelty scoring: generality and irreducibility of discovered symbols.
 
-use mathscape_core::eval::{pattern_match, RewriteRule};
+use mathscape_core::eval::{pattern_match, subsumes, RewriteRule};
 use mathscape_core::term::Term;
 
 /// Compute generality of a rewrite rule against a corpus.
@@ -42,15 +42,13 @@ fn matches_anywhere(pattern: &Term, term: &Term) -> bool {
 /// rule is derivable.
 pub fn irreducibility(rule: &RewriteRule, existing_library: &[RewriteRule]) -> f64 {
     for existing in existing_library {
-        // Exact subsumption: same LHS and RHS patterns
-        if pattern_match(&existing.lhs, &rule.lhs).is_some()
-            && pattern_match(&existing.rhs, &rule.rhs).is_some()
-        {
+        // Exact subsumption: existing lhs/rhs patterns subsume rule's.
+        if subsumes(&existing.lhs, &rule.lhs) && subsumes(&existing.rhs, &rule.rhs) {
             return 0.0;
         }
-        // If the existing rule's RHS structurally matches our LHS
-        // (and RHS is not a trivial variable), it might be derivable
-        if !existing.rhs.is_var() && pattern_match(&existing.rhs, &rule.lhs).is_some() {
+        // If the existing rule's RHS structurally subsumes our LHS
+        // (and RHS is not a trivial variable), it might be derivable.
+        if !existing.rhs.is_var() && subsumes(&existing.rhs, &rule.lhs) {
             return 0.0;
         }
     }

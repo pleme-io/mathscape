@@ -156,6 +156,30 @@ fn try_builtin(func: &Term, args: &[Term]) -> Result<Option<Term>, EvalError> {
     }
 }
 
+/// Classical subsumption: `subsumer.lhs` pattern-matches
+/// `subsumed.lhs` — every term matched by subsumed is also matched
+/// by subsumer. One-directional; the subsumer is strictly more
+/// general (or equivalent, if both directions succeed).
+///
+/// Used across mathscape-core (reduction, promotion gate),
+/// mathscape-compress (generator dedup, extract dedup), and
+/// mathscape-reward (novelty scoring). Centralized here so all
+/// consumers share the exact semantics.
+#[must_use]
+pub fn subsumes(subsumer: &Term, subsumed: &Term) -> bool {
+    pattern_match(subsumer, subsumed).is_some()
+}
+
+/// Two patterns are *pattern-equivalent* iff each subsumes the
+/// other — they define the same equivalence class under rewriting.
+/// `extract_rules` dedups candidates by this relation; the
+/// reinforcement pass picks the canonical representative (lowest
+/// hash) when a pair is equivalent rather than strictly subsumed.
+#[must_use]
+pub fn pattern_equivalent(a: &Term, b: &Term) -> bool {
+    subsumes(a, b) && subsumes(b, a)
+}
+
 /// Match a pattern term against a concrete term, returning variable bindings.
 /// Returns None if the pattern doesn't match.
 pub fn pattern_match(pattern: &Term, term: &Term) -> Option<HashMap<u32, Term>> {

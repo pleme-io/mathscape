@@ -1,10 +1,11 @@
 //! Library extraction: discover repeated patterns and create rewrite rules.
 
 use crate::antiunify::{anti_unify, AntiUnifyResult};
-use mathscape_core::eval::RewriteRule;
+use mathscape_core::eval::{pattern_equivalent, pattern_match, RewriteRule};
 use mathscape_core::term::{SymbolId, Term};
 
 /// Configuration for library extraction.
+#[derive(Debug, Clone)]
 pub struct ExtractConfig {
     /// Minimum shared structure size for a pattern to be worth extracting.
     pub min_shared_size: usize,
@@ -80,8 +81,7 @@ pub fn extract_rules(
     let mut unique_candidates: Vec<_> = Vec::new();
     for cand in candidates {
         let already_seen = unique_candidates.iter().any(|u: &(AntiUnifyResult, Term, Term)| {
-            mathscape_core::eval::pattern_match(&u.0.pattern, &cand.0.pattern).is_some()
-                && mathscape_core::eval::pattern_match(&cand.0.pattern, &u.0.pattern).is_some()
+            pattern_equivalent(&u.0.pattern, &cand.0.pattern)
         });
         if !already_seen {
             unique_candidates.push(cand);
@@ -92,9 +92,7 @@ pub fn extract_rules(
         // Count how many corpus members this pattern matches
         let match_count = corpus
             .iter()
-            .filter(|e| {
-                mathscape_core::eval::pattern_match(&result.pattern, e).is_some()
-            })
+            .filter(|e| pattern_match(&result.pattern, e).is_some())
             .count();
 
         if match_count < config.min_matches {
