@@ -12,5 +12,7 @@ pub mod law_generator;
 pub mod meta_gen;
 
 pub use adapter::CompressionGenerator;
-pub use law_generator::derive_laws_from_corpus;
+pub use law_generator::{
+    derive_laws_from_corpus, derive_laws_from_corpus_instrumented, LawGenStats,
+};
 pub use meta_gen::{CompositeGenerator, MetaPatternGenerator};

@@ -53,6 +53,45 @@ use crate::antiunify::paired_anti_unify;
 use mathscape_core::eval::{eval, RewriteRule};
 use mathscape_core::term::{SymbolId, Term};
 use std::collections::BTreeMap;
+use std::time::Instant;
+
+/// R34: per-call stats for `derive_laws_from_corpus_instrumented`.
+/// Breaks the extractor into its three phases so the caller can
+/// see which phase dominates a given corpus/library configuration.
+///
+/// - `eval_ns`: Phase 1 — evaluate every corpus term. Typically
+///   dominates when the eval step budget is large or when
+///   library rules trigger deep reduction chains.
+/// - `anti_unify_ns`: Phase 2 — O(n²) paired anti-unification
+///   (capped at `max_pairs = 500`). Dominates when the trace set
+///   is large relative to eval cost.
+/// - `rank_ns`: Phase 3 — filter by min_support, emit rules,
+///   sort by support. Small constant cost relative to the other
+///   two; included for completeness.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct LawGenStats {
+    pub eval_ns: u64,
+    pub anti_unify_ns: u64,
+    pub rank_ns: u64,
+    pub trace_count: usize,
+    pub pairs_considered: usize,
+    pub laws_emitted: usize,
+}
+
+impl LawGenStats {
+    /// Sum across all three phases.
+    #[must_use]
+    pub fn total_ns(&self) -> u64 {
+        self.eval_ns
+            .saturating_add(self.anti_unify_ns)
+            .saturating_add(self.rank_ns)
+    }
+}
+
+#[inline]
+fn elapsed_ns(start: Instant) -> u64 {
+    u64::try_from(start.elapsed().as_nanos()).unwrap_or(u64::MAX)
+}
 
 /// Derive candidate laws from a concrete corpus. Each term in
 /// corpus is evaluated; non-trivial reductions become (input,
@@ -73,8 +112,33 @@ pub fn derive_laws_from_corpus(
     min_support: usize,
     next_id: &mut SymbolId,
 ) -> Vec<RewriteRule> {
+    derive_laws_from_corpus_instrumented(
+        corpus, library, step_limit, min_support, next_id,
+    )
+    .0
+}
+
+/// R34: instrumented variant of `derive_laws_from_corpus` returning
+/// per-phase wall-clock stats alongside the laws. Use this when the
+/// caller wants a breakdown of where the extractor spent its time —
+/// eval (Phase 1) vs. paired AU (Phase 2) vs. rank (Phase 3).
+///
+/// The non-instrumented `derive_laws_from_corpus` delegates to this
+/// function and discards the stats — same behavior, same results,
+/// no observable difference.
+#[must_use]
+pub fn derive_laws_from_corpus_instrumented(
+    corpus: &[Term],
+    library: &[RewriteRule],
+    step_limit: usize,
+    min_support: usize,
+    next_id: &mut SymbolId,
+) -> (Vec<RewriteRule>, LawGenStats) {
+    let mut stats = LawGenStats::default();
+
     // Phase 1: evaluate every term. Keep non-trivial reductions
     // as (input, output) traces.
+    let t_eval = Instant::now();
     let mut traces: Vec<(Term, Term)> = Vec::new();
     for t in corpus {
         match eval(t, library, step_limit) {
@@ -88,13 +152,16 @@ pub fn derive_laws_from_corpus(
             }
         }
     }
+    stats.eval_ns = elapsed_ns(t_eval);
+    stats.trace_count = traces.len();
 
     if traces.len() < 2 {
-        return Vec::new();
+        return (Vec::new(), stats);
     }
 
     // Phase 2: paired anti-unify trace pairs. Build a map from
     // (lhs_pattern, rhs_pattern) → support count.
+    let t_au = Instant::now();
     let mut law_support: BTreeMap<(Term, Term), usize> = BTreeMap::new();
 
     let max_pairs = 500.min(traces.len() * (traces.len() - 1) / 2);
@@ -130,8 +197,11 @@ pub fn derive_laws_from_corpus(
             }
         }
     }
+    stats.anti_unify_ns = elapsed_ns(t_au);
+    stats.pairs_considered = considered;
 
     // Phase 3: filter by min_support, emit as rules.
+    let t_rank = Instant::now();
     let mut laws: Vec<RewriteRule> = Vec::new();
     for ((lhs, rhs), support) in &law_support {
         if *support < min_support {
@@ -151,8 +221,10 @@ pub fn derive_laws_from_corpus(
         let k = (r.lhs.clone(), r.rhs.clone());
         std::cmp::Reverse(*law_support.get(&k).unwrap_or(&0))
     });
+    stats.rank_ns = elapsed_ns(t_rank);
+    stats.laws_emitted = laws.len();
 
-    laws
+    (laws, stats)
 }
 
 #[cfg(test)]

@@ -27,7 +27,7 @@
 
 mod common;
 
-use mathscape_compress::derive_laws_from_corpus;
+use mathscape_compress::{derive_laws_from_corpus_instrumented, LawGenStats};
 use mathscape_core::{
     bootstrap::{
         BootstrapCycle, CanonicalDeduper, DefaultCorpusGenerator,
@@ -38,13 +38,33 @@ use mathscape_core::{
     term::Term,
     trajectory::LibraryFeatures,
 };
+use std::cell::RefCell;
 
 /// LawExtractor wrapping R24's paired-AU law generator. Same as
 /// self_bootstrap — extracted here so first_model reads self-
 /// contained.
+///
+/// R35: carries a RefCell<Vec<LawGenStats>> so each extract() call
+/// records its per-phase breakdown. The cycle consumes the stats
+/// after the run and prints the extract-layer efficiency report.
 struct DerivedLawsExtractor {
     step_limit: usize,
     min_support: usize,
+    per_call_stats: RefCell<Vec<LawGenStats>>,
+}
+
+impl DerivedLawsExtractor {
+    fn new(step_limit: usize, min_support: usize) -> Self {
+        Self {
+            step_limit,
+            min_support,
+            per_call_stats: RefCell::new(Vec::new()),
+        }
+    }
+
+    fn take_stats(&self) -> Vec<LawGenStats> {
+        self.per_call_stats.borrow_mut().drain(..).collect()
+    }
 }
 
 impl LawExtractor for DerivedLawsExtractor {
@@ -55,13 +75,25 @@ impl LawExtractor for DerivedLawsExtractor {
     ) -> Vec<RewriteRule> {
         let mut next_id: mathscape_core::term::SymbolId =
             (library.len() + 1) as u32;
-        derive_laws_from_corpus(
+        let (laws, stats) = derive_laws_from_corpus_instrumented(
             corpus,
             library,
             self.step_limit,
             self.min_support,
             &mut next_id,
-        )
+        );
+        self.per_call_stats.borrow_mut().push(stats);
+        laws
+    }
+}
+
+/// R35 helper: percentage of `part` out of `total`, clamped to 0
+/// when `total` is zero.
+fn pct(part: u64, total: u64) -> f64 {
+    if total == 0 {
+        0.0
+    } else {
+        (part as f64 / total as f64) * 100.0
     }
 }
 
@@ -81,20 +113,29 @@ const FEATURE_NAMES: [&str; LibraryFeatures::WIDTH] = [
 
 /// Build a fresh BootstrapCycle and run it to produce M0.
 fn produce_m0() -> mathscape_core::bootstrap::BootstrapOutcome {
+    produce_m0_with_extract_stats().0
+}
+
+/// R35: same as `produce_m0` but also returns the per-iteration
+/// extract-layer stats (one LawGenStats per iteration). Used by
+/// the inspection test to render the extract breakdown.
+fn produce_m0_with_extract_stats() -> (
+    mathscape_core::bootstrap::BootstrapOutcome,
+    Vec<LawGenStats>,
+) {
     let cycle = BootstrapCycle::new(
         DefaultCorpusGenerator,
-        DerivedLawsExtractor {
-            step_limit: 300,
-            min_support: 2,
-        },
+        DerivedLawsExtractor::new(300, 2),
         DefaultModelUpdater::default(),
         5, // 5 iterations — enough to see post-saturation stability
     );
-    cycle.run_with_dedup(
+    let outcome = cycle.run_with_dedup(
         Vec::new(),
         LinearPolicy::tensor_seeking_prior(),
         &CanonicalDeduper,
-    )
+    );
+    let stats = cycle.extractor.take_stats();
+    (outcome, stats)
 }
 
 #[test]
@@ -104,7 +145,7 @@ fn produce_and_inspect_first_model() {
     println!("║ Produced by BootstrapCycle<C, E, M> + CanonicalDedup ║");
     println!("╚══════════════════════════════════════════════════════╝");
 
-    let outcome = produce_m0();
+    let (outcome, extract_stats) = produce_m0_with_extract_stats();
     let model = &outcome.final_policy;
     let library = &outcome.final_library;
 
@@ -225,6 +266,52 @@ fn produce_and_inspect_first_model() {
             t.total_ns(),
         );
     }
+
+    // ── Section 7c: R35 extract-phase drill-down ─────────────────
+    // The extract seam dominates per-iter time; R35 captures the
+    // sub-phase split (eval / paired_anti_unify / rank) inside the
+    // law generator. Use this to pick the next optimization target.
+    println!("\n──── 7c. EXTRACT PHASE BREAKDOWN (derive_laws_from_corpus) ─");
+    println!("  iter  eval_ns  au_ns    rank_ns  traces pairs  laws");
+    let mut eval_total = 0u64;
+    let mut au_total = 0u64;
+    let mut rank_total = 0u64;
+    for (i, s) in extract_stats.iter().enumerate() {
+        println!(
+            "  {:>4} {:>8} {:>8} {:>8}  {:>6} {:>5} {:>5}",
+            i,
+            s.eval_ns,
+            s.anti_unify_ns,
+            s.rank_ns,
+            s.trace_count,
+            s.pairs_considered,
+            s.laws_emitted,
+        );
+        eval_total = eval_total.saturating_add(s.eval_ns);
+        au_total = au_total.saturating_add(s.anti_unify_ns);
+        rank_total = rank_total.saturating_add(s.rank_ns);
+    }
+    let extract_sub_total = eval_total
+        .saturating_add(au_total)
+        .saturating_add(rank_total);
+    println!(
+        "  SUM  {:>8} {:>8} {:>8}  ({:>5.1}%  {:>5.1}%  {:>5.1}%)",
+        eval_total,
+        au_total,
+        rank_total,
+        pct(eval_total, extract_sub_total),
+        pct(au_total, extract_sub_total),
+        pct(rank_total, extract_sub_total),
+    );
+    println!(
+        "  extract sub-total = {extract_sub_total} ns (cycle.extract_ns × iters = {} ns)",
+        outcome
+            .timings
+            .per_iteration
+            .iter()
+            .map(|t| t.extract_ns)
+            .fold(0u64, u64::saturating_add),
+    );
 
     // ── Section 8: what this proves ──────────────────────────────
     println!("\n──── 8. WHAT M0 PROVES ─────────────────────────────────");
