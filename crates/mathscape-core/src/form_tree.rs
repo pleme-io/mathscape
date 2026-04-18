@@ -37,6 +37,118 @@ use crate::term::Term;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 
+// ── Typescape: invariant-carrying types ─────────────────────────────
+//
+// The three typed invariants that the forest depends on. Each has a
+// gated constructor, so any value that exists in the program is by
+// construction within the allowed domain. Downstream code doesn't
+// need runtime checks — the type carries the proof.
+//
+// This is the pleme-io "types → proofs → render anywhere" discipline
+// applied to the forest. Every line that mentions an `IrreducibilityRate`
+// knows it's in [0, 1]; every `CheckPeriod` is in [1, 64]; every
+// `HitCount` has `hits <= check_count`. No runtime validation, no
+// clamping in consumer code, no defensive `assert!` scattered
+// through the scheduler.
+
+/// Irreducibility rate: fraction of checks that failed to reduce,
+/// constructor-gated to [0.0, 1.0]. The only way to produce a value
+/// outside the domain is to bypass the constructor — which requires
+/// a type change, caught at compile time.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct IrreducibilityRate(f64);
+
+impl IrreducibilityRate {
+    /// The "fully irreducible" end of the spectrum. Brand-new nodes
+    /// default to this: conservative, due immediately for checking.
+    pub const MAX: Self = Self(1.0);
+    /// The "always reduces" end.
+    pub const MIN: Self = Self(0.0);
+
+    /// Construct from a raw f64, clamping into [0, 1]. Any NaN is
+    /// treated as MAX (conservative — "due for checking").
+    #[must_use]
+    pub fn new(raw: f64) -> Self {
+        if raw.is_nan() {
+            return Self::MAX;
+        }
+        Self(raw.clamp(0.0, 1.0))
+    }
+
+    #[must_use]
+    pub fn as_f64(&self) -> f64 {
+        self.0
+    }
+}
+
+/// Check period: how many epochs to wait before re-inspecting a
+/// node. Constructor-gated to [1, 64]. `CheckPeriod::from_rate`
+/// derives it from the irreducibility rate under the `2^(6r)` curve.
+/// Downstream arithmetic on `u64` is safe — the bounds are baked in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub struct CheckPeriod(u64);
+
+impl CheckPeriod {
+    pub const MIN: Self = Self(1);
+    pub const MAX: Self = Self(64);
+
+    /// Derive period from the irreducibility rate via `2^(6r)`:
+    /// r=0 → 1 epoch, r=1 → 64 epochs. Round, clamp, construct.
+    #[must_use]
+    pub fn from_rate(rate: IrreducibilityRate) -> Self {
+        let raw = (rate.as_f64() * 6.0).exp2();
+        let clamped = raw.clamp(Self::MIN.0 as f64, Self::MAX.0 as f64);
+        Self(clamped.round() as u64)
+    }
+
+    #[must_use]
+    pub fn as_u64(&self) -> u64 {
+        self.0
+    }
+}
+
+/// Hit count: invariant `hits <= check_count`. The only mutation is
+/// through `record_check`, which maintains the invariant by
+/// construction. Consumers cannot set hits > check_count.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct HitCount {
+    check_count: u64,
+    hits: u64,
+}
+
+impl HitCount {
+    /// Record a check. `hit` is true iff at least one rule fired in
+    /// this pass. The type guarantees `hits <= check_count` post-call.
+    pub fn record_check(&mut self, hit: bool) {
+        self.check_count += 1;
+        if hit {
+            self.hits += 1;
+        }
+        debug_assert!(self.hits <= self.check_count, "HitCount invariant violated");
+    }
+
+    #[must_use]
+    pub fn check_count(&self) -> u64 {
+        self.check_count
+    }
+
+    #[must_use]
+    pub fn hits(&self) -> u64 {
+        self.hits
+    }
+
+    /// Empirical irreducibility rate. A never-checked counter has
+    /// rate 1.0 (conservative).
+    #[must_use]
+    pub fn irreducibility_rate(&self) -> IrreducibilityRate {
+        if self.check_count == 0 {
+            return IrreducibilityRate::MAX;
+        }
+        let miss = (self.check_count - self.hits) as f64 / self.check_count as f64;
+        IrreducibilityRate::new(miss)
+    }
+}
+
 /// A node in the discovery forest.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FormNode {
@@ -48,20 +160,14 @@ pub struct FormNode {
     /// Used to mark morphism edges as `retroactive` when a rule
     /// lands on a node that predates the rule's minting epoch.
     pub inserted_epoch: u64,
-    /// Number of times we have tried to reduce this node. Each pass
-    /// of `apply_rules_retroactively` counts as one check, regardless
-    /// of how many rules were in the batch.
-    pub check_count: u64,
-    /// Number of checks where *at least one* rule fired. Capped at
-    /// `check_count` by construction: semantically "fraction of
-    /// inspections that produced any reduction." Under a batch of K
-    /// rules, `hits` grows by 0 or 1 per pass, not by the number of
-    /// rules that fired. This keeps `irreducibility_rate` in [0, 1]
-    /// even under multi-rule batches.
-    pub hits: u64,
+    /// Typed check/hit counter — invariant `hits <= check_count`
+    /// enforced by the constructor. Accessors:
+    /// `counter.check_count()`, `counter.hits()`,
+    /// `counter.irreducibility_rate()`.
+    pub counter: HitCount,
     /// Cumulative morphism edges fired on this node, across its
-    /// entire history. Distinct from `hits`: a single pass with 3
-    /// matching rules counts as 1 `hit` but 3 `edges_fired`.
+    /// entire history. Distinct from `counter.hits()`: a single pass
+    /// with 3 matching rules counts as 1 hit but 3 edges_fired.
     pub edges_fired: u64,
     /// Epoch at which this node was last checked.
     pub last_checked_epoch: u64,
@@ -76,42 +182,27 @@ pub struct FormNode {
 }
 
 impl FormNode {
-    /// Empirical irreducibility rate: `1 - hits / check_count`,
-    /// clamped to [0, 1]. A node never checked has rate 1.0 — the
-    /// conservative default, which means "assume due for checking
-    /// until proven otherwise." The schedule treats check_count==0
-    /// specially so this doesn't wrongly starve brand-new inserts.
+    /// Empirical irreducibility rate as a typed newtype. The value
+    /// is guaranteed to be in [0, 1] by the type system — downstream
+    /// consumers cannot observe a value outside the domain.
     #[must_use]
-    pub fn irreducibility_rate(&self) -> f64 {
-        if self.check_count == 0 {
-            return 1.0;
-        }
-        let miss = (self.check_count - self.hits) as f64 / self.check_count as f64;
-        miss.clamp(0.0, 1.0)
+    pub fn irreducibility_rate(&self) -> IrreducibilityRate {
+        self.counter.irreducibility_rate()
     }
 
-    /// Adaptive check period: how many epochs to wait before the
-    /// scheduler should re-check this node. Exponential in the
-    /// irreducibility rate, with a floor of 1 and ceiling of 64.
-    /// Highly reducible nodes (rate ~0) get checked every epoch;
-    /// stably irreducible nodes (rate ~1) get checked every ~64.
-    ///
-    /// Burn-in: before a node accumulates `BURN_IN` samples, return
-    /// period=1. Without this, a single all-miss sample would jump
-    /// the period to 64 and the scheduler would refuse to re-check
-    /// the node for 64 epochs — which defeats retroactive reduction
-    /// when a matching rule arrives on epoch 2 (too-soon for the
-    /// node to be due again). Burn-in lets new rules land on all
-    /// recently-inserted nodes before the scheduler backs off.
+    /// Adaptive check period as a typed newtype. Guaranteed to be
+    /// in [1, 64]. Burn-in: before the counter accumulates `BURN_IN`
+    /// samples, return `CheckPeriod::MIN` — this prevents a single
+    /// all-miss observation from jumping the period to MAX and
+    /// starving retroactive firing of a matching rule that arrives
+    /// a few epochs later.
     #[must_use]
-    pub fn check_period(&self) -> u64 {
+    pub fn check_period(&self) -> CheckPeriod {
         const BURN_IN: u64 = 3;
-        if self.check_count < BURN_IN {
-            return 1;
+        if self.counter.check_count() < BURN_IN {
+            return CheckPeriod::MIN;
         }
-        let r = self.irreducibility_rate();
-        let raw = (r * 6.0).exp2(); // r=0 -> 1, r=1 -> 64.
-        raw.clamp(1.0, 64.0).round() as u64
+        CheckPeriod::from_rate(self.irreducibility_rate())
     }
 }
 
@@ -174,8 +265,7 @@ impl DiscoveryForest {
             id,
             term,
             inserted_epoch: self.epoch,
-            check_count: 0,
-            hits: 0,
+            counter: HitCount::default(),
             edges_fired: 0,
             last_checked_epoch: 0,
             last_hit_epoch: None,
@@ -281,16 +371,15 @@ impl DiscoveryForest {
             }
 
             let node = self.nodes.get_mut(&id).expect("id exists");
-            node.check_count += 1;
-            if node_hit_this_pass {
-                node.hits += 1;
-            }
+            node.counter.record_check(node_hit_this_pass);
             node.last_checked_epoch = epoch;
             // Re-schedule based on updated stats. A node that hit in
             // this pass is "hot" — its rate drops and period shrinks.
             // A node that missed all rules has a higher rate and will
-            // be scheduled further out.
-            let next = epoch + node.check_period();
+            // be scheduled further out. Typed `CheckPeriod` guarantees
+            // the period is in [1, 64] — no arithmetic overflow on
+            // the schedule key, no silent period=0 stall.
+            let next = epoch + node.check_period().as_u64();
             self.next_check.insert(id, next);
             self.schedule.entry(next).or_default().push(id);
         }
@@ -309,7 +398,10 @@ impl DiscoveryForest {
     pub fn stable_leaf_count(&self) -> usize {
         self.nodes
             .values()
-            .filter(|n| n.check_count > 0 && n.irreducibility_rate() >= 0.9999)
+            .filter(|n| {
+                n.counter.check_count() > 0
+                    && n.irreducibility_rate().as_f64() >= 0.9999
+            })
             .count()
     }
 
@@ -351,6 +443,62 @@ impl DiscoveryForest {
     #[must_use]
     pub fn retroactive_edge_count(&self) -> usize {
         self.edges.iter().filter(|e| e.retroactive).count()
+    }
+
+    /// The generator-facing seam: return the *live frontier* the
+    /// generator should anti-unify over this epoch. Stable leaves
+    /// (check_period at MAX, not yet due) are skipped — they are
+    /// not going to produce new extractable patterns. This is where
+    /// the forest's scheduler stops being observation and starts
+    /// being compute-saving for the discovery loop.
+    ///
+    /// Each returned term is the node's current `reduced_to` chain
+    /// tip (if any) or the original term (if never reduced). That
+    /// way the generator sees the library-reduced view without
+    /// re-running `rewrite_fixed_point` from the raw corpus every
+    /// epoch.
+    ///
+    /// This is the clean boundary for a future Lisp layer: a
+    /// `DueSelector` trait can wrap this method with arbitrary
+    /// selection policy (random-sample, top-k-by-rate, etc.)
+    /// without touching the forest's internal scheduler.
+    #[must_use]
+    pub fn due_corpus_view(&self, epoch: u64) -> Vec<Term> {
+        let mut out = Vec::new();
+        for id in self.due_nodes(epoch) {
+            if let Some(node) = self.nodes.get(&id) {
+                // Resolve the reduction chain: if this node has been
+                // reduced, follow reduced_to to the current tip.
+                // Prevents cycles with a step bound.
+                let mut cur = node.id;
+                let mut steps = 0usize;
+                while steps < 32 {
+                    match self.nodes.get(&cur) {
+                        Some(n) => match n.reduced_to {
+                            Some(next) if next != cur => {
+                                cur = next;
+                                steps += 1;
+                            }
+                            _ => break,
+                        },
+                        None => break,
+                    }
+                }
+                if let Some(tip) = self.nodes.get(&cur) {
+                    out.push(tip.term.clone());
+                }
+            }
+        }
+        out
+    }
+
+    /// Total compute units skipped vs a naive O(total) scan over the
+    /// forest: the count of non-due nodes. Exposed as a metric so the
+    /// flex harness can log scheduler savings alongside discovery
+    /// progress.
+    #[must_use]
+    pub fn scheduler_skip_count(&self, epoch: u64) -> usize {
+        self.len().saturating_sub(self.due_nodes(epoch).len())
     }
 }
 
@@ -396,7 +544,7 @@ mod tests {
         assert_eq!(edges[0].from, id);
         let leaf_id = nat(5).content_hash();
         assert!(f.nodes.contains_key(&leaf_id));
-        assert_eq!(f.nodes[&id].hits, 1);
+        assert_eq!(f.nodes[&id].counter.hits(), 1);
     }
 
     #[test]
@@ -411,24 +559,39 @@ mod tests {
             let _ = f.apply_rule_retroactively(&rule);
         }
         let node = f.nodes.values().next().unwrap();
-        assert!(node.check_count >= 2);
-        assert_eq!(node.hits, 0);
-        assert!((node.irreducibility_rate() - 1.0).abs() < 1e-9);
+        assert!(node.counter.check_count() >= 2);
+        assert_eq!(node.counter.hits(), 0);
+        assert!((node.irreducibility_rate().as_f64() - 1.0).abs() < 1e-9);
         assert!(
-            node.check_period() >= 32,
+            node.check_period().as_u64() >= 32,
             "fully-irreducible node should have near-max period; got {}",
-            node.check_period(),
+            node.check_period().as_u64(),
         );
     }
 
     #[test]
     fn check_period_hot_vs_cold() {
+        let mut hot_counter = HitCount::default();
+        for _ in 0..100 {
+            hot_counter.record_check(true); // but counter caps at 99 hits because...
+        }
+        // Actually record 99 hits + 1 miss to get 99/100.
+        let mut hot_counter = HitCount::default();
+        for _ in 0..99 {
+            hot_counter.record_check(true);
+        }
+        hot_counter.record_check(false);
+
+        let mut cold_counter = HitCount::default();
+        for _ in 0..100 {
+            cold_counter.record_check(false);
+        }
+
         let hot = FormNode {
             id: nat(0).content_hash(),
             term: nat(0),
             inserted_epoch: 0,
-            check_count: 100,
-            hits: 99,
+            counter: hot_counter,
             edges_fired: 99,
             last_checked_epoch: 0,
             last_hit_epoch: None,
@@ -436,13 +599,53 @@ mod tests {
             history: vec![],
         };
         let cold = FormNode {
-            check_count: 100,
-            hits: 0,
+            counter: cold_counter,
             ..hot.clone()
         };
         assert!(cold.check_period() > hot.check_period());
-        assert!(cold.check_period() <= 64);
-        assert!(hot.check_period() >= 1);
+        assert_eq!(cold.check_period(), CheckPeriod::MAX);
+        assert_eq!(hot.check_period(), CheckPeriod::MIN);
+    }
+
+    // ── Typescape: proofs of the invariant types ────────────────────
+
+    #[test]
+    fn irreducibility_rate_clamps_into_domain() {
+        assert_eq!(IrreducibilityRate::new(-1.0).as_f64(), 0.0);
+        assert_eq!(IrreducibilityRate::new(0.5).as_f64(), 0.5);
+        assert_eq!(IrreducibilityRate::new(2.0).as_f64(), 1.0);
+    }
+
+    #[test]
+    fn irreducibility_rate_nan_goes_max() {
+        assert_eq!(IrreducibilityRate::new(f64::NAN), IrreducibilityRate::MAX);
+    }
+
+    #[test]
+    fn check_period_constructor_clamps_into_domain() {
+        assert_eq!(CheckPeriod::from_rate(IrreducibilityRate::MIN), CheckPeriod::MIN);
+        assert_eq!(CheckPeriod::from_rate(IrreducibilityRate::MAX), CheckPeriod::MAX);
+        let mid = CheckPeriod::from_rate(IrreducibilityRate::new(0.5));
+        assert!(mid >= CheckPeriod::MIN && mid <= CheckPeriod::MAX);
+    }
+
+    #[test]
+    fn hit_count_invariant_holds_after_many_checks() {
+        let mut c = HitCount::default();
+        for i in 0..1000 {
+            c.record_check(i % 3 == 0); // record hits sparsely
+        }
+        assert!(c.hits() <= c.check_count());
+        let r = c.irreducibility_rate();
+        assert!(r.as_f64() >= 0.0 && r.as_f64() <= 1.0);
+    }
+
+    #[test]
+    fn hit_count_default_is_conservative() {
+        let c = HitCount::default();
+        assert_eq!(c.check_count(), 0);
+        assert_eq!(c.hits(), 0);
+        assert_eq!(c.irreducibility_rate(), IrreducibilityRate::MAX);
     }
 
     #[test]
