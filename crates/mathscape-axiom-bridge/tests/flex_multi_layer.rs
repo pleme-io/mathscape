@@ -511,7 +511,13 @@ fn flex_dimensional_discovery_emerges() {
             // node itself).
             min_shared_size: 1,
             min_matches: 2,
-            max_new_rules: 3,
+            // Raised from 3 → 12 so both the nested and the flat
+            // identity-element abstractions survive the top-K cut.
+            // Same-family pair anti-unifications (e.g. S_001 vs
+            // S_003) have higher shared_size than cross-family
+            // pairs (S_003 vs S_005), so they crowd the top slots
+            // even though dedup will reject them later.
+            max_new_rules: 12,
         },
         1000, // high id range to keep meta symbols distinct
     );
@@ -596,18 +602,56 @@ fn flex_dimensional_discovery_emerges() {
         );
     }
 
-    // Hard assertion: at least one meta-rule should have landed.
-    // This is the test's purpose — prove the machine reached the
-    // dimensional-discovery regime.
+    // Hard assertions: the machine should discover BOTH meta-laws
+    // (flat + nested identity-element), and reinforcement should
+    // recognize that the flat form subsumes the nested form and
+    // collapse appropriately.
     assert!(
-        !meta_rules.is_empty(),
-        "dimensional discovery FAILED: no operator-variable meta-rule in library. \
-         Either meta-generator produced no candidates, prover rejected them all, \
-         or reinforcement collapsed them. Library was: {:?}",
-        library
-            .iter()
-            .map(|a| &a.rule.name)
-            .collect::<Vec<_>>()
+        meta_rules.len() >= 2,
+        "dimensional discovery should surface both flat AND nested \
+         identity-element abstractions; got {} meta-rules: {:?}",
+        meta_rules.len(),
+        meta_rules.iter().map(|a| &a.rule.name).collect::<Vec<_>>(),
+    );
+    // Classify: a "flat" meta-rule is a 2-arg Apply whose arg 0 is a
+    // fresh var (not a library constant like Nat(0) or Nat(1)), i.e.
+    // the operator-identity pattern with generalized identity value.
+    // A "nested" meta-rule has an Apply as arg 0.
+    let flat_count = meta_rules
+        .iter()
+        .filter(|a| {
+            if let Term::Apply(_, args) = &a.rule.lhs {
+                if args.len() == 2 {
+                    return matches!(args[0], Term::Var(_))
+                        && matches!(args[1], Term::Var(_));
+                }
+            }
+            false
+        })
+        .count();
+    let nested_count = meta_rules
+        .iter()
+        .filter(|a| {
+            if let Term::Apply(_, args) = &a.rule.lhs {
+                if args.len() == 2 {
+                    return matches!(args[0], Term::Apply(..));
+                }
+            }
+            false
+        })
+        .count();
+    println!(
+        "\n▶ Meta-rule shape census: flat={flat_count} nested={nested_count}"
+    );
+    assert!(
+        flat_count >= 1,
+        "flat identity-element abstraction (op(x, id) = x) should surface \
+         — this is the canonical arithmetic primitive generalization"
+    );
+    assert!(
+        nested_count >= 1,
+        "nested identity-element abstraction (op(op(x, id), id)) should \
+         also surface (witness of multi-depth meta-patterns)"
     );
 }
 

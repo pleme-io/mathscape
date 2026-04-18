@@ -33,6 +33,19 @@ pub struct MetaPatternGenerator {
     pub config: ExtractConfig,
     pub next_symbol_id: SymbolId,
     pub origin: String,
+    /// Library-signature cache: if the library composition is
+    /// identical to the last call, return the cached candidates
+    /// instead of re-running anti-unification over every pair.
+    /// Observed in practice: after the first discovery burst, the
+    /// runner re-enters propose() with the same library for
+    /// several epochs before reinforcement subsumes anything —
+    /// every re-entry redoes O(N²) anti-unification only to have
+    /// dedup throw it away. The cache cuts that to a hash check.
+    last_lib_signature: Option<u64>,
+    last_candidates: Vec<Candidate>,
+    /// Observability: how often the cache fired. Reset on `new()`.
+    pub cache_hits: u64,
+    pub cache_misses: u64,
 }
 
 impl MetaPatternGenerator {
@@ -42,8 +55,29 @@ impl MetaPatternGenerator {
             config,
             next_symbol_id,
             origin: "compress/meta-antiunify".into(),
+            last_lib_signature: None,
+            last_candidates: Vec::new(),
+            cache_hits: 0,
+            cache_misses: 0,
         }
     }
+}
+
+/// Hash the library composition in a way that ignores ordering
+/// of equivalent rules but captures every structural distinction
+/// that could affect meta-extraction output.
+fn library_signature(library: &[Artifact]) -> u64 {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+    // Collect content hashes, sort, hash the sequence. Order-
+    // independent by construction.
+    let mut hashes: Vec<[u8; 32]> = library.iter().map(|a| a.content_hash.0).collect();
+    hashes.sort();
+    let mut h = DefaultHasher::new();
+    for bytes in &hashes {
+        bytes.hash(&mut h);
+    }
+    h.finish()
 }
 
 impl Generator for MetaPatternGenerator {
@@ -58,6 +92,14 @@ impl Generator for MetaPatternGenerator {
             // anti-unify between.
             return vec![];
         }
+
+        // Fast path: library unchanged since last call.
+        let sig = library_signature(library);
+        if self.last_lib_signature == Some(sig) {
+            self.cache_hits += 1;
+            return self.last_candidates.clone();
+        }
+        self.cache_misses += 1;
 
         // The "corpus" for meta-extraction is the library's LHSs. If
         // the library holds 5 rules, we anti-unify across pairs of
@@ -105,12 +147,16 @@ impl Generator for MetaPatternGenerator {
                 eprintln!("[meta]   kept: {} :: {} => {}", r.name, r.lhs, r.rhs);
             }
         }
-        kept.into_iter()
+        let candidates: Vec<Candidate> = kept
+            .into_iter()
             .map(|rule| Candidate {
                 rule,
                 origin: self.origin.clone(),
             })
-            .collect()
+            .collect();
+        self.last_lib_signature = Some(sig);
+        self.last_candidates = candidates.clone();
+        candidates
     }
 }
 
@@ -304,6 +350,94 @@ mod tests {
             meta_origin_count > 0,
             "composite must emit at least one meta-origin candidate; got candidates = {}",
             candidates.len(),
+        );
+    }
+
+    #[test]
+    fn meta_caches_on_unchanged_library() {
+        let library = vec![
+            lib_artifact(
+                "add-identity",
+                apply(var(2), vec![var(100), nat(0)]),
+                var(100),
+            ),
+            lib_artifact(
+                "mul-identity",
+                apply(var(3), vec![var(100), nat(1)]),
+                var(100),
+            ),
+        ];
+        let mut g = MetaPatternGenerator::new(
+            ExtractConfig {
+                min_shared_size: 1,
+                min_matches: 2,
+                max_new_rules: 5,
+            },
+            600,
+        );
+        let first = g.propose(0, &[], &library);
+        assert_eq!(g.cache_hits, 0);
+        assert_eq!(g.cache_misses, 1);
+
+        // Re-call with the same library: must hit cache, must
+        // return identical candidates.
+        let second = g.propose(1, &[], &library);
+        assert_eq!(g.cache_hits, 1);
+        assert_eq!(g.cache_misses, 1);
+        assert_eq!(first.len(), second.len());
+        for (a, b) in first.iter().zip(second.iter()) {
+            assert_eq!(a.rule.name, b.rule.name);
+            assert_eq!(a.rule.lhs, b.rule.lhs);
+        }
+
+        // Change the library: cache must invalidate.
+        let mut library2 = library.clone();
+        library2.push(lib_artifact(
+            "square",
+            apply(var(4), vec![var(100), var(100)]),
+            var(100),
+        ));
+        let _third = g.propose(2, &[], &library2);
+        assert_eq!(g.cache_hits, 1);
+        assert_eq!(g.cache_misses, 2);
+
+        // And a re-call with library2 hits cache again.
+        let _fourth = g.propose(3, &[], &library2);
+        assert_eq!(g.cache_hits, 2);
+        assert_eq!(g.cache_misses, 2);
+    }
+
+    #[test]
+    fn meta_cache_is_order_independent() {
+        // Signature hashes content_hash set, not position order —
+        // library with rules in different order should still hit
+        // cache.
+        let a = lib_artifact(
+            "add-identity",
+            apply(var(2), vec![var(100), nat(0)]),
+            var(100),
+        );
+        let b = lib_artifact(
+            "mul-identity",
+            apply(var(3), vec![var(100), nat(1)]),
+            var(100),
+        );
+        let mut g = MetaPatternGenerator::new(
+            ExtractConfig {
+                min_shared_size: 1,
+                min_matches: 2,
+                max_new_rules: 5,
+            },
+            700,
+        );
+        let _ = g.propose(0, &[], &[a.clone(), b.clone()]);
+        assert_eq!(g.cache_misses, 1);
+        let _ = g.propose(1, &[], &[b, a]);
+        // Should have hit the cache since the set of content
+        // hashes is identical.
+        assert_eq!(
+            g.cache_hits, 1,
+            "cache must be order-independent (sorted content hashes)"
         );
     }
 
