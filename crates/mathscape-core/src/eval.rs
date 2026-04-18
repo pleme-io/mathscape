@@ -2,7 +2,6 @@
 //! and user-defined library rewrite rules.
 
 use crate::term::Term;
-use crate::value::Value;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
@@ -394,6 +393,7 @@ fn match_inner(pattern: &Term, term: &Term, bindings: &mut BTreeMap<u32, Term>) 
 mod tests {
     use super::*;
     use crate::test_helpers::{apply, nat, var};
+    use crate::value::Value;
 
     #[test]
     fn shared_anonymize_preserves_commutativity_signal() {

@@ -214,14 +214,27 @@ impl Term {
 // duplicate list of magic constants. One source of truth.
 use crate::builtin::is_commutative as is_commutative_op;
 
+use crate::builtin::is_associative as is_associative_op;
+
 impl Term {
     /// Produce a canonical form — structurally equal representations
     /// of semantically-equal terms become literally identical.
     ///
-    /// R3 (2026-04-18): sorts args of commutative operators. Does
-    /// NOT yet flatten associativity (that's R4, pending evaluator
-    /// support for variadic add/mul). Recursive: all subterms are
-    /// canonicalized bottom-up.
+    /// R3 + R4 (2026-04-18): handles both commutativity AND
+    /// associativity. For AC operators (add, mul), the algorithm is:
+    ///   1. Recursively canonicalize args (bottom-up).
+    ///   2. If head is associative: flatten nested same-head
+    ///      Applys into a single list of operands.
+    ///   3. If head is commutative: sort operands by the derived
+    ///      Ord.
+    ///   4. Rebuild in binary LEFT-ASSOCIATED form so the evaluator
+    ///      (which expects arity=2 add/mul) still sees a valid
+    ///      binary tree: `[a, b, c]` → `add(add(a, b), c)`.
+    ///
+    /// The result: every semantically-equal AC expression maps to
+    /// ONE canonical term. `add(add(1, 2), 3)`, `add(1, add(2, 3))`,
+    /// `add(3, add(1, 2))`, etc. all collapse to
+    /// `add(add(1, 2), 3)`.
     #[must_use]
     pub fn canonical(&self) -> Term {
         match self {
@@ -232,14 +245,32 @@ impl Term {
             Term::Apply(head, args) => {
                 let head_c = head.canonical();
                 let args_c: Vec<Term> = args.iter().map(Term::canonical).collect();
-                let sorted_args = if is_commutative_op(&head_c) {
-                    let mut v = args_c;
-                    v.sort();
-                    v
+
+                // R4: if associative, flatten nested same-head
+                // applications into a single operand list.
+                let flat_args: Vec<Term> = if is_associative_op(&head_c) {
+                    flatten_associative(&head_c, args_c)
                 } else {
                     args_c
                 };
-                Term::Apply(Box::new(head_c), sorted_args)
+
+                // R3: if commutative, sort the flat operand list.
+                let sorted_args = if is_commutative_op(&head_c) {
+                    let mut v = flat_args;
+                    v.sort();
+                    v
+                } else {
+                    flat_args
+                };
+
+                // R4 rebuild: binary left-associated form preserves
+                // arity=2 so the existing evaluator works unchanged.
+                // [a, b, c, d] → add(add(add(a, b), c), d)
+                if is_associative_op(&head_c) && sorted_args.len() > 2 {
+                    rebuild_left_associated(head_c, sorted_args)
+                } else {
+                    Term::Apply(Box::new(head_c), sorted_args)
+                }
             }
             Term::Symbol(id, args) => {
                 Term::Symbol(*id, args.iter().map(Term::canonical).collect())
@@ -254,6 +285,50 @@ impl Term {
     pub fn apply_canonical(head: Term, args: Vec<Term>) -> Term {
         Term::Apply(Box::new(head), args).canonical()
     }
+}
+
+/// Flatten nested same-head Apply trees into a single operand list.
+/// Only called when `head` is associative. Each arg that's itself
+/// `Apply(head, inner_args)` with the same head contributes its
+/// inner args; other args pass through.
+fn flatten_associative(head: &Term, args: Vec<Term>) -> Vec<Term> {
+    let mut out = Vec::with_capacity(args.len());
+    for a in args {
+        match &a {
+            Term::Apply(inner_head, inner_args)
+                if inner_head.as_ref() == head =>
+            {
+                // Recursive flatten in case nesting is deeper.
+                let flat = flatten_associative(head, inner_args.clone());
+                out.extend(flat);
+            }
+            _ => out.push(a),
+        }
+    }
+    out
+}
+
+/// Rebuild a variadic operand list as a binary left-associated
+/// tree. Preserves the evaluator's arity=2 expectation.
+///   [a]          → a (shouldn't happen in practice)
+///   [a, b]       → Apply(head, [a, b])
+///   [a, b, c]    → Apply(head, [Apply(head, [a, b]), c])
+///   [a, b, c, d] → Apply(head, [Apply(head, [Apply(head, [a, b]), c]), d])
+fn rebuild_left_associated(head: Term, args: Vec<Term>) -> Term {
+    if args.is_empty() {
+        return head;
+    }
+    if args.len() == 1 {
+        return args.into_iter().next().unwrap();
+    }
+    let mut iter = args.into_iter();
+    let first = iter.next().unwrap();
+    let second = iter.next().unwrap();
+    let mut acc = Term::Apply(Box::new(head.clone()), vec![first, second]);
+    for rest in iter {
+        acc = Term::Apply(Box::new(head.clone()), vec![acc, rest]);
+    }
+    acc
 }
 
 impl fmt::Display for Term {
@@ -464,5 +539,216 @@ mod tests {
             vec![Term::Number(Value::Nat(3)), Term::Number(Value::Nat(4))],
         );
         assert_eq!(format!("{t}"), "(S1 3 4)");
+    }
+
+    // ── R4: associativity canonicalization gold tests ──────────────
+
+    #[test]
+    fn canonical_associative_flattens_left_vs_right_nesting() {
+        // The core R4 claim. add is associative, so these two
+        // structurally-distinct trees denote the same arithmetic value.
+        // After canonicalization they must be LITERALLY identical.
+        let left_nested = app(
+            Term::Var(2),
+            vec![app(Term::Var(2), vec![nat(1), nat(2)]), nat(3)],
+        );
+        let right_nested = app(
+            Term::Var(2),
+            vec![nat(1), app(Term::Var(2), vec![nat(2), nat(3)])],
+        );
+        assert_ne!(
+            left_nested, right_nested,
+            "pre-canonical: distinct groupings"
+        );
+        assert_eq!(
+            left_nested.canonical(),
+            right_nested.canonical(),
+            "canonical form of associative nesting: identical"
+        );
+    }
+
+    #[test]
+    fn canonical_ac_unifies_all_permutations_and_groupings() {
+        // Six trees that all denote 1 + 2 + 3. With commutativity
+        // AND associativity, canonical form must collapse all of
+        // them to ONE structural representative.
+        let trees = vec![
+            app(
+                Term::Var(2),
+                vec![app(Term::Var(2), vec![nat(1), nat(2)]), nat(3)],
+            ),
+            app(
+                Term::Var(2),
+                vec![app(Term::Var(2), vec![nat(2), nat(1)]), nat(3)],
+            ),
+            app(
+                Term::Var(2),
+                vec![nat(1), app(Term::Var(2), vec![nat(2), nat(3)])],
+            ),
+            app(
+                Term::Var(2),
+                vec![nat(3), app(Term::Var(2), vec![nat(1), nat(2)])],
+            ),
+            app(
+                Term::Var(2),
+                vec![app(Term::Var(2), vec![nat(3), nat(2)]), nat(1)],
+            ),
+            app(
+                Term::Var(2),
+                vec![nat(2), app(Term::Var(2), vec![nat(3), nat(1)])],
+            ),
+        ];
+        let canons: Vec<Term> = trees.iter().map(Term::canonical).collect();
+        let first = &canons[0];
+        for (i, c) in canons.iter().enumerate() {
+            assert_eq!(
+                c, first,
+                "permutation {i} must canonicalize to the same term"
+            );
+        }
+    }
+
+    #[test]
+    fn canonical_rebuilt_shape_is_binary_left_associated() {
+        // The evaluator expects arity=2 add/mul. R4 reshapes any
+        // canonical AC expression into binary left-associated form:
+        //   [a, b, c] → add(add(a, b), c)
+        //   [a, b, c, d] → add(add(add(a, b), c), d)
+        let t = app(
+            Term::Var(2),
+            vec![app(Term::Var(2), vec![nat(1), nat(2)]), nat(3)],
+        );
+        let canon = t.canonical();
+        match canon {
+            Term::Apply(ref outer_head, ref outer_args) => {
+                assert_eq!(**outer_head, Term::Var(2));
+                assert_eq!(outer_args.len(), 2, "binary at top");
+                // second arg is the largest leaf (after sort)
+                assert_eq!(outer_args[1], nat(3));
+                // first arg is the nested add(1, 2)
+                match &outer_args[0] {
+                    Term::Apply(inner_head, inner_args) => {
+                        assert_eq!(**inner_head, Term::Var(2));
+                        assert_eq!(inner_args.len(), 2);
+                        assert_eq!(inner_args[0], nat(1));
+                        assert_eq!(inner_args[1], nat(2));
+                    }
+                    other => panic!("expected inner Apply, got {other:?}"),
+                }
+            }
+            other => panic!("expected outer Apply, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn canonical_idempotent_with_deep_ac_nesting() {
+        // Idempotence is the algebraic bedrock. canonical(canonical(t))
+        // must equal canonical(t) even when associativity has
+        // reshuffled the tree.
+        let t = app(
+            Term::Var(2),
+            vec![
+                app(
+                    Term::Var(2),
+                    vec![
+                        nat(5),
+                        app(Term::Var(3), vec![nat(7), nat(2)]),
+                    ],
+                ),
+                app(Term::Var(2), vec![nat(1), nat(3)]),
+            ],
+        );
+        let once = t.canonical();
+        let twice = once.canonical();
+        assert_eq!(once, twice);
+    }
+
+    #[test]
+    fn canonical_preserves_semantics_across_associativity() {
+        // R4 reshapes the tree but must NOT change what it computes.
+        // Three groupings of 1 + 2 + 3, all must evaluate to 6.
+        use crate::eval::eval;
+        let groupings = [
+            app(
+                Term::Var(2),
+                vec![app(Term::Var(2), vec![nat(1), nat(2)]), nat(3)],
+            ),
+            app(
+                Term::Var(2),
+                vec![nat(1), app(Term::Var(2), vec![nat(2), nat(3)])],
+            ),
+            app(
+                Term::Var(2),
+                vec![app(Term::Var(2), vec![nat(3), nat(1)]), nat(2)],
+            ),
+        ];
+        for g in &groupings {
+            let canon = g.canonical();
+            let v = eval(&canon, &[], 200).unwrap();
+            assert_eq!(v, nat(6), "canonical form must still evaluate to 6");
+        }
+    }
+
+    #[test]
+    fn canonical_non_associative_does_not_flatten() {
+        // A made-up non-AC binary op (Var(77)): nested calls are
+        // NOT flattened, arg order is NOT sorted. The kernel must
+        // only transform what its registry says is safe to transform.
+        let inner = app(Term::Var(77), vec![nat(1), nat(2)]);
+        let outer = app(Term::Var(77), vec![inner.clone(), nat(3)]);
+        let canon = outer.canonical();
+        // Expect the exact same binary shape we fed in.
+        match canon {
+            Term::Apply(ref head, ref args) => {
+                assert_eq!(**head, Term::Var(77));
+                assert_eq!(args.len(), 2, "not flattened");
+                assert_eq!(args[0], inner, "nested arg preserved verbatim");
+                assert_eq!(args[1], nat(3), "trailing arg preserved verbatim");
+            }
+            other => panic!("expected Apply, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn canonical_deeply_nested_ac_collapses_to_one_tree() {
+        // An adversarial case: add(add(add(4,1),add(3,2)),5) —
+        // 5 operands arriving through 4 levels of nesting. After
+        // canonicalization the operands must be sorted ascending
+        // and rebuilt as a binary left-associated spine.
+        let t = app(
+            Term::Var(2),
+            vec![
+                app(
+                    Term::Var(2),
+                    vec![
+                        app(Term::Var(2), vec![nat(4), nat(1)]),
+                        app(Term::Var(2), vec![nat(3), nat(2)]),
+                    ],
+                ),
+                nat(5),
+            ],
+        );
+        let canon = t.canonical();
+        // Expected: add(add(add(add(1, 2), 3), 4), 5)
+        let expected = app(
+            Term::Var(2),
+            vec![
+                app(
+                    Term::Var(2),
+                    vec![
+                        app(
+                            Term::Var(2),
+                            vec![
+                                app(Term::Var(2), vec![nat(1), nat(2)]),
+                                nat(3),
+                            ],
+                        ),
+                        nat(4),
+                    ],
+                ),
+                nat(5),
+            ],
+        );
+        assert_eq!(canon, expected);
     }
 }
