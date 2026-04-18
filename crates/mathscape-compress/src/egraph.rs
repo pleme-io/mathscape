@@ -236,6 +236,38 @@ pub fn check_rule_equivalence(
     }
 }
 
+/// Is `rule` semantically NOVEL against a ledger of validated
+/// theorems? Returns `true` when `rule` is not e-graph-equivalent
+/// under the probe set to any entry in `ledger`. Returns `false`
+/// as soon as one equivalent entry is found. Undetermined verdicts
+/// (saturation limit) count as "not equivalent" — we err on the
+/// side of accepting a rule the probe set can't confidently reject,
+/// since the validator has already certified it empirically.
+///
+/// This is the phase K hook for tightening the Ledger's novelty
+/// from STRUCTURAL (literal LHS+RHS dedup) to SEMANTIC (equivalence-
+/// class dedup under commutativity/associativity). Pass
+/// `commutativity_probe()` for cheap commute-only dedup, or
+/// concatenate `commutativity_probe()` + `associativity_probe()`
+/// for full AC-equivalence.
+#[must_use]
+pub fn is_semantically_novel(
+    rule: &RewriteRule,
+    ledger: &[RewriteRule],
+    rewrites: &[Rewrite<MathscapeLang, ()>],
+    step_limit: usize,
+) -> bool {
+    for existing in ledger {
+        if matches!(
+            check_rule_equivalence(rule, existing, rewrites, step_limit),
+            Some(true)
+        ) {
+            return false;
+        }
+    }
+    true
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -391,6 +423,61 @@ mod tests {
         assert_ne!(
             verdict, Some(true),
             "distinct identities on different operators must not merge"
+        );
+    }
+
+    #[test]
+    fn semantic_novelty_against_empty_ledger_is_novel() {
+        let rule = RewriteRule {
+            name: "r".into(),
+            lhs: apply(var(2), vec![nat(0), var(100)]),
+            rhs: var(100),
+        };
+        assert!(is_semantically_novel(&rule, &[], &[], 5));
+    }
+
+    #[test]
+    fn semantic_novelty_rejects_commutative_duplicate_with_probes() {
+        // Ledger has `add(?a, ?b) → S(?a, ?b)`. A new rule
+        // `add(?b, ?a) → S(?a, ?b)` is commutatively equivalent
+        // under the commutativity probe — is_semantically_novel
+        // must reject.
+        let existing = RewriteRule {
+            name: "existing".into(),
+            lhs: apply(var(2), vec![var(100), var(101)]),
+            rhs: Term::Symbol(42, vec![Term::Var(100), Term::Var(101)]),
+        };
+        let new_rule = RewriteRule {
+            name: "commute-variant".into(),
+            lhs: apply(var(2), vec![var(101), var(100)]),
+            rhs: Term::Symbol(42, vec![Term::Var(100), Term::Var(101)]),
+        };
+        let probes = commutativity_probe();
+        assert!(
+            !is_semantically_novel(&new_rule, &[existing], &probes, 30),
+            "commutativity probe must collapse arg-swapped duplicate"
+        );
+    }
+
+    #[test]
+    fn semantic_novelty_against_structurally_different_lhs_is_novel() {
+        // Different LHS shapes — these are genuinely different
+        // rules, not merely re-expressions of one. Both should
+        // survive dedup.
+        let existing = RewriteRule {
+            name: "existing".into(),
+            lhs: apply(var(2), vec![var(100), var(101)]),
+            rhs: Term::Symbol(42, vec![Term::Var(100), Term::Var(101)]),
+        };
+        let new_rule = RewriteRule {
+            name: "different-lhs".into(),
+            lhs: apply(var(3), vec![var(100), var(101)]), // mul, not add
+            rhs: Term::Symbol(42, vec![Term::Var(100), Term::Var(101)]),
+        };
+        let probes = commutativity_probe();
+        assert!(
+            is_semantically_novel(&new_rule, &[existing], &probes, 30),
+            "mul rule must not collapse with add rule"
         );
     }
 
