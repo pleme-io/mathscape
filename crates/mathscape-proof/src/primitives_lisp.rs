@@ -94,6 +94,9 @@ pub fn primitive_to_sexp(p: &MlPrimitive) -> Sexp {
         MlPrimitive::MetaDistributive => {
             items.push(Sexp::symbol("meta-distributive"));
         }
+        MlPrimitive::MetaIdentity => {
+            items.push(Sexp::symbol("meta-identity"));
+        }
     }
     Sexp::List(items)
 }
@@ -161,6 +164,7 @@ pub fn primitive_from_sexp(sexp: &Sexp) -> Option<MlPrimitive> {
             op: fields.get_int("op")? as u32,
         }),
         "meta-distributive" => Some(MlPrimitive::MetaDistributive),
+        "meta-identity" => Some(MlPrimitive::MetaIdentity),
         _ => None,
     }
 }
@@ -248,6 +252,8 @@ pub fn census_to_sexp(c: &PrimitiveCensus) -> Sexp {
         Sexp::int(c.homomorphism as i64),
         Sexp::keyword("meta-distributive"),
         Sexp::int(c.meta_distributive as i64),
+        Sexp::keyword("meta-identity"),
+        Sexp::int(c.meta_identity as i64),
     ])
 }
 
@@ -364,13 +370,14 @@ mod tests {
             right_distributive: 6,
             homomorphism: 7,
             meta_distributive: 8,
+            meta_identity: 9,
         };
         let sexp = census_to_sexp(&c);
         // Confirm all the fields are present by counting
-        // (symbol + 9 pairs) = 19 items.
+        // (symbol + 10 pairs) = 21 items.
         match sexp {
             Sexp::List(items) => {
-                assert_eq!(items.len(), 19);
+                assert_eq!(items.len(), 21);
                 // Header is 'census'.
                 match &items[0] {
                     Sexp::Atom(Atom::Symbol(s)) => assert_eq!(s, "census"),

@@ -76,6 +76,21 @@ pub enum MlPrimitive {
     /// themselves are pattern variables. The gateway to abstract
     /// bilinearity over discovered operators.
     MetaDistributive,
+    /// R22: Meta-identity — "applying an operator twice with the
+    /// same absorbing second argument cancels it." Pattern:
+    ///
+    /// ```text
+    ///   ?op(?op(?x, ?id), ?id) = ?x
+    /// ```
+    ///
+    /// Both `?op` occurrences are the SAME operator variable; both
+    /// `?id` occurrences are the SAME value variable. This is
+    /// `S_10000` — the rank-1 meta-rule the machine naturally
+    /// discovers at 93%+ cross-corpus density in autonomous
+    /// traversal. Added to R12 after the R22 natural-emergence
+    /// probe revealed R12 didn't cover the shape the machine
+    /// actually finds. Now it does.
+    MetaIdentity,
 }
 
 /// The identity element shape. Either a concrete Number (Nat/Int)
@@ -138,6 +153,11 @@ pub fn classify_primitives(rule: &RewriteRule) -> Vec<MlPrimitive> {
     if let Some(p) = detect_homomorphism(rule) {
         out.push(p);
     }
+    // R22: the meta-identity pattern the machine actually
+    // discovers (S_10000).
+    if let Some(p) = detect_meta_identity(rule) {
+        out.push(p);
+    }
 
     out
 }
@@ -154,6 +174,8 @@ pub struct PrimitiveCensus {
     pub right_distributive: usize,
     pub homomorphism: usize,
     pub meta_distributive: usize,
+    /// R22: meta-identity shape S_10000.
+    pub meta_identity: usize,
     pub total_rules: usize,
 }
 
@@ -171,6 +193,7 @@ impl PrimitiveCensus {
             + self.right_distributive
             + self.homomorphism
             + self.meta_distributive
+            + self.meta_identity
     }
 }
 
@@ -192,6 +215,7 @@ pub fn census(rules: &[RewriteRule]) -> PrimitiveCensus {
                 MlPrimitive::RightDistributive { .. } => c.right_distributive += 1,
                 MlPrimitive::Homomorphism { .. } => c.homomorphism += 1,
                 MlPrimitive::MetaDistributive => c.meta_distributive += 1,
+                MlPrimitive::MetaIdentity => c.meta_identity += 1,
             }
         }
     }
@@ -352,6 +376,55 @@ fn detect_right_distributive(rule: &RewriteRule) -> Option<MlPrimitive> {
         outer: outer_id,
         inner: inner_id,
     })
+}
+
+fn detect_meta_identity(rule: &RewriteRule) -> Option<MlPrimitive> {
+    // LHS: Apply(Var(?op_var), [Apply(Var(?op_var), [Var(?x), Var(?id)]), Var(?id)])
+    //   - outer and inner heads must be the SAME op-variable
+    //     (id ≥ 100, since it's a pattern variable, not a concrete op)
+    //   - the "id" variable appears in both inner-arg2 and outer-arg2
+    // RHS: Var(?x)
+    let (outer_head, outer_args) = match &rule.lhs {
+        Term::Apply(h, a) if a.len() == 2 => (h.as_ref(), a),
+        _ => return None,
+    };
+    let outer_op_var = match outer_head {
+        Term::Var(id) if *id >= 100 => *id,
+        _ => return None,
+    };
+    let outer_id_var = match &outer_args[1] {
+        Term::Var(id) => *id,
+        _ => return None,
+    };
+    let (inner_head, inner_args) = match &outer_args[0] {
+        Term::Apply(h, a) if a.len() == 2 => (h.as_ref(), a),
+        _ => return None,
+    };
+    let inner_op_var = match inner_head {
+        Term::Var(id) if *id >= 100 => *id,
+        _ => return None,
+    };
+    if inner_op_var != outer_op_var {
+        return None;
+    }
+    let x_var = match &inner_args[0] {
+        Term::Var(id) => *id,
+        _ => return None,
+    };
+    let inner_id_var = match &inner_args[1] {
+        Term::Var(id) => *id,
+        _ => return None,
+    };
+    // id must appear the same on both levels.
+    if inner_id_var != outer_id_var {
+        return None;
+    }
+    // RHS is the x variable.
+    match &rule.rhs {
+        Term::Var(v) if *v == x_var => {}
+        _ => return None,
+    }
+    Some(MlPrimitive::MetaIdentity)
 }
 
 fn detect_homomorphism(rule: &RewriteRule) -> Option<MlPrimitive> {
