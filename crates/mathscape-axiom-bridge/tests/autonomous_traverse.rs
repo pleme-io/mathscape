@@ -2105,7 +2105,6 @@ fn hpo_zoo_weight_sweep() {
     // 49.6% (pure procedural LLN) and 89% (zoo-anchored)?
     // Linear? Sigmoidal? Stepwise at specific zoo entries?
     use mathscape_compress::extract::ExtractConfig as EC;
-    use std::collections::HashMap;
     use std::time::Instant;
 
     const N_SEEDS: u64 = 128;
@@ -4281,4 +4280,264 @@ fn phase_ml_reward_mutation_probe() {
         println!("    come from mutating the EXTRACTOR (ML2), not the combination rule.");
     }
     assert_eq!(fingerprints.len(), variants.len());
+}
+
+#[test]
+#[ignore = "phase ML1-sweep: 24 apparatus variants × 12 seeds × BUDGET=20. Discovery sweep before committing to ML2. ~2-5 min, --ignored"]
+fn phase_ml_apparatus_grand_sweep() {
+    // Phase ML1-sweep. The reward-mutation probe (ML1+) showed 5/5
+    // hand-picked variants produced different bettyfines. This is
+    // the scaled-up version: 24 variants systematically spanning
+    // four regions of apparatus space:
+    //
+    //   Tier A — axis ablation (5 variants):
+    //     one axis active, others zeroed. Tests what each axis
+    //     alone can pull through the prover.
+    //   Tier B — two-axis combinations (6 variants):
+    //     every pair of axes. Tests which pairings produce
+    //     stable bettyfines vs. destabilized traversals.
+    //   Tier C — shape mutations (6 variants):
+    //     additive, max, product, harmonic, clamped, threshold.
+    //     Tests combination SHAPE independent of axis weighting.
+    //   Tier D — weight perturbations (7 variants):
+    //     amplification, inversion, uniformity. Tests the
+    //     weight-space topology around canonical.
+    //
+    // For each variant × 12 seeds × BUDGET=20, we record:
+    //   - library size (avg and distribution)
+    //   - axiomatized count (avg)
+    //   - modal apex (fingerprint appearing in most seeds)
+    //   - modal stability (what fraction of seeds hit it)
+    //   - rule-ids unique to this variant (not in canonical apex)
+    //
+    // Discoveries = apex rule ids appearing under some variant
+    // but NOT under canonical. Each such id is a concrete
+    // empirical find: "apparatus X discovers structure canonical
+    // does not promote."
+    //
+    // Lynchpin invariant: every variant's library must have every
+    // rule with ≥2 cross-corpus support. This is asserted weakly
+    // here (no explicit cross-support counting) — stronger claim
+    // is that the traversal completes without panic, which would
+    // indicate a structural regression.
+    use mathscape_compress::extract::ExtractConfig as EC;
+    use std::collections::{BTreeMap, BTreeSet};
+
+    const SEEDS_PER_VARIANT: u64 = 12;
+    const BUDGET: usize = 20;
+    const DEPTH: usize = 4;
+    let ec = EC::default();
+
+    // 24 variants, organized by tier for reporting.
+    let variants: Vec<(&'static str, &'static str, &'static str)> = vec![
+        // Tier A — single-axis reward
+        ("A1-canonical",   "A", "(+ (* alpha cr) (* beta novelty) (* gamma meta-compression) (* delta lhs-subsumption))"),
+        ("A2-cr-only",     "A", "(* alpha cr)"),
+        ("A3-novelty-only","A", "(* beta novelty)"),
+        ("A4-meta-only",   "A", "(* gamma meta-compression)"),
+        ("A5-sub-only",    "A", "(* delta lhs-subsumption)"),
+
+        // Tier B — two-axis combinations
+        ("B1-cr+nov",      "B", "(+ (* alpha cr) (* beta novelty))"),
+        ("B2-cr+meta",     "B", "(+ (* alpha cr) (* gamma meta-compression))"),
+        ("B3-cr+sub",      "B", "(+ (* alpha cr) (* delta lhs-subsumption))"),
+        ("B4-nov+meta",    "B", "(+ (* beta novelty) (* gamma meta-compression))"),
+        ("B5-nov+sub",     "B", "(+ (* beta novelty) (* delta lhs-subsumption))"),
+        ("B6-meta+sub",    "B", "(+ (* gamma meta-compression) (* delta lhs-subsumption))"),
+
+        // Tier C — shape mutations (keeping all 4 axes)
+        ("C1-max-pair",    "C", "(max (+ (* alpha cr) (* beta novelty)) (+ (* gamma meta-compression) (* delta lhs-subsumption)))"),
+        ("C2-cr*nov",      "C", "(+ (* cr novelty) (* gamma meta-compression) (* delta lhs-subsumption))"),
+        ("C3-harmonic",    "C", "(+ (/ (* cr novelty) (max (+ cr novelty) 0.001)) (* gamma meta-compression) (* delta lhs-subsumption))"),
+        ("C4-clamped",     "C", "(clamp (+ (* alpha cr) (* beta novelty) (* gamma meta-compression) (* delta lhs-subsumption)) -1 2)"),
+        ("C5-threshold",   "C", "(+ (* alpha cr) (if (max (- cr 0.05) 0) (* beta novelty) 0) (* gamma meta-compression) (* delta lhs-subsumption))"),
+        ("C6-cr-gated-sub","C", "(+ (* alpha cr) (* beta novelty) (* gamma meta-compression) (if (max (- cr 0.01) 0) (* delta lhs-subsumption) 0))"),
+
+        // Tier D — weight perturbations
+        ("D1-alpha-x2",    "D", "(+ (* (* 2 alpha) cr) (* beta novelty) (* gamma meta-compression) (* delta lhs-subsumption))"),
+        ("D2-beta-x2",     "D", "(+ (* alpha cr) (* (* 2 beta) novelty) (* gamma meta-compression) (* delta lhs-subsumption))"),
+        ("D3-delta-x3",    "D", "(+ (* alpha cr) (* beta novelty) (* gamma meta-compression) (* (* 3 delta) lhs-subsumption))"),
+        ("D4-uniform",     "D", "(+ (* 0.25 cr) (* 0.25 novelty) (* 0.25 meta-compression) (* 0.25 lhs-subsumption))"),
+        ("D5-cr-penalty",  "D", "(+ (* alpha cr) (* (- 0 beta) novelty) (* gamma meta-compression) (* delta lhs-subsumption))"),
+        ("D6-meta-heavy",  "D", "(+ (* alpha cr) (* beta novelty) (* (* 5 gamma) meta-compression) (* delta lhs-subsumption))"),
+        ("D7-all-equal-weighted","D", "(+ (* 0.5 cr) (* 0.5 novelty) (* 0.5 meta-compression) (* 0.5 lhs-subsumption))"),
+    ];
+
+    println!();
+    println!("phase ML1-sweep: apparatus grand sweep — 24 variants × {SEEDS_PER_VARIANT} seeds × BUDGET={BUDGET}");
+    println!("═══════════════════════════════════════════════════════════════════════");
+
+    // Per-variant measurements.
+    struct VariantResult {
+        label: &'static str,
+        tier: &'static str,
+        avg_rules: f64,
+        avg_axiom: f64,
+        modal_apex: Vec<String>,
+        modal_count: usize,
+        unique_apex_union: BTreeSet<String>,
+    }
+    let mut results: Vec<VariantResult> = Vec::new();
+    let start = std::time::Instant::now();
+
+    for (label, tier, src) in &variants {
+        let mut rule_counts: Vec<usize> = Vec::new();
+        let mut axiom_counts: Vec<usize> = Vec::new();
+        let mut per_seed_apex: Vec<Vec<String>> = Vec::new();
+        let mut union: BTreeSet<String> = BTreeSet::new();
+
+        for seed in 0..SEEDS_PER_VARIANT {
+            let (lib, axiom, apex) =
+                run_with_reward_form(seed * 997, BUDGET, DEPTH, ec.clone(), src);
+            rule_counts.push(lib);
+            axiom_counts.push(axiom);
+            for a in &apex {
+                union.insert(a.clone());
+            }
+            per_seed_apex.push(apex);
+        }
+
+        let avg_rules =
+            rule_counts.iter().sum::<usize>() as f64 / rule_counts.len() as f64;
+        let avg_axiom =
+            axiom_counts.iter().sum::<usize>() as f64 / axiom_counts.len() as f64;
+
+        // Modal apex: the fingerprint appearing in the most seeds.
+        let mut apex_hist: BTreeMap<Vec<String>, usize> = BTreeMap::new();
+        for apex in &per_seed_apex {
+            *apex_hist.entry(apex.clone()).or_insert(0) += 1;
+        }
+        let (modal_apex, modal_count) = apex_hist
+            .iter()
+            .max_by_key(|(_, c)| *c)
+            .map(|(fp, c)| (fp.clone(), *c))
+            .unwrap_or_default();
+
+        results.push(VariantResult {
+            label,
+            tier,
+            avg_rules,
+            avg_axiom,
+            modal_apex,
+            modal_count,
+            unique_apex_union: union,
+        });
+    }
+
+    let elapsed = start.elapsed();
+    println!("sweep completed in {:.1}s", elapsed.as_secs_f64());
+    println!();
+
+    // Per-tier summary table.
+    for tier in ["A", "B", "C", "D"] {
+        let tier_name = match tier {
+            "A" => "Tier A — axis ablation",
+            "B" => "Tier B — axis pairs",
+            "C" => "Tier C — shape mutations",
+            "D" => "Tier D — weight perturbations",
+            _ => continue,
+        };
+        println!("{tier_name}");
+        println!("  {:<22} {:>9} {:>9} {:>6}  {:>5} apex (modal={}/seeds)",
+                 "variant", "avg_rules", "avg_axiom", "stab", "union", SEEDS_PER_VARIANT);
+        println!("  {:─<22} {:─>9} {:─>9} {:─>6}  {:─>5}", "", "", "", "", "");
+        for r in results.iter().filter(|r| r.tier == tier) {
+            let modal_str = format!("{}/{}", r.modal_count, SEEDS_PER_VARIANT);
+            println!("  {:<22} {:>9.1} {:>9.1} {:>6}  {:>5}",
+                     r.label, r.avg_rules, r.avg_axiom, modal_str,
+                     r.unique_apex_union.len());
+        }
+        println!();
+    }
+
+    // Discovery report: apex rules UNIQUE to a variant (not in canonical).
+    let canonical_union = &results[0].unique_apex_union.clone();
+    println!("discoveries — apex rules appearing in some variant but NOT canonical:");
+    let mut variant_discoveries: BTreeMap<&str, BTreeSet<String>> = BTreeMap::new();
+    for r in &results {
+        if r.label == "A1-canonical" {
+            continue;
+        }
+        let diff: BTreeSet<String> = r
+            .unique_apex_union
+            .difference(canonical_union)
+            .cloned()
+            .collect();
+        if !diff.is_empty() {
+            variant_discoveries.insert(r.label, diff);
+        }
+    }
+    if variant_discoveries.is_empty() {
+        println!("  (none — every apex rule under mutation is already in canonical's union)");
+    } else {
+        for (label, diff) in &variant_discoveries {
+            println!("  {label}: {} novel apex ids", diff.len());
+            // Print first 10 names for spot-check.
+            let sample: Vec<String> = diff.iter().take(10).cloned().collect();
+            println!("    e.g. {sample:?}");
+        }
+    }
+    println!();
+
+    // Stability report: which variants are consistent vs. chaotic?
+    println!("stability ranking (modal apex fraction, higher = more consistent):");
+    let mut stability: Vec<(&str, f64)> = results
+        .iter()
+        .map(|r| (r.label, r.modal_count as f64 / SEEDS_PER_VARIANT as f64))
+        .collect();
+    stability.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+    for (label, frac) in &stability[..stability.len().min(5)] {
+        println!("  TOP:    {label:<22}  {:.0}% modal", frac * 100.0);
+    }
+    println!("  ...");
+    for (label, frac) in &stability[stability.len().saturating_sub(5)..] {
+        println!("  BOTTOM: {label:<22}  {:.0}% modal", frac * 100.0);
+    }
+    println!();
+
+    // Discovery rate: variants with the most UNIQUE apex rules
+    // (wide basin of attraction → finds more candidates).
+    println!("discovery rate (|apex union across seeds|, higher = explores more):");
+    let mut discovery: Vec<(&str, usize)> = results
+        .iter()
+        .map(|r| (r.label, r.unique_apex_union.len()))
+        .collect();
+    discovery.sort_by(|a, b| b.1.cmp(&a.1));
+    for (label, n) in &discovery[..discovery.len().min(5)] {
+        println!("  MOST:   {label:<22}  {} apex rules across seeds", n);
+    }
+    println!("  ...");
+    for (label, n) in &discovery[discovery.len().saturating_sub(5)..] {
+        println!("  FEWEST: {label:<22}  {} apex rules across seeds", n);
+    }
+    println!();
+
+    // Final verdict.
+    let total_discoveries: usize =
+        variant_discoveries.values().map(|s| s.len()).sum();
+    let divergent_variants = results
+        .iter()
+        .skip(1)
+        .filter(|r| r.modal_apex != results[0].modal_apex)
+        .count();
+    println!("═══════════════════════════════════════════════════════════════════════");
+    println!(
+        "summary: 23 mutations vs canonical → {divergent_variants} with different modal apex; \
+         {total_discoveries} apex rules discovered in non-canonical apparatuses"
+    );
+    println!(
+        "         apparatus mutation is {} generative across 24-variant sweep",
+        if divergent_variants > 0 { "empirically" } else { "NOT" }
+    );
+
+    // Assertion: every variant must have at least completed its
+    // traversal (no panic). Structural regression would manifest
+    // as a panic inside run_with_reward_form.
+    assert_eq!(results.len(), variants.len());
+    // Canonical variant must stay within the historical bettyfine
+    // range — sanity check that the default path didn't regress.
+    assert!(
+        results[0].avg_rules >= 1.0,
+        "canonical variant must find at least 1 rule"
+    );
 }
