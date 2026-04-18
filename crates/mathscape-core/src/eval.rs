@@ -202,8 +202,30 @@ fn anonymize_walk(
             }
         }
         Term::Fn(params, body) => {
+            // C3 correctness fix (2026-04-18): pre-register Fn
+            // params in var_map so the body's references to those
+            // params get the SAME canonical id as the param list.
+            // Before this fix, body vars were renumbered but
+            // params were cloned verbatim — breaking the Fn's
+            // binding (param [200] and body Var(100) no longer
+            // match after anonymization).
+            //
+            // Params with id < 100 are vocabulary (operator refs)
+            // and pass through unchanged — consistent with how
+            // Var leaves are treated below.
+            let new_params: Vec<u32> = params
+                .iter()
+                .map(|p| {
+                    if *p < 100 {
+                        *p
+                    } else {
+                        let next = var_map.len() as u32;
+                        *var_map.entry(*p).or_insert(next + 100)
+                    }
+                })
+                .collect();
             let b = anonymize_walk(body, var_map, symbol_map);
-            Term::Fn(params.clone(), Box::new(b))
+            Term::Fn(new_params, Box::new(b))
         }
         Term::Apply(f, args) => {
             let f2 = anonymize_walk(f, var_map, symbol_map);
@@ -394,6 +416,90 @@ mod tests {
     use super::*;
     use crate::test_helpers::{apply, nat, var};
     use crate::value::Value;
+
+    #[test]
+    fn anonymize_preserves_multi_param_fn_bindings() {
+        // (fn (?201 ?205) (apply add ?205 ?201)) —
+        // two params, body uses both.
+        let t = Term::Fn(
+            vec![201, 205],
+            Box::new(apply(var(2), vec![var(205), var(201)])),
+        );
+        let anon = anonymize_term(&t);
+        if let Term::Fn(params, body) = &anon {
+            assert_eq!(params.len(), 2);
+            // Collect the param ids — what matters is that the
+            // body references them consistently.
+            let p0 = params[0];
+            let p1 = params[1];
+            if let Term::Apply(head, args) = body.as_ref() {
+                assert_eq!(**head, Term::Var(2));
+                assert_eq!(args.len(), 2);
+                // args[0] should reference p1 (=205 originally)
+                // args[1] should reference p0 (=201 originally)
+                assert_eq!(
+                    args[0],
+                    Term::Var(p1),
+                    "body arg[0] must match second param"
+                );
+                assert_eq!(
+                    args[1],
+                    Term::Var(p0),
+                    "body arg[1] must match first param"
+                );
+            } else {
+                panic!("expected Apply in body");
+            }
+        } else {
+            panic!("expected Fn");
+        }
+    }
+
+    #[test]
+    fn anonymize_fn_bindings_are_alpha_equivalent_across_renamings() {
+        // (fn (?200) ?200) and (fn (?300) ?300) denote the same
+        // lambda — identity on a single arg. After anonymization,
+        // both must produce IDENTICAL terms. That's the point of
+        // canonical renumbering.
+        let a = Term::Fn(vec![200], Box::new(Term::Var(200)));
+        let b = Term::Fn(vec![300], Box::new(Term::Var(300)));
+        assert_ne!(a, b, "different param ids pre-anonymization");
+        let anon_a = anonymize_term(&a);
+        let anon_b = anonymize_term(&b);
+        assert_eq!(
+            anon_a, anon_b,
+            "alpha-equivalent lambdas must anonymize to same term"
+        );
+    }
+
+    #[test]
+    fn anonymize_preserves_fn_param_binding_probe() {
+        // Probe: does anonymization preserve the binding between
+        // a Fn's param and its body's bound var?
+        //
+        // Input: (fn (?200) ?200) — the identity lambda on id=200.
+        // After anonymization, the body's Var(200) gets renumbered
+        // to Var(100) (fresh-start). But the param list is cloned
+        // verbatim. If params aren't also renumbered, the param
+        // [200] and body Var(100) no longer match — the binding
+        // is broken.
+        let t = Term::Fn(vec![200], Box::new(Term::Var(200)));
+        let anon = anonymize_term(&t);
+        if let Term::Fn(params, body) = &anon {
+            let param_id = params[0];
+            if let Term::Var(body_var) = body.as_ref() {
+                assert_eq!(
+                    param_id, *body_var,
+                    "KERNEL BUG: Fn param id={param_id} but body references Var({body_var}); \
+                     binding broken by anonymization"
+                );
+            } else {
+                panic!("expected body to be a Var");
+            }
+        } else {
+            panic!("expected Fn");
+        }
+    }
 
     #[test]
     fn shared_anonymize_preserves_commutativity_signal() {
