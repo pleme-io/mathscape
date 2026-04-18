@@ -4,7 +4,7 @@
 use crate::term::Term;
 use crate::value::Value;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 /// Built-in operations available in the base evaluator.
 const BUILTIN_ZERO: u32 = 0;
@@ -192,54 +192,90 @@ pub fn pattern_equivalent(a: &Term, b: &Term) -> bool {
 /// foundation of the eager-collapse principle: any two rules that
 /// CAN be one rule SHOULD be one rule.
 pub fn anonymize_term(t: &Term) -> Term {
-    use std::collections::HashMap;
-    fn walk(
-        t: &Term,
-        var_map: &mut HashMap<u32, u32>,
-        symbol_map: &mut HashMap<u32, u32>,
-    ) -> Term {
-        match t {
-            Term::Point(p) => Term::Point(p.clone()),
-            Term::Number(n) => Term::Number(n.clone()),
-            Term::Var(v) => {
-                // Concrete ops (id < 100) are vocabulary — preserve.
-                // Fresh vars (id ≥ 100) get canonical renumbering.
-                if *v < 100 {
-                    Term::Var(*v)
-                } else {
-                    let next = var_map.len() as u32;
-                    let id = *var_map.entry(*v).or_insert(next + 100);
-                    Term::Var(id)
-                }
-            }
-            Term::Fn(params, body) => {
-                let b = walk(body, var_map, symbol_map);
-                Term::Fn(params.clone(), Box::new(b))
-            }
-            Term::Apply(f, args) => {
-                let f2 = walk(f, var_map, symbol_map);
-                let args2 = args.iter().map(|a| walk(a, var_map, symbol_map)).collect();
-                Term::Apply(Box::new(f2), args2)
-            }
-            Term::Symbol(id, args) => {
-                let next = symbol_map.len() as u32;
-                let canonical = *symbol_map.entry(*id).or_insert(next);
-                let args2 = args.iter().map(|a| walk(a, var_map, symbol_map)).collect();
-                Term::Symbol(canonical, args2)
+    // Single-term anonymization — uses a fresh var_map. For rule
+    // anonymization that preserves cross-side variable identity
+    // (LHS and RHS share the SAME var_map), use
+    // `anonymize_rule`.
+    let mut var_map = BTreeMap::new();
+    let mut symbol_map = BTreeMap::new();
+    anonymize_walk(t, &mut var_map, &mut symbol_map)
+}
+
+fn anonymize_walk(
+    t: &Term,
+    var_map: &mut BTreeMap<u32, u32>,
+    symbol_map: &mut BTreeMap<u32, u32>,
+) -> Term {
+    match t {
+        Term::Point(p) => Term::Point(p.clone()),
+        Term::Number(n) => Term::Number(n.clone()),
+        Term::Var(v) => {
+            // Concrete ops (id < 100) are vocabulary — preserve.
+            // Fresh vars (id ≥ 100) get canonical renumbering.
+            if *v < 100 {
+                Term::Var(*v)
+            } else {
+                let next = var_map.len() as u32;
+                let id = *var_map.entry(*v).or_insert(next + 100);
+                Term::Var(id)
             }
         }
+        Term::Fn(params, body) => {
+            let b = anonymize_walk(body, var_map, symbol_map);
+            Term::Fn(params.clone(), Box::new(b))
+        }
+        Term::Apply(f, args) => {
+            let f2 = anonymize_walk(f, var_map, symbol_map);
+            let args2 = args
+                .iter()
+                .map(|a| anonymize_walk(a, var_map, symbol_map))
+                .collect();
+            Term::Apply(Box::new(f2), args2)
+        }
+        Term::Symbol(id, args) => {
+            let next = symbol_map.len() as u32;
+            let canonical = *symbol_map.entry(*id).or_insert(next);
+            let args2 = args
+                .iter()
+                .map(|a| anonymize_walk(a, var_map, symbol_map))
+                .collect();
+            Term::Symbol(canonical, args2)
+        }
     }
-    let mut var_map = HashMap::new();
-    let mut symbol_map = HashMap::new();
-    walk(t, &mut var_map, &mut symbol_map)
+}
+
+/// Anonymize a rule's LHS and RHS with a SHARED var_map /
+/// symbol_map so cross-side variable identity is preserved.
+///
+/// Correctness fix (2026-04-18): previously `alpha_equivalent`
+/// called `anonymize_term(&lhs)` and `anonymize_term(&rhs)`
+/// independently — each side got its own fresh var map. This
+/// collapsed commutativity-inverted rules (e.g., `add(a, b) →
+/// add(b, a)`) to the identity form `add(?v100, ?v101) →
+/// add(?v100, ?v101)`, losing the commutativity signal.
+///
+/// With shared maps: a variable that appears on both LHS and RHS
+/// gets the SAME canonical id on both sides. If the RHS
+/// structurally differs from the LHS, the anonymized forms
+/// remain distinct.
+#[must_use]
+pub fn anonymize_rule(rule: &RewriteRule) -> RewriteRule {
+    let mut var_map = BTreeMap::new();
+    let mut symbol_map = BTreeMap::new();
+    let lhs = anonymize_walk(&rule.lhs, &mut var_map, &mut symbol_map);
+    let rhs = anonymize_walk(&rule.rhs, &mut var_map, &mut symbol_map);
+    RewriteRule {
+        name: rule.name.clone(),
+        lhs,
+        rhs,
+    }
 }
 
 /// *Alpha equivalence* — the eager-collapse predicate. Two rules
-/// are alpha-equivalent iff they have the same anonymized LHS and
-/// the same anonymized RHS. This is the machine's "can be one term
-/// without breaking anything" check: alpha-equivalent rules encode
-/// identical patterns under different fresh-id choices, and the
-/// core algorithm should collapse them on sight.
+/// are alpha-equivalent iff their SHARED-var-map anonymized
+/// forms are identical. This is the machine's "can be one term
+/// without breaking anything" check: alpha-equivalent rules
+/// encode identical patterns under different fresh-id choices.
 ///
 /// Stronger than `pattern_equivalent` (which only checks LHSs) and
 /// stricter than `proper_subsumes` (which allows asymmetric
@@ -247,8 +283,9 @@ pub fn anonymize_term(t: &Term) -> Term {
 /// rule modulo naming.
 #[must_use]
 pub fn alpha_equivalent(r1: &RewriteRule, r2: &RewriteRule) -> bool {
-    anonymize_term(&r1.lhs) == anonymize_term(&r2.lhs)
-        && anonymize_term(&r1.rhs) == anonymize_term(&r2.rhs)
+    let a1 = anonymize_rule(r1);
+    let a2 = anonymize_rule(r2);
+    a1.lhs == a2.lhs && a1.rhs == a2.rhs
 }
 
 /// *Proper subsumption* — the absolute measure of rule-level
@@ -292,8 +329,14 @@ pub fn proper_subsumes(r1: &RewriteRule, r2: &RewriteRule) -> bool {
 
 /// Match a pattern term against a concrete term, returning variable bindings.
 /// Returns None if the pattern doesn't match.
-pub fn pattern_match(pattern: &Term, term: &Term) -> Option<HashMap<u32, Term>> {
-    let mut bindings = HashMap::new();
+///
+/// Correctness fix (2026-04-18): was `HashMap` which has
+/// non-deterministic iteration order. Downstream code that
+/// iterates bindings (substitution in rule application, etc.)
+/// was non-deterministic across runs. Switched to `BTreeMap` so
+/// iteration is sorted by var id — repeatable by construction.
+pub fn pattern_match(pattern: &Term, term: &Term) -> Option<BTreeMap<u32, Term>> {
+    let mut bindings: BTreeMap<u32, Term> = BTreeMap::new();
     if match_inner(pattern, term, &mut bindings) {
         Some(bindings)
     } else {
@@ -301,7 +344,7 @@ pub fn pattern_match(pattern: &Term, term: &Term) -> Option<HashMap<u32, Term>> 
     }
 }
 
-fn match_inner(pattern: &Term, term: &Term, bindings: &mut HashMap<u32, Term>) -> bool {
+fn match_inner(pattern: &Term, term: &Term, bindings: &mut BTreeMap<u32, Term>) -> bool {
     match pattern {
         // Pattern variable: bind or check consistency
         Term::Var(v) => {
@@ -369,6 +412,53 @@ fn match_inner(pattern: &Term, term: &Term, bindings: &mut HashMap<u32, Term>) -
 mod tests {
     use super::*;
     use crate::test_helpers::{apply, nat, var};
+
+    #[test]
+    fn shared_anonymize_preserves_commutativity_signal() {
+        // C1 correctness fix: `add(?a, ?b) → add(?b, ?a)` is NOT
+        // the identity rule — it's commutativity. Before the fix,
+        // independent anonymize_term calls on LHS and RHS produced
+        // identical anonymized forms (both became
+        // `add(?100, ?101) → add(?100, ?101)` since each side's
+        // fresh var map assigned from first-seen order
+        // independently). With shared var_map, the cross-side
+        // variable identity is preserved.
+        let identity_rule = RewriteRule {
+            name: "identity".into(),
+            lhs: apply(var(2), vec![var(100), var(101)]),
+            rhs: apply(var(2), vec![var(100), var(101)]),
+        };
+        let commute_rule = RewriteRule {
+            name: "commute".into(),
+            lhs: apply(var(2), vec![var(100), var(101)]),
+            rhs: apply(var(2), vec![var(101), var(100)]),
+        };
+        let anon_id = anonymize_rule(&identity_rule);
+        let anon_com = anonymize_rule(&commute_rule);
+        assert_eq!(anon_id.lhs, anon_com.lhs, "LHSs are the same");
+        assert_ne!(
+            anon_id.rhs, anon_com.rhs,
+            "RHSs must DIFFER — identity vs commutativity — anonymization preserves distinction"
+        );
+    }
+
+    #[test]
+    fn pattern_match_returns_deterministic_ordering() {
+        // C2 correctness fix: pattern_match uses BTreeMap so
+        // iteration is sorted by var id. Before: HashMap had
+        // non-deterministic iteration order across runs.
+        // Pattern binds head (var 2) + args (var 100, 101).
+        let pattern = apply(var(2), vec![var(100), var(101)]);
+        let concrete = apply(var(2), vec![nat(5), nat(7)]);
+        let bindings = pattern_match(&pattern, &concrete).unwrap();
+        let keys: Vec<u32> = bindings.keys().copied().collect();
+        // BTreeMap iteration is sorted by key — always. This is
+        // the property — keys come back in ascending order
+        // deterministically.
+        let mut sorted = keys.clone();
+        sorted.sort();
+        assert_eq!(keys, sorted, "binding keys must be in sorted order");
+    }
 
     #[test]
     fn eval_add() {
