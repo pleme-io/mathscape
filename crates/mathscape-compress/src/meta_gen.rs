@@ -213,7 +213,7 @@ impl<G: Generator + Clone> Generator for CompositeGenerator<G> {
 mod tests {
     use super::*;
     use mathscape_core::{
-        epoch::{AcceptanceCertificate, Artifact, InMemoryRegistry, Registry},
+        epoch::{AcceptanceCertificate, Artifact, InMemoryRegistry},
         test_helpers::{apply, nat, var},
     };
 

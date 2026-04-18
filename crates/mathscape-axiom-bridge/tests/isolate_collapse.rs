@@ -53,7 +53,7 @@ fn trace_mixed_corpus_through_generator_to_registry() {
     }
 
     // Step 2: Run one Discover epoch with real prover + registry.
-    let mut g2 = CompressionGenerator::new(
+    let g2 = CompressionGenerator::new(
         ExtractConfig {
             min_shared_size: 2,
             min_matches: 2,

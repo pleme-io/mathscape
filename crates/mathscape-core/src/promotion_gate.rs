@@ -157,7 +157,7 @@ mod tests {
     use crate::test_helpers::{apply, nat, var};
     use crate::term::Term;
 
-    fn art(id: u32, rule: RewriteRule) -> Artifact {
+    fn art(_id: u32, rule: RewriteRule) -> Artifact {
         Artifact::seal(
             rule,
             0,

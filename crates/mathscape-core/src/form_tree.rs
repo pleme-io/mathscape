@@ -240,6 +240,21 @@ pub struct DiscoveryForest {
     /// lazy tombstones in `schedule`. Equal to
     /// `last_checked_epoch + check_period` after a pass.
     next_check: HashMap<TermRef, u64>,
+    /// Internal algorithmic compaction: (node_id, rule_name) pairs
+    /// that have already been tried. Pattern matching is stateless —
+    /// a rule that missed a node once will miss it forever under the
+    /// same library. Retesting is redundant work that bloats morphism
+    /// edge counts and CPU as the forest grows. Memoizing the tried
+    /// set turns retroactive passes from O(forest × library) into
+    /// O(new_nodes + new_rules × forest). At large scale this is the
+    /// difference between linear per-corpus cost and quadratic.
+    ///
+    /// Stored as a HashSet<(TermRef, String)>. Rule names are small
+    /// by convention (`S_001`..`S_10000` etc.); hash-set storage cost
+    /// is dominated by the TermRef (32 bytes) plus a ~6-byte rule
+    /// name — ~45 bytes per entry. At 10000 nodes × 7 rules the set
+    /// is ~3MB, far below the edge-count memory we save.
+    tried_pairs: std::collections::HashSet<(TermRef, String)>,
 }
 
 impl DiscoveryForest {
@@ -328,6 +343,19 @@ impl DiscoveryForest {
         let mut inserts: Vec<Term> = Vec::new();
 
         for id in due_ids {
+            // Skip this node entirely if every rule in the batch has
+            // already been tried on it. That's the steady-state case
+            // at scale: the library is stable, all existing nodes
+            // have seen every rule, and retroactive passes become
+            // no-ops for them. The scheduler still re-schedules them
+            // per check_period (which has grown to MAX for stable
+            // leaves), so memory is bounded too.
+            let has_untried_rule = rules
+                .iter()
+                .any(|r| !self.tried_pairs.contains(&(id, r.name.clone())));
+            if !has_untried_rule {
+                continue;
+            }
             let before_term = match self.nodes.get(&id) {
                 Some(n) => n.term.clone(),
                 None => continue,
@@ -338,8 +366,20 @@ impl DiscoveryForest {
             // a node is "checked once" regardless of how many rules
             // were in the batch — that matches the scheduling
             // semantics: the batch is one observation of the node.
+            //
+            // Internal compaction (ongoing-constrained compute): skip
+            // any (node, rule) pair already tried. Pattern matching
+            // is stateless — a rule that missed once will miss
+            // forever under the same library, and a rule that fired
+            // once has already produced its morphism edge. Retrying
+            // is pure overhead.
             let mut node_hit_this_pass = false;
             for rule in rules {
+                let pair_key = (id, rule.name.clone());
+                if self.tried_pairs.contains(&pair_key) {
+                    continue;
+                }
+                self.tried_pairs.insert(pair_key);
                 let hit = pattern_match(&rule.lhs, &before_term).map(|bindings| {
                     let mut rhs = rule.rhs.clone();
                     for (v, val) in &bindings {
@@ -548,25 +588,43 @@ mod tests {
     }
 
     #[test]
-    fn irreducibility_rate_and_check_period_ramp() {
+    fn node_retires_after_all_rules_tried() {
+        // Self-containing compute invariant: once every rule in the
+        // active library has been tried against a node, the node is
+        // retired from the schedule — further retroactive passes do
+        // no work on it. Pattern matching is stateless, so re-trying
+        // a tried (node, rule) pair is pure overhead.
+        //
+        // This test: one unreducible node, one rule, 40 epochs.
+        // Expected behavior:
+        //   - First epoch: node tried against rule, miss recorded,
+        //     (node, rule) memoized in tried_pairs.
+        //   - Epochs 2..=40: the node is skipped (all rules tried);
+        //     no check_count bump, no reschedule — it leaves the
+        //     schedule entirely.
+        //
+        // check_count stays at 1 because only one actual attempt
+        // occurred. The node is terminally retired.
         let mut f = DiscoveryForest::new();
-        // Term that doesn't match add-identity.
         f.insert(apply(var(3), vec![nat(1), nat(1)]));
         let rule = add_identity();
-        // Keep advancing epoch so the node keeps becoming due.
         for e in 1..=40 {
             f.set_epoch(e);
             let _ = f.apply_rule_retroactively(&rule);
         }
         let node = f.nodes.values().next().unwrap();
-        assert!(node.counter.check_count() >= 2);
+        assert_eq!(
+            node.counter.check_count(),
+            1,
+            "node should be checked exactly once then retired; got {}",
+            node.counter.check_count(),
+        );
         assert_eq!(node.counter.hits(), 0);
         assert!((node.irreducibility_rate().as_f64() - 1.0).abs() < 1e-9);
-        assert!(
-            node.check_period().as_u64() >= 32,
-            "fully-irreducible node should have near-max period; got {}",
-            node.check_period().as_u64(),
-        );
+        // The (node, rule) pair is memoized — re-running apply_rule
+        // would be a no-op. That's the self-containment.
+        assert!(f.due_nodes(40).is_empty(),
+            "fully-tried node should no longer be scheduled; compute must self-contain");
     }
 
     #[test]

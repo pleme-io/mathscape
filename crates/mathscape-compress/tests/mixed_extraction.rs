@@ -9,7 +9,6 @@
 
 use mathscape_compress::extract::{extract_rules, ExtractConfig};
 use mathscape_core::{
-    eval::RewriteRule,
     term::{SymbolId, Term},
     value::Value,
 };

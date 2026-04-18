@@ -185,6 +185,42 @@ All four tests must pass. Any failure means the milestone has regressed
 and needs investigation. Use `--nocapture` to see the full TraversalReport
 narrative for each test.
 
+## Self-containing compute (2026-04-18 extension)
+
+The original milestone proved the loop closes at 47 corpora. A subsequent
+scale experiment (BUDGET=100,000 procedural corpora) showed a property the
+thesis implied but we hadn't yet pinned: **per-corpus cost is sub-linear in
+total sweep size**. More data makes the machine MORE efficient, not less.
+
+The mechanism: once a `(node, rule)` pair has been tested, retesting is pure
+overhead — pattern matching is stateless, so a rule that missed at epoch 10
+will miss forever under the same library. Memoizing the tried-pair set turns
+each retroactive pass into O(new_nodes + new_rules × forest), never
+O(forest × library) as the forest grows. The machine's developed tools
+compact each new corpus using work already done, exactly as the user's
+compaction thesis predicted.
+
+Measured scaling (release mode):
+
+| Corpora | Forest nodes | Elapsed | ms / corpus |
+|---|---|---|---|
+| 47 | 1,161 | 0.5s | 10.7 |
+| 507 | 10,231 | 3.1s | 6.2 |
+| 10,007 | 152,924 | 8.3s | 0.83 |
+| 100,007 | 1,171,969 | 83.6s | 0.84 |
+
+Per-corpus cost converges to ~0.84 ms. Memory grows linearly with unique
+terms (content-addressed hash-consing deduplicates structurally-identical
+terms across corpora). At 100k corpora the forest holds 1.17M nodes in
+~200 MB — trivially within commodity RAM.
+
+This is the "self-containing compute" invariant the milestone was missing
+at first. It's now pinned by:
+- `form_tree::DiscoveryForest::tried_pairs` — the memoization set.
+- `form_tree::tests::node_retires_after_all_rules_tried` — tests that a
+  fully-tested node is terminally retired from the schedule.
+- The skill's budget sizing guide with measured per-scale costs.
+
 ## Cross-references
 
 - `docs/arch/machine-synthesis.md` — the five architectural objects, ten

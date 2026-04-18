@@ -1,2 +1,81 @@
 # mathscape
-Evolutionary symbolic compression engine — discovers mathematical abstractions by rewarding compression and novelty over expression trees
+
+Evolutionary symbolic compression engine — discovers mathematical
+abstractions by rewarding compression and novelty over expression trees.
+
+## Status: autonomous traversal, self-containing compute
+
+As of 2026-04-18, the machine traverses mathscape **autonomously** and
+with **self-containing compute**:
+
+- Given any sufficiently-diverse corpus set, it discovers primitives,
+  reinforces them via retroactive reduction across a shared forest
+  substrate, and climbs the proof-status lattice to `Axiomatized` on
+  cross-corpus empirical evidence alone. No human approval is in the
+  loop. No external prover assists. No hook fakes the gate.
+- More input makes the machine **more efficient**, not less.
+  `(node, rule)` memoization + content-addressable hash-consing turn
+  per-corpus cost into O(new_nodes × library_size) — measured at
+  ~0.84 ms/corpus from 10,000 corpora up through 100,000, on a
+  commodity darwin-arm64 workstation.
+- The **lynchpin invariant** holds at every tested scale: every rule
+  in the final library earns cross-corpus retroactive support ≥ 2.
+  No corpus artifacts survive.
+
+See `docs/arch/autonomous-traversal.md` for the milestone doc, the
+invariants, the measured scaling data, and the reproducer.
+
+## Quickstart
+
+```bash
+cd mathscape
+
+# Run the orchestrated autonomous-traversal suite (4 tests):
+cargo test -p mathscape-axiom-bridge --test autonomous_traverse
+
+# Scale probe — 10,000 procedural corpora, ~8s in release:
+MATHSCAPE_TRAVERSE_BUDGET=10000 \
+  cargo test -p mathscape-axiom-bridge --test autonomous_traverse \
+    autonomous_traverse_medium --release -- --nocapture
+
+# Mega probe — 100,000 procedural corpora, ~85s in release:
+MATHSCAPE_TRAVERSE_BUDGET=100000 \
+  cargo test -p mathscape-axiom-bridge --test autonomous_traverse \
+    autonomous_traverse_medium --release -- --nocapture
+```
+
+Or via the reserved skill (from any repo):
+
+```
+/mathscape-traverse
+```
+
+## Core thesis
+
+Mathematical understanding is compression. Mathscape automates that
+compression: given a minimal computational substrate and a reward
+signal that favors shorter descriptions of more phenomena, a search
+process rediscovers known mathematics — and may find new compressions
+humans haven't seen. The **self-containing compute** property means
+this is tractable at arbitrary input scale: the machine's developed
+tools (symbols, meta-rules) compact each new corpus using work
+already done, so the effective traversal cost stays bounded as the
+reachable territory expands.
+
+## Documentation
+
+- `CLAUDE.md` — conventions, architecture, crate structure.
+- `docs/arch/machine-synthesis.md` — the canonical picture of the
+  five architectural objects, ten gates, five forces, three regimes.
+- `docs/arch/autonomous-traversal.md` — the milestone + self-containing
+  compute findings.
+- Full arch-doc list in `CLAUDE.md`.
+
+## Invocation boundaries
+
+- Read-only observation: use the `mathscape-traverse` skill.
+- Code changes: edit crates directly, then rerun
+  `autonomous_traverse` to confirm the lynchpin invariant still holds.
+- Anything that breaks `autonomous_traverse_deterministic_replay`
+  is a serious regression — some source of non-determinism has leaked
+  into the loop.

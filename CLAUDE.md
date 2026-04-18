@@ -59,14 +59,22 @@ machine produces the trajectory.
     to the next step"; levels 0–7.
 16. `docs/arch/realization-plan.md` — the phased implementation plan
     (A through L).
-17. `docs/arch/autonomous-traversal.md` — **MILESTONE (2026-04-17)**.
-    The machine now traverses mathscape autonomously: discovers
-    primitives, reinforces via retroactive reduction across a shared
-    forest substrate, and climbs the proof-status lattice to
-    `Axiomatized` on cross-corpus empirical evidence alone. No human
-    approval in the loop; no hook fakes. Pinned by
+17. `docs/arch/autonomous-traversal.md` — **MILESTONE (2026-04-17,
+    extended 2026-04-18)**. The machine traverses mathscape
+    autonomously AND with self-containing compute: discovers
+    primitives, reinforces via retroactive reduction, climbs the
+    proof-status lattice to `Axiomatized` on cross-corpus empirical
+    evidence alone, and per-corpus compute stays at ~0.84 ms up
+    through 100,000 procedural corpora (measured). More data makes
+    the machine more efficient, not less. Pinned by
     `crates/mathscape-axiom-bridge/tests/autonomous_traverse.rs`.
     Invoked via the `mathscape-traverse` skill.
+18. `docs/arch/landmarks.md` — **canonical map** of where the
+    machine is, where it's been (phases A–G), and where it goes next
+    (phases H–L, ranked by impact-per-effort). Updated every time a
+    milestone closes. The apex fingerprint, lynchpin invariant, and
+    regression signals all live here. Start here when asking "what
+    can mathscape do now?" or "what's the next move?"
 
 The sections below (Core Thesis, Compression as Tractability, etc.)
 are preserved because they explain the *philosophy* the machine

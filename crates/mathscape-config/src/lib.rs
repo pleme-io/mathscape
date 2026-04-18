@@ -64,6 +64,16 @@ pub struct RewardConfig {
     pub alpha: f64,
     pub beta: f64,
     pub gamma: f64,
+    /// Library-LHS subsumption weight. A candidate rule that would
+    /// make K existing library rules redundant earns `K * delta` bits
+    /// — this is the signal that drives dimensional discovery
+    /// (meta-rules) past ΔCR gatekeeping.
+    #[serde(default = "default_delta")]
+    pub delta: f64,
+}
+
+fn default_delta() -> f64 {
+    0.5
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -111,6 +121,7 @@ impl Default for Config {
                 alpha: 0.6,
                 beta: 0.3,
                 gamma: 0.1,
+                delta: 0.5,
             },
             extract: ExtractConfig {
                 min_shared_size: 3,
@@ -140,6 +151,7 @@ impl Config {
             alpha: self.reward.alpha,
             beta: self.reward.beta,
             gamma: self.reward.gamma,
+            delta: self.reward.delta,
         }
     }
 

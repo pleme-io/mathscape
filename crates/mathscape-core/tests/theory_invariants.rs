@@ -31,8 +31,7 @@ use mathscape_core::{
     eval::RewriteRule,
     lifecycle::ProofStatus,
     reduction::{
-        check_maximally_reduced, check_reduction, reduction_pressure, ReductionPolicy,
-        ReductionVerdict,
+        check_reduction, reduction_pressure, ReductionPolicy, ReductionVerdict,
     },
     term::Term,
     value::Value,

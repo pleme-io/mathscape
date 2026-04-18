@@ -195,6 +195,7 @@ mod tests {
             alpha: 0.1,
             beta: 0.8,
             gamma: 0.1,
+            delta: 0.0,
         };
 
         let r_default = compute_reward(&corpus, &[rule.clone()], &[rule.clone()], &default_config);

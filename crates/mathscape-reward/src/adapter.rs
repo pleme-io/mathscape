@@ -111,7 +111,7 @@ impl Prover for StatisticalProver {
 mod tests {
     use super::*;
     use mathscape_core::{
-        epoch::{Artifact, Candidate},
+        epoch::Candidate,
         eval::RewriteRule,
         test_helpers::{apply, nat, var},
     };

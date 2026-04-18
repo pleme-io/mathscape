@@ -488,7 +488,7 @@ fn flex_discovery_forest_end_to_end() {
         policy: ReductionPolicy::layer_0_default(),
     };
     let fired = Rc::new(RefCell::new(Vec::new()));
-    let hook = build_observational_hook(fired);
+    let _hook = build_observational_hook(fired);
 
     // Run the machine to equilibrium, but keep driving the forest
     // manually: tick its epoch cursor in lockstep with the inner
