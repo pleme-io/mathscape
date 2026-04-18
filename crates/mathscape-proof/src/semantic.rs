@@ -275,6 +275,25 @@ pub fn generate_semantic_candidates_with_ledger(
     rule: &RewriteRule,
     ledger: &[RewriteRule],
 ) -> Vec<SemanticCandidate> {
+    generate_semantic_candidates_with_config(
+        rule,
+        ledger,
+        5,   // default max_size
+        30,  // default composition_cap
+    )
+}
+
+/// Like `generate_semantic_candidates_with_ledger` but the enumerator
+/// and composition knobs are parameters instead of constants.
+/// This is the ML4 entry point — MechanismConfig callers invoke
+/// this directly.
+#[must_use]
+pub fn generate_semantic_candidates_with_config(
+    rule: &RewriteRule,
+    ledger: &[RewriteRule],
+    max_size: usize,
+    composition_cap: usize,
+) -> Vec<SemanticCandidate> {
     let mut out = generate_semantic_candidates(rule);
     let rule_vars = collect_free_vars(&rule.lhs);
     if rule_vars.is_empty() {
@@ -283,10 +302,7 @@ pub fn generate_semantic_candidates_with_ledger(
 
     // Generic term enumeration: every term of size ≤ K built from
     // {succ, add, mul} over {free_vars, 0, 1}. No hand-coded
-    // equations. Size cap keeps combinatorics in check while
-    // reaching candidates like succ(add(a, b)) and associativity
-    // LHS/RHS shapes.
-    let max_size = 5; // enough for assoc-shape (size 5) and distrib precursors
+    // equations.
     let enumerated = enumerate_candidate_terms(&rule_vars, max_size);
     for (i, candidate_rhs) in enumerated.into_iter().enumerate() {
         let already = out.iter().any(|c| c.rule.rhs == candidate_rhs);
@@ -346,8 +362,8 @@ pub fn generate_semantic_candidates_with_ledger(
     //
     // Capped to keep the candidate count tractable. With N ledger
     // shapes, we generate N (succ-wrapped) + 2×N² (binary-wrapped)
-    // = O(N²) candidates. For N=30 that's ~1830 extra per rule.
-    let composition_cap = 30;
+    // = O(N²) candidates. Cap is parameterized — the outer loop
+    // can mutate this value.
     let shapes: Vec<&Term> =
         ledger_rhs_shapes.iter().take(composition_cap).collect();
     let mut compositional: Vec<Term> = Vec::new();
@@ -398,6 +414,27 @@ pub fn discover_semantic_projections_with_ledger(
         .into_iter()
         .map(|c| {
             let verdict = validate_semantically(&c.rule, config);
+            (c, verdict)
+        })
+        .filter(|(_, v)| matches!(v, SemanticVerdict::Valid { .. }))
+        .collect()
+}
+
+/// ML4 entry point for discovery with explicit mechanism
+/// parameters. Replaces the ledger-driven variant when the
+/// orchestrator needs to vary enumerator size or composition cap.
+#[must_use]
+pub fn discover_semantic_projections_with_config(
+    rule: &RewriteRule,
+    ledger: &[RewriteRule],
+    validation: &ValidationConfig,
+    max_size: usize,
+    composition_cap: usize,
+) -> Vec<(SemanticCandidate, SemanticVerdict)> {
+    generate_semantic_candidates_with_config(rule, ledger, max_size, composition_cap)
+        .into_iter()
+        .map(|c| {
+            let verdict = validate_semantically(&c.rule, validation);
             (c, verdict)
         })
         .filter(|(_, v)| matches!(v, SemanticVerdict::Valid { .. }))

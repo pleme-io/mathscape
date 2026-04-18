@@ -45,8 +45,11 @@ use mathscape_compress::extract::ExtractConfig;
 use mathscape_core::eval::{anonymize_term, RewriteRule};
 use mathscape_core::term::Term;
 use mathscape_proof::discovery::{theorem_key, DiscoverySession};
+use mathscape_proof::mechanism::{
+    respond_to_saturation, MechanismConfig, MechanismPool, TrialResult,
+};
 use mathscape_proof::semantic::{
-    discover_semantic_projections_with_ledger, SemanticCandidate, SemanticVerdict,
+    discover_semantic_projections_with_config, SemanticCandidate, SemanticVerdict,
     ValidationConfig,
 };
 use rayon::prelude::*;
@@ -301,6 +304,7 @@ fn run_sub_campaign(
     apparatuses: &[Apparatus],
     substrate: &[RewriteRule],
     ledger_rules: &[RewriteRule],
+    mechanism: &MechanismConfig,
 ) -> (HashMap<String, Provenance>, BTreeMap<String, usize>) {
     let provenance: Mutex<HashMap<String, Provenance>> = Mutex::new(HashMap::new());
     const CHUNK: usize = 256;
@@ -334,13 +338,26 @@ fn run_sub_campaign(
     // rules have a valid projection under that apparatus's output.
     // We approximate: count rules whose exemplar validates AND
     // whose apparatus-set includes this apparatus.
-    let vconfig = ValidationConfig::default();
+    let vconfig = ValidationConfig {
+        samples: mechanism.validator_samples,
+        max_value: mechanism.validator_max_value,
+        step_limit: mechanism.validator_step_limit,
+        ..ValidationConfig::default()
+    };
+    let max_size = mechanism.candidate_max_size;
+    let composition_cap = mechanism.composition_cap;
     let validated: HashMap<String, Vec<(SemanticCandidate, SemanticVerdict)>> =
         provenance
             .par_iter()
             .filter_map(|(k, p)| {
                 let rule = p.exemplar.as_ref()?;
-                let results = discover_semantic_projections_with_ledger(rule, ledger_rules, &vconfig);
+                let results = discover_semantic_projections_with_config(
+                    rule,
+                    ledger_rules,
+                    &vconfig,
+                    max_size,
+                    composition_cap,
+                );
                 if results.is_empty() {
                     None
                 } else {
@@ -370,8 +387,14 @@ fn extract_new_theorems(
     theorem_ledger: &HashSet<String>,
     ledger_rules: &[RewriteRule],
     top_k: usize,
+    mechanism: &MechanismConfig,
 ) -> Vec<RewriteRule> {
-    let vconfig = ValidationConfig::default();
+    let vconfig = ValidationConfig {
+        samples: mechanism.validator_samples,
+        max_value: mechanism.validator_max_value,
+        step_limit: mechanism.validator_step_limit,
+        ..ValidationConfig::default()
+    };
     let mut ranked: Vec<(&String, &Provenance)> = provenance.iter().collect();
     ranked.sort_by(|a, b| b.1.apparatuses.len().cmp(&a.1.apparatuses.len()));
 
@@ -381,8 +404,13 @@ fn extract_new_theorems(
         let Some(rule) = p.exemplar.as_ref() else {
             continue;
         };
-        let verdicts =
-            discover_semantic_projections_with_ledger(rule, ledger_rules, &vconfig);
+        let verdicts = discover_semantic_projections_with_config(
+            rule,
+            ledger_rules,
+            &vconfig,
+            mechanism.candidate_max_size,
+            mechanism.composition_cap,
+        );
         for (cand, _) in verdicts {
             let tk = theorem_key(&cand.rule);
             if theorem_ledger.contains(&tk) || seen_this_cycle.contains(&tk) {
@@ -443,6 +471,22 @@ fn edge_riding_loop() {
     // session.has_stalled() / session.stalled_cycles().
     let mut session = DiscoverySession::new();
 
+    // ML4: the mechanism pool. Holds the CURRENT discovery
+    // mechanism parameters (enumerator size, composition cap,
+    // corpus shape, validator settings, extract config). When
+    // saturation fires, respond_to_saturation proposes mutations;
+    // if a mutant produces delta-novelty, it becomes the new
+    // current config. This is the self-mutation loop.
+    let mut mech_pool = MechanismPool::new();
+
+    // Saturation trigger: consecutive zero-novelty cycles after
+    // bootstrap before we invoke mechanism mutation. Lower
+    // trigger = faster self-mutation but noisier; higher trigger
+    // = fewer spurious mutations but slower recovery.
+    const SATURATION_TRIGGER: usize = 2;
+    const MECH_MUTATIONS_PER_ROUND: usize = 12;
+    const MECH_ESCALATION_BUDGET: usize = 3;
+
     // Phase K probes for semantic-novelty dedup. Applied BEFORE
     // each theorem enters the ledger, so the ledger grows by
     // equivalence-class-count, not by structural-form-count.
@@ -467,11 +511,15 @@ fn edge_riding_loop() {
         );
 
         // 1. Run sub-campaign over the current substrate + ledger.
+        //    Uses the CURRENT mechanism config from the pool —
+        //    this is the parameter set the machine is currently
+        //    riding.
         let (provenance, yield_by_app) = run_sub_campaign(
             PROBES_PER_CYCLE,
             &pool,
             session.substrate.rules(),
             session.ledger.rules(),
+            &mech_pool.current,
         );
 
         println!(
@@ -494,6 +542,7 @@ fn edge_riding_loop() {
             &ledger_keys,
             session.ledger.rules(),
             RUSTIFY_TOP_K,
+            &mech_pool.current,
         );
         println!("  new theorems discovered: {}", new_theorems.len());
         for t in &new_theorems {
@@ -568,8 +617,8 @@ fn edge_riding_loop() {
         let cycle_elapsed = cycle_start.elapsed().as_secs_f64();
         // Record the ACTUAL admission count (reducing + equivalence,
         // after semantic-dedup rejection). This is the real novelty
-        // signal — if it hits zero post-bootstrap, the correctness
-        // criterion fires and we've found a mechanism gap.
+        // signal — if it hits zero post-bootstrap for several
+        // consecutive cycles, the mechanism-mutation layer fires.
         let admitted = added_to_substrate + ledger_only;
         session.record_cycle(
             cycle,
@@ -578,6 +627,101 @@ fn edge_riding_loop() {
             cycle_elapsed,
         );
         println!("  cycle elapsed: {cycle_elapsed:.1}s");
+
+        // ── ML4: SATURATION RESPONSE ──
+        //
+        // If the last SATURATION_TRIGGER post-bootstrap cycles all
+        // produced zero admissions, invoke mechanism mutation. The
+        // machine proposes variants of its OWN config, short-trials
+        // each, keeps the winner. If no mutant breaks saturation,
+        // we've hit mechanism-saturation (ML5 territory) and halt.
+        let recent_stalled = session
+            .trajectory
+            .iter()
+            .rev()
+            .take(SATURATION_TRIGGER)
+            .filter(|r| r.new_theorems == 0 && r.cycle >= 2)
+            .count();
+        if recent_stalled >= SATURATION_TRIGGER {
+            println!();
+            println!(
+                "  ⚠ SATURATION DETECTED — last {SATURATION_TRIGGER} cycles produced 0 admissions"
+            );
+            println!("    current mechanism: {}", mech_pool.current.brief());
+            println!("    invoking saturation response...");
+            let sat_start = std::time::Instant::now();
+            // Clone state needed for the trial closure. The trial
+            // runs a short sub-campaign (one probe pass) to measure
+            // delta-novelty for a mutant config.
+            let pool_snapshot = pool.clone();
+            let substrate_snapshot = session.substrate.rules().to_vec();
+            let ledger_snapshot = session.ledger.rules().to_vec();
+            let probes_clone = probes.clone();
+            let trial_fn = |mutant: &MechanismConfig| {
+                let (trial_prov, _yield) = run_sub_campaign(
+                    512, // short trial budget
+                    &pool_snapshot,
+                    &substrate_snapshot,
+                    &ledger_snapshot,
+                    mutant,
+                );
+                // Compute delta-novelty: count theorems not in the
+                // existing ledger after semantic dedup with probes.
+                let mut trial_ledger_keys: HashSet<String> = HashSet::new();
+                for r in &ledger_snapshot {
+                    trial_ledger_keys.insert(theorem_key(r));
+                }
+                let mut trial_admitted = 0;
+                let mut trial_total = 0;
+                let trial_new = extract_new_theorems(
+                    &trial_prov,
+                    &trial_ledger_keys,
+                    &ledger_snapshot,
+                    8,
+                    mutant,
+                );
+                for t in &trial_new {
+                    trial_total += 1;
+                    if mathscape_compress::egraph::is_semantically_novel(
+                        t,
+                        &ledger_snapshot,
+                        &probes_clone,
+                        24,
+                    ) {
+                        trial_admitted += 1;
+                    }
+                }
+                TrialResult {
+                    delta_novelty: trial_admitted,
+                    total_theorems_found: trial_total,
+                }
+            };
+            match respond_to_saturation(
+                &mut mech_pool,
+                session.ledger.rules(),
+                trial_fn,
+                MECH_MUTATIONS_PER_ROUND,
+                MECH_ESCALATION_BUDGET,
+                (cycle as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15),
+            ) {
+                Some((mutation, new_config)) => {
+                    println!(
+                        "    ✓ self-mutation: {} ({:.1}s)",
+                        mutation.brief(),
+                        sat_start.elapsed().as_secs_f64()
+                    );
+                    println!("    new mechanism: {}", new_config.brief());
+                    mech_pool.current = new_config;
+                }
+                None => {
+                    println!(
+                        "    ✗ MECHANISM-SATURATED — no mutation produced delta-novelty. ML5 gate."
+                    );
+                    println!("    exiting loop.");
+                    break;
+                }
+            }
+        }
     }
 
     let total_elapsed = start.elapsed().as_secs_f64();

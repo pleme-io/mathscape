@@ -7,6 +7,7 @@
 
 pub mod discovery;
 pub mod lean_export;
+pub mod mechanism;
 pub mod semantic;
 
 pub use discovery::{
@@ -14,9 +15,14 @@ pub use discovery::{
     Substrate,
 };
 pub use lean_export::{export_rule_as_lean, LeanExportOptions};
+pub use mechanism::{
+    propose_random_mutations, respond_to_saturation, MechanismConfig,
+    MechanismMutation, MechanismPool, TrialResult,
+};
 pub use semantic::{
-    discover_semantic_projections, discover_semantic_projections_with_ledger,
-    generate_semantic_candidates, generate_semantic_candidates_with_ledger,
+    discover_semantic_projections, discover_semantic_projections_with_config,
+    discover_semantic_projections_with_ledger, generate_semantic_candidates,
+    generate_semantic_candidates_with_config, generate_semantic_candidates_with_ledger,
     validate_semantically, CandidateKind, SemanticCandidate, SemanticVerdict,
     ValidationConfig,
 };
