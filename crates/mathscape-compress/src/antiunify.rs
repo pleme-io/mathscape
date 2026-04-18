@@ -12,7 +12,7 @@ use mathscape_core::term::Term;
 use std::collections::HashMap;
 
 /// Result of anti-unification.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct AntiUnifyResult {
     /// The generalized pattern (with Var placeholders).
     pub pattern: Term,

@@ -1399,6 +1399,121 @@ fn run_traversal_pure_procedural_with_library(
 }
 
 #[test]
+#[ignore = "phase M10: bettyfine uniqueness probe — do different configs produce different bettyfines?, ~30s, --ignored"]
+fn bettyfine_family_probe() {
+    // User's question: "bettyfine seems a bit not unique so far
+    // but lets see how it holds up over many variations."
+    //
+    // Method: at each of several distinct configurations, find the
+    // modal basin (the config's bettyfine) and print its anonymized
+    // rule content. Compare.
+    //
+    // If the modal basin's RULE SHAPES are identical across configs,
+    // the bettyfine is a canonical trivial form (just Symbol-
+    // naming, uninteresting but universal). If the shapes DIFFER
+    // across configs, there's a FAMILY of bettyfines, each
+    // characteristic of its machinery state.
+    use mathscape_compress::extract::ExtractConfig as EC;
+    use std::collections::HashMap;
+
+    const N_SEEDS: u64 = 64;
+    const BUDGET: usize = 15;
+    const DEPTH: usize = 4;
+
+    // Configurations to compare: diverse extract configs + different
+    // corpora + extreme budgets.
+    let configs: Vec<(&str, EC, usize, usize)> = vec![
+        ("default (2,2,5)", EC { min_shared_size: 2, min_matches: 2, max_new_rules: 5 }, BUDGET, DEPTH),
+        ("optimum (2,2,10)", EC { min_shared_size: 2, min_matches: 2, max_new_rules: 10 }, BUDGET, DEPTH),
+        ("wide (2,2,20)", EC { min_shared_size: 2, min_matches: 2, max_new_rules: 20 }, BUDGET, DEPTH),
+        ("strict (3,2,10)", EC { min_shared_size: 3, min_matches: 2, max_new_rules: 10 }, BUDGET, DEPTH),
+        ("permissive (1,2,20)", EC { min_shared_size: 1, min_matches: 2, max_new_rules: 20 }, BUDGET, DEPTH),
+        ("deep (2,2,10)×depth6", EC { min_shared_size: 2, min_matches: 2, max_new_rules: 10 }, BUDGET, 6),
+        ("shallow (2,2,10)×depth2", EC { min_shared_size: 2, min_matches: 2, max_new_rules: 10 }, BUDGET, 2),
+        ("rich budget=30", EC { min_shared_size: 2, min_matches: 2, max_new_rules: 10 }, 30, DEPTH),
+    ];
+
+    println!("\n╔══════════════════════════════════════════════════════╗");
+    println!("║ BETTYFINE FAMILY PROBE                               ║");
+    println!("║   Is the bettyfine unique or a family across configs?║");
+    println!("╚══════════════════════════════════════════════════════╝");
+
+    let mut bettyfine_shapes: HashMap<String, Vec<(usize, String, String)>> = HashMap::new();
+    for (label, ec, budget, depth) in configs {
+        // For each config, collect basin fingerprints across seeds,
+        // find modal, extract its canonical rule content.
+        let mut basin_support: HashMap<Vec<(String, String)>, usize> = HashMap::new();
+        let mut basin_to_rules: HashMap<
+            Vec<(String, String)>,
+            Vec<mathscape_core::eval::RewriteRule>,
+        > = HashMap::new();
+
+        for seed in 1..=N_SEEDS {
+            let report = run_traversal_pure_procedural_with_extract(seed, budget, depth, ec.clone());
+            let fp = structural_fingerprint(&report.axiomatized_rules_full);
+            *basin_support.entry(fp.clone()).or_default() += 1;
+            basin_to_rules
+                .entry(fp)
+                .or_insert(report.axiomatized_rules_full);
+        }
+
+        let (modal_fp, modal_count) = basin_support
+            .into_iter()
+            .max_by_key(|(_, c)| *c)
+            .unwrap_or_default();
+        let modal_frac = modal_count as f64 / N_SEEDS as f64;
+
+        println!("\n▶ [{label}]  modal {}/{N_SEEDS} ({:.1}%)",
+            modal_count, modal_frac * 100.0);
+        let rules = basin_to_rules.get(&modal_fp).cloned().unwrap_or_default();
+        if rules.is_empty() {
+            println!("  (no rules in modal basin — total collapse or empty library)");
+            continue;
+        }
+        let mut rule_shapes = Vec::new();
+        for rule in &rules {
+            let lhs_anon = mathscape_core::eval::anonymize_term(&rule.lhs);
+            let rhs_anon = mathscape_core::eval::anonymize_term(&rule.rhs);
+            println!("  rule: {} :: {} => {}", rule.name, lhs_anon, rhs_anon);
+            rule_shapes.push((
+                rule.lhs.size() + rule.rhs.size(),
+                format!("{lhs_anon}"),
+                format!("{rhs_anon}"),
+            ));
+        }
+        bettyfine_shapes.insert(label.to_string(), rule_shapes);
+    }
+
+    // Cross-config comparison: how many DISTINCT modal-basin rule
+    // shapes did we see across configs?
+    let mut distinct_shapes: std::collections::HashSet<Vec<(String, String)>> =
+        std::collections::HashSet::new();
+    for (_, shape) in &bettyfine_shapes {
+        let key: Vec<(String, String)> =
+            shape.iter().map(|(_, l, r)| (l.clone(), r.clone())).collect();
+        distinct_shapes.insert(key);
+    }
+    println!("\n▶ Cross-config bettyfine distinctness");
+    println!("  configs tested           : {}", bettyfine_shapes.len());
+    println!("  distinct bettyfine shapes: {}", distinct_shapes.len());
+    if distinct_shapes.len() == 1 {
+        println!(
+            "\n  UNIQUE — every config's modal basin has the same rule shape.\n  The bettyfine IS the canonical trivial form. Interesting\n  because it proves robustness; uninteresting because it's\n  trivially the same Symbol-naming pattern regardless of knobs."
+        );
+    } else if distinct_shapes.len() <= 3 {
+        println!(
+            "\n  SMALL FAMILY — {} distinct bettyfine shapes across configs.\n  Each config has its OWN bettyfine. These are the canonical\n  attractors of different machinery regimes.",
+            distinct_shapes.len()
+        );
+    } else {
+        println!(
+            "\n  DIVERSE — {} distinct bettyfine shapes. The bettyfine isn't\n  really one object; it's a FAMILY indexed by configuration.\n  Each knob setting lands in a different canonical form.",
+            distinct_shapes.len()
+        );
+    }
+}
+
+#[test]
 #[ignore = "phase M9: seeded-bettyfine discovery — what can we penetrate on top? ~20s, --ignored"]
 fn seeded_bettyfine_penetration() {
     // The bettyfine is the tool. What does it penetrate?
