@@ -1,10 +1,12 @@
 //! Symbolic compression: anti-unification, library extraction, rewriting.
 //!
-//! E-graph integration (egg) is a future phase — this module starts with
-//! direct anti-unification for pattern discovery.
+//! E-graph integration (`egg`) lives in `egraph` — phase K bridges
+//! mathscape's `Term` to egg's `Language` so future provers can
+//! accept rules by semantic equivalence, not just syntactic match.
 
 pub mod adapter;
 pub mod antiunify;
+pub mod egraph;
 pub mod extract;
 pub mod meta_gen;
 
