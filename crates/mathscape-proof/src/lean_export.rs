@@ -162,6 +162,18 @@ fn term_to_lean(t: &Term, params: &[String]) -> String {
         Term::Number(Value::Float(bits)) => {
             format!("({} : Float)", f64::from_bits(*bits))
         }
+        // R19: FloatTensor — Array of Floats with shape comment.
+        Term::Number(Value::FloatTensor { shape, data }) => {
+            let elems: Vec<String> = data
+                .iter()
+                .map(|b| format!("({} : Float)", f64::from_bits(*b)))
+                .collect();
+            format!(
+                "(#[{}] : Array Float) /- shape: {:?} -/",
+                elems.join(", "),
+                shape
+            )
+        }
         Term::Point(p) => format!("(Point.mk {p})"),
         Term::Apply(f, args) => match f.as_ref() {
             Term::Var(2) if args.len() == 2 => format!(

@@ -99,6 +99,20 @@ fn format_term(t: &Term) -> String {
         // identity (0.1 and 0.1 + 0.0 have different bits —
         // distinct theorems).
         Term::Number(Value::Float(bits)) => format!("{}f", f64::from_bits(*bits)),
+        // R19: FloatTensor keyed by shape + decoded floats.
+        Term::Number(Value::FloatTensor { shape, data }) => {
+            let s = shape
+                .iter()
+                .map(|x| x.to_string())
+                .collect::<Vec<_>>()
+                .join("x");
+            let d = data
+                .iter()
+                .map(|b| f64::from_bits(*b).to_string())
+                .collect::<Vec<_>>()
+                .join(",");
+            format!("FT{s}[{d}]")
+        }
         Term::Apply(f, args) => {
             let fs = format_term(f);
             let ass: Vec<String> = args.iter().map(format_term).collect();

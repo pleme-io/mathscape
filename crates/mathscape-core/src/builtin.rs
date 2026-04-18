@@ -95,6 +95,18 @@ pub const FLOAT_DIV: u32 = 34;
 pub const FLOAT_FROM_INT: u32 = 35;
 pub const FLOAT_SUB: u32 = 36;
 
+// Float Tensor domain (40..=48) — R19 (2026-04-18). Enables
+// real-valued parametric models. Elementwise ops mirror the
+// integer Tensor domain (R13) but preserve float precision.
+pub const FT_ADD: u32 = 40;
+pub const FT_MUL: u32 = 41;
+pub const FT_NEG: u32 = 42;
+pub const FT_SUM: u32 = 43;
+pub const FT_DOT: u32 = 44;
+pub const FT_SCALE: u32 = 45;
+pub const FT_SUB: u32 = 46;
+pub const FT_MATMUL: u32 = 47;
+
 /// A builtin operator — the atomic primitives the evaluator knows
 /// how to reduce directly. Fields are the declaration; `eval` is
 /// the reduction rule.
@@ -441,6 +453,167 @@ fn eval_float_from_int(args: &[Term]) -> Option<Term> {
     Value::from_f64(i as f64).map(Term::Number)
 }
 
+// ── R19 (2026-04-18): FloatTensor eval rules ──────────────────────
+
+fn as_ft(t: &Term) -> Option<(Vec<usize>, Vec<f64>)> {
+    match t {
+        Term::Number(v) => v.as_float_tensor().map(|(s, d)| (s.to_vec(), d)),
+        _ => None,
+    }
+}
+
+fn eval_ft_add(args: &[Term]) -> Option<Term> {
+    if args.len() != 2 {
+        return None;
+    }
+    let (sa, da) = as_ft(&args[0])?;
+    let (sb, db) = as_ft(&args[1])?;
+    if sa != sb {
+        return None;
+    }
+    let mut out: Vec<f64> = Vec::with_capacity(da.len());
+    for (a, b) in da.iter().zip(db.iter()) {
+        let s = a + b;
+        if !s.is_finite() {
+            return None;
+        }
+        out.push(s);
+    }
+    Value::float_tensor(sa, out).map(Term::Number)
+}
+
+fn eval_ft_mul(args: &[Term]) -> Option<Term> {
+    if args.len() != 2 {
+        return None;
+    }
+    let (sa, da) = as_ft(&args[0])?;
+    let (sb, db) = as_ft(&args[1])?;
+    if sa != sb {
+        return None;
+    }
+    let mut out: Vec<f64> = Vec::with_capacity(da.len());
+    for (a, b) in da.iter().zip(db.iter()) {
+        let p = a * b;
+        if !p.is_finite() {
+            return None;
+        }
+        out.push(p);
+    }
+    Value::float_tensor(sa, out).map(Term::Number)
+}
+
+fn eval_ft_sub(args: &[Term]) -> Option<Term> {
+    if args.len() != 2 {
+        return None;
+    }
+    let (sa, da) = as_ft(&args[0])?;
+    let (sb, db) = as_ft(&args[1])?;
+    if sa != sb {
+        return None;
+    }
+    let mut out: Vec<f64> = Vec::with_capacity(da.len());
+    for (a, b) in da.iter().zip(db.iter()) {
+        let s = a - b;
+        if !s.is_finite() {
+            return None;
+        }
+        out.push(s);
+    }
+    Value::float_tensor(sa, out).map(Term::Number)
+}
+
+fn eval_ft_neg(args: &[Term]) -> Option<Term> {
+    if args.len() != 1 {
+        return None;
+    }
+    let (s, d) = as_ft(&args[0])?;
+    let out: Vec<f64> = d.iter().map(|x| -x).collect();
+    Value::float_tensor(s, out).map(Term::Number)
+}
+
+fn eval_ft_sum(args: &[Term]) -> Option<Term> {
+    if args.len() != 1 {
+        return None;
+    }
+    let (_s, d) = as_ft(&args[0])?;
+    let mut acc: f64 = 0.0;
+    for v in d {
+        acc += v;
+        if !acc.is_finite() {
+            return None;
+        }
+    }
+    Value::from_f64(acc).map(Term::Number)
+}
+
+fn eval_ft_dot(args: &[Term]) -> Option<Term> {
+    if args.len() != 2 {
+        return None;
+    }
+    let (sa, da) = as_ft(&args[0])?;
+    let (sb, db) = as_ft(&args[1])?;
+    if sa.len() != 1 || sb.len() != 1 || sa != sb {
+        return None;
+    }
+    let mut acc: f64 = 0.0;
+    for (a, b) in da.iter().zip(db.iter()) {
+        acc += a * b;
+        if !acc.is_finite() {
+            return None;
+        }
+    }
+    Value::from_f64(acc).map(Term::Number)
+}
+
+fn eval_ft_scale(args: &[Term]) -> Option<Term> {
+    // scale(c, T) where c is Float scalar, T is FloatTensor.
+    if args.len() != 2 {
+        return None;
+    }
+    let c = args[0].as_float_val()?;
+    let (s, d) = as_ft(&args[1])?;
+    let out: Vec<f64> = d.iter().map(|x| c * x).collect();
+    // Guard non-finite in output (e.g., overflow from large c).
+    for v in &out {
+        if !v.is_finite() {
+            return None;
+        }
+    }
+    Value::float_tensor(s, out).map(Term::Number)
+}
+
+fn eval_ft_matmul(args: &[Term]) -> Option<Term> {
+    // 2D float matrix multiplication: A[m,n] @ B[n,p] = C[m,p].
+    if args.len() != 2 {
+        return None;
+    }
+    let (sa, da) = as_ft(&args[0])?;
+    let (sb, db) = as_ft(&args[1])?;
+    if sa.len() != 2 || sb.len() != 2 {
+        return None;
+    }
+    let (m, n_a) = (sa[0], sa[1]);
+    let (n_b, p) = (sb[0], sb[1]);
+    if n_a != n_b {
+        return None;
+    }
+    let n = n_a;
+    let mut out = vec![0.0_f64; m * p];
+    for i in 0..m {
+        for j in 0..p {
+            let mut acc = 0.0_f64;
+            for k in 0..n {
+                acc += da[i * n + k] * db[k * p + j];
+                if !acc.is_finite() {
+                    return None;
+                }
+            }
+            out[i * p + j] = acc;
+        }
+    }
+    Value::float_tensor(vec![m, p], out).map(Term::Number)
+}
+
 fn eval_tensor_reshape(args: &[Term]) -> Option<Term> {
     // Reshape T to a new shape. Second arg is a 1D tensor whose
     // elements (as usize) are the new dims. Rejects on numel
@@ -726,6 +899,74 @@ pub const BUILTINS: &[Builtin] = &[
         commutative: false,
         associative: false,
         eval: eval_float_sub,
+    },
+    // R19: Float tensor domain (ids 40..=47). Real-valued
+    // parametric models use these. Same AC flags as integer
+    // tensor; semantic domain-disjoint from both integer tensor
+    // and scalar Float.
+    Builtin {
+        id: 40,
+        name: "ft_add",
+        arity: 2,
+        commutative: true,
+        associative: true,
+        eval: eval_ft_add,
+    },
+    Builtin {
+        id: 41,
+        name: "ft_mul",
+        arity: 2,
+        commutative: true,
+        associative: true,
+        eval: eval_ft_mul,
+    },
+    Builtin {
+        id: 42,
+        name: "ft_neg",
+        arity: 1,
+        commutative: false,
+        associative: false,
+        eval: eval_ft_neg,
+    },
+    Builtin {
+        id: 43,
+        name: "ft_sum",
+        arity: 1,
+        commutative: false,
+        associative: false,
+        eval: eval_ft_sum,
+    },
+    Builtin {
+        id: 44,
+        name: "ft_dot",
+        arity: 2,
+        commutative: true,
+        associative: false,
+        eval: eval_ft_dot,
+    },
+    Builtin {
+        id: 45,
+        name: "ft_scale",
+        arity: 2,
+        commutative: false,
+        associative: false,
+        eval: eval_ft_scale,
+    },
+    Builtin {
+        id: 46,
+        name: "ft_sub",
+        arity: 2,
+        commutative: false,
+        associative: false,
+        eval: eval_ft_sub,
+    },
+    Builtin {
+        id: 47,
+        name: "ft_matmul",
+        arity: 2,
+        commutative: false,
+        associative: false,
+        eval: eval_ft_matmul,
     },
 ];
 
@@ -1473,6 +1714,126 @@ mod tests {
             "after 50 SGD steps, w={w}, target={target}, |diff|={}",
             (w - target).abs()
         );
+    }
+
+    // ── R19: FloatTensor tests ───────────────────────────────────
+
+    fn ft(shape: Vec<usize>, data: Vec<f64>) -> Term {
+        Term::Number(Value::float_tensor(shape, data).unwrap())
+    }
+
+    #[test]
+    fn ft_builtins_registered() {
+        assert_eq!(lookup(FT_ADD).unwrap().name, "ft_add");
+        assert_eq!(lookup(FT_MUL).unwrap().name, "ft_mul");
+        assert_eq!(lookup(FT_SUM).unwrap().name, "ft_sum");
+        assert_eq!(lookup(FT_DOT).unwrap().name, "ft_dot");
+        assert_eq!(lookup(FT_MATMUL).unwrap().name, "ft_matmul");
+    }
+
+    #[test]
+    fn ft_add_elementwise() {
+        let a = ft(vec![3], vec![1.0, 2.0, 3.0]);
+        let b = ft(vec![3], vec![0.5, 1.5, 2.5]);
+        let r = eval_ft_add(&[a, b]).unwrap();
+        assert_eq!(r, ft(vec![3], vec![1.5, 3.5, 5.5]));
+    }
+
+    #[test]
+    fn ft_mul_elementwise() {
+        let a = ft(vec![2], vec![2.0, 3.0]);
+        let b = ft(vec![2], vec![4.0, 5.0]);
+        let r = eval_ft_mul(&[a, b]).unwrap();
+        assert_eq!(r, ft(vec![2], vec![8.0, 15.0]));
+    }
+
+    #[test]
+    fn ft_sum_reduces_to_scalar_float() {
+        let v = ft(vec![4], vec![0.5, 1.5, 2.5, 3.5]);
+        let s = eval_ft_sum(&[v]).unwrap();
+        assert_eq!(s, f(8.0));
+    }
+
+    #[test]
+    fn ft_dot_computes_inner_product() {
+        // dot([1, 2], [3, 4]) = 3 + 8 = 11
+        let a = ft(vec![2], vec![1.0, 2.0]);
+        let b = ft(vec![2], vec![3.0, 4.0]);
+        let r = eval_ft_dot(&[a, b]).unwrap();
+        assert_eq!(r, f(11.0));
+    }
+
+    #[test]
+    fn ft_scale_multiplies_all_elements() {
+        let r = eval_ft_scale(&[f(2.5), ft(vec![3], vec![1.0, 2.0, 3.0])]).unwrap();
+        assert_eq!(r, ft(vec![3], vec![2.5, 5.0, 7.5]));
+    }
+
+    #[test]
+    fn ft_matmul_2x3_by_3x2() {
+        // [[1, 2, 3], [4, 5, 6]] @ [[0.5, 1.0], [1.5, 2.0], [2.5, 3.0]]
+        //   C[0,0] = 1*0.5 + 2*1.5 + 3*2.5 = 0.5 + 3 + 7.5 = 11.0
+        //   C[0,1] = 1*1.0 + 2*2.0 + 3*3.0 = 1 + 4 + 9 = 14.0
+        //   C[1,0] = 4*0.5 + 5*1.5 + 6*2.5 = 2 + 7.5 + 15 = 24.5
+        //   C[1,1] = 4*1.0 + 5*2.0 + 6*3.0 = 4 + 10 + 18 = 32.0
+        let a = ft(vec![2, 3], vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
+        let b = ft(vec![3, 2], vec![0.5, 1.0, 1.5, 2.0, 2.5, 3.0]);
+        let c = eval_ft_matmul(&[a, b]).unwrap();
+        assert_eq!(
+            c,
+            ft(vec![2, 2], vec![11.0, 14.0, 24.5, 32.0])
+        );
+    }
+
+    #[test]
+    fn ft_ops_reject_integer_tensor() {
+        // Cross-domain guard: ft_add rejects integer Tensor args.
+        let int_t = Term::Number(Value::tensor(vec![2], vec![1, 2]).unwrap());
+        assert!(eval_ft_add(&[int_t.clone(), int_t]).is_none());
+    }
+
+    // ── PROOF: linear regression on FloatTensor ──────────────────
+
+    #[test]
+    fn proof_float_linear_regression_forward_and_loss() {
+        // Model: y_hat = dot(w, x) + b  where w, x are 1D float
+        // tensors and b is a Float scalar.
+        //   w = [1.0, 0.5, 2.0]
+        //   x = [4.0, 6.0, 1.0]
+        //   b = 0.5
+        //   y_hat = 1*4 + 0.5*6 + 2*1 + 0.5 = 4 + 3 + 2 + 0.5 = 9.5
+        //
+        // Loss: (y_hat - target)² where target = 10.0
+        //   loss = (9.5 - 10.0)² = (-0.5)² = 0.25
+        use crate::eval::eval;
+        let w = ft(vec![3], vec![1.0, 0.5, 2.0]);
+        let x = ft(vec![3], vec![4.0, 6.0, 1.0]);
+        let b = f(0.5);
+        let target = f(10.0);
+
+        let dot = Term::Apply(
+            Box::new(Term::Var(FT_DOT)),
+            vec![w, x],
+        );
+        let y_hat = Term::Apply(
+            Box::new(Term::Var(FLOAT_ADD)),
+            vec![dot, b],
+        );
+        // Check y_hat directly.
+        let y_hat_val = eval(&y_hat, &[], 200).unwrap();
+        assert_eq!(y_hat_val, f(9.5));
+
+        // Compute loss: (y_hat - target)²
+        let diff = Term::Apply(
+            Box::new(Term::Var(FLOAT_SUB)),
+            vec![y_hat, target],
+        );
+        let loss = Term::Apply(
+            Box::new(Term::Var(FLOAT_MUL)),
+            vec![diff.clone(), diff],
+        );
+        let loss_val = eval(&loss, &[], 200).unwrap();
+        assert_eq!(loss_val, f(0.25));
     }
 
     #[test]

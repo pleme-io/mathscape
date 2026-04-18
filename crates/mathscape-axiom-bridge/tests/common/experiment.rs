@@ -512,6 +512,20 @@ pub fn format_term(t: &Term) -> String {
             )
         }
         Term::Number(Value::Float(bits)) => format!("{}f", f64::from_bits(*bits)),
+        Term::Number(Value::FloatTensor { shape, data }) => {
+            format!(
+                "FT{}[{}]",
+                shape
+                    .iter()
+                    .map(|x| x.to_string())
+                    .collect::<Vec<_>>()
+                    .join("x"),
+                data.iter()
+                    .map(|b| f64::from_bits(*b).to_string())
+                    .collect::<Vec<_>>()
+                    .join(",")
+            )
+        }
         Term::Apply(f, args) => {
             let fs = format_term(f);
             let ass: Vec<String> = args.iter().map(format_term).collect();

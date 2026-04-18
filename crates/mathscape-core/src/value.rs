@@ -55,6 +55,12 @@ pub enum Value {
     /// Construction: `Value::from_f64(f)` — returns None on NaN
     /// or Inf. Access: `value.as_float()` — converts back to f64.
     Float(u64),
+    /// R19 (2026-04-18): shape-tagged float tensor. Same bit-
+    /// encoded workaround as `Float` for Eq/Ord/Hash derives.
+    /// Data stored as Vec<u64> where each u64 is `f64::to_bits`.
+    /// Construct via `Value::float_tensor(shape, data)` which
+    /// rejects non-finite inputs.
+    FloatTensor { shape: Vec<usize>, data: Vec<u64> },
 }
 
 impl Value {
@@ -76,9 +82,9 @@ impl Value {
     }
 
     /// Successor — defined for Nat, Int, Float. Maps each value
-    /// to its +1 in its own domain. Undefined for Tensor (caller
-    /// gets identity — no increment semantics on a multi-element
-    /// container).
+    /// to its +1 in its own domain. Undefined for Tensor/
+    /// FloatTensor (no increment semantics on multi-element
+    /// containers — caller gets identity).
     pub fn succ(&self) -> Self {
         match self {
             Value::Nat(n) => Value::Nat(n + 1),
@@ -94,12 +100,12 @@ impl Value {
                     self.clone()
                 }
             }
-            Value::Tensor { .. } => self.clone(),
+            Value::Tensor { .. } | Value::FloatTensor { .. } => self.clone(),
         }
     }
 
-    /// Negation — defined for Int, Float, Tensor (element-wise).
-    /// Nat has no negatives; caller gets `None` for Nat input.
+    /// Negation — defined for Int, Float, Tensor, FloatTensor
+    /// (element-wise). Nat has no negatives; caller gets `None`.
     pub fn neg(&self) -> Option<Self> {
         match self {
             Value::Nat(_) => None,
@@ -111,6 +117,23 @@ impl Value {
             Value::Float(bits) => {
                 let f = f64::from_bits(*bits);
                 Value::from_f64(-f)
+            }
+            Value::FloatTensor { shape, data } => {
+                // Negate each bit-encoded element. None if any
+                // would become non-finite (shouldn't happen for
+                // finite inputs but guard anyway).
+                let mut out = Vec::with_capacity(data.len());
+                for b in data {
+                    let negated = -f64::from_bits(*b);
+                    if !negated.is_finite() {
+                        return None;
+                    }
+                    out.push(negated.to_bits());
+                }
+                Some(Value::FloatTensor {
+                    shape: shape.clone(),
+                    data: out,
+                })
             }
         }
     }
@@ -148,6 +171,7 @@ impl Value {
                 | (Value::Int(_), Value::Int(_))
                 | (Value::Tensor { .. }, Value::Tensor { .. })
                 | (Value::Float(_), Value::Float(_))
+                | (Value::FloatTensor { .. }, Value::FloatTensor { .. })
         )
     }
 
@@ -213,6 +237,59 @@ impl Value {
             _ => None,
         }
     }
+
+    // ── R19 Float tensor constructors ────────────────────────────
+
+    /// Construct a FloatTensor from shape + f64 data. Validates
+    /// shape and rejects non-finite elements — non-finite reaches
+    /// the kernel as None, same rule as `Value::from_f64`.
+    pub fn float_tensor(shape: Vec<usize>, data: Vec<f64>) -> Option<Self> {
+        let expected: usize = shape.iter().product();
+        if data.len() != expected {
+            return None;
+        }
+        let mut bits: Vec<u64> = Vec::with_capacity(data.len());
+        for v in &data {
+            if !v.is_finite() {
+                return None;
+            }
+            bits.push(v.to_bits());
+        }
+        Some(Value::FloatTensor { shape, data: bits })
+    }
+
+    /// FloatTensor of zeros with the given shape.
+    pub fn float_tensor_zeros(shape: Vec<usize>) -> Self {
+        let n: usize = shape.iter().product();
+        Value::FloatTensor {
+            shape,
+            data: vec![0u64; n],
+        }
+    }
+
+    /// FloatTensor of ones.
+    pub fn float_tensor_ones(shape: Vec<usize>) -> Self {
+        let n: usize = shape.iter().product();
+        let one_bits = 1.0_f64.to_bits();
+        Value::FloatTensor {
+            shape,
+            data: vec![one_bits; n],
+        }
+    }
+
+    /// View as (shape, data-as-f64-iterator); None if not a
+    /// FloatTensor. Returns owned Vec<f64> of decoded values for
+    /// convenience in eval rules.
+    pub fn as_float_tensor(&self) -> Option<(&[usize], Vec<f64>)> {
+        match self {
+            Value::FloatTensor { shape, data } => {
+                let floats: Vec<f64> =
+                    data.iter().map(|b| f64::from_bits(*b)).collect();
+                Some((shape, floats))
+            }
+            _ => None,
+        }
+    }
 }
 
 impl fmt::Display for Value {
@@ -250,6 +327,21 @@ impl fmt::Display for Value {
             Value::Float(bits) => {
                 let v = f64::from_bits(*bits);
                 write!(f, "{v}f")
+            }
+            // R19: FloatTensor uses 'FT' prefix to distinguish
+            // from the integer Tensor.
+            Value::FloatTensor { shape, data } => {
+                let shape_str = shape
+                    .iter()
+                    .map(|s| s.to_string())
+                    .collect::<Vec<_>>()
+                    .join("x");
+                let data_str = data
+                    .iter()
+                    .map(|b| format!("{}", f64::from_bits(*b)))
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                write!(f, "FT<{shape_str}>[{data_str}]")
             }
         }
     }

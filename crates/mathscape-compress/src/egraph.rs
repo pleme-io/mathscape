@@ -110,6 +110,16 @@ pub fn term_to_recexpr(term: &Term, expr: &mut RecExpr<MathscapeLang>) -> Id {
         // (same bits) are e-graph-equal. IEEE 754 NaN would be
         // problematic but kernel never sees NaN.
         Term::Number(Value::Float(bits)) => expr.add(MathscapeLang::Num(*bits)),
+        // R19: FloatTensor — hashed into a u64 for e-graph
+        // identity, similar to Tensor.
+        Term::Number(Value::FloatTensor { shape, data }) => {
+            use std::collections::hash_map::DefaultHasher;
+            use std::hash::{Hash, Hasher};
+            let mut h = DefaultHasher::new();
+            shape.hash(&mut h);
+            data.hash(&mut h);
+            expr.add(MathscapeLang::Num(h.finish()))
+        }
         Term::Var(v) => {
             let id_node = expr.add(MathscapeLang::Num(*v as u64));
             expr.add(MathscapeLang::Var([id_node]))
