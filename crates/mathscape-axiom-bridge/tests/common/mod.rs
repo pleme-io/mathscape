@@ -1,6 +1,11 @@
 //! Shared test helpers for autonomous-traversal and flex-multi-layer
 //! integration tests.
 //!
+//! `experiment` submodule (2026-04-18): the mathscape experiment
+//! harness — parameterizes apparatus-level discovery experiments
+//! as data, enabling a 100+ experiment catalog to probe the
+//! discovery space systematically.
+//!
 //! Extracted 2026-04-18 to de-duplicate ~500 lines of term builders,
 //! zoo corpora, and the procedural generator across two test files.
 //! Kept intentionally thin — these are pure construction helpers,
@@ -12,6 +17,8 @@
 //! module convention: each test file can `mod common;` to pull it in.
 
 #![allow(dead_code)]
+
+pub mod experiment;
 
 use mathscape_core::{term::Term, value::Value};
 
