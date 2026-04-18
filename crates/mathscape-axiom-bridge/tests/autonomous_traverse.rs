@@ -1399,6 +1399,276 @@ fn run_traversal_pure_procedural_with_library(
 }
 
 #[test]
+#[ignore = "phase I: subterm AU on a shared-subterm-dense corpus, ~5s, --ignored"]
+fn phase_i_crafted_shared_subterm_corpus() {
+    // Phase I penetration test on a CRAFTED corpus where subterm AU
+    // has something to find. Classical procedural corpora are random
+    // — sharing subterms by chance at low probability. Here we
+    // construct pairs with deliberate shared-subterm structure:
+    //
+    //   add(mul(n, 2), 0)    ← has mul(n, 2) as subterm
+    //   mul(mul(n, 2), 3)    ← has mul(n, 2) as subterm
+    //   add(add(n, k), 0)    ← has add(n, k) as subterm
+    //   mul(add(n, k), 3)    ← has add(n, k) as subterm
+    //
+    // Root AU across these pairs sees "?op(?x, ?y) => ?" (trivial
+    // root match). Subterm AU should see the shared inner structure
+    // like mul(?n, 2) or add(?n, ?k).
+    use common::{apply, nat, var};
+    use mathscape_compress::extract::ExtractConfig as EC;
+
+    let mut crafted: Vec<Term> = Vec::new();
+    for n in 1..=10u64 {
+        // add(mul(n, 2), 0) and mul(mul(n, 2), 3): share mul(n, 2)
+        crafted.push(apply(var(2), vec![apply(var(3), vec![nat(n), nat(2)]), nat(0)]));
+        crafted.push(apply(var(3), vec![apply(var(3), vec![nat(n), nat(2)]), nat(3)]));
+        // add(add(n, 1), 0) and mul(add(n, 1), 5): share add(n, 1)
+        crafted.push(apply(var(2), vec![apply(var(2), vec![nat(n), nat(1)]), nat(0)]));
+        crafted.push(apply(var(3), vec![apply(var(2), vec![nat(n), nat(1)]), nat(5)]));
+    }
+
+    let ec = EC {
+        min_shared_size: 2,
+        min_matches: 2,
+        max_new_rules: 10,
+    };
+
+    // Vanilla extraction over crafted corpus
+    let mut next_id_v: mathscape_core::term::SymbolId = 1;
+    let rules_v = mathscape_compress::extract::extract_rules(
+        &crafted,
+        &[],
+        &mut next_id_v,
+        &ec,
+    );
+    // Subterm AU extraction over the same corpus
+    let mut next_id_s: mathscape_core::term::SymbolId = 1;
+    let rules_s = mathscape_compress::extract::extract_rules_with_options(
+        &crafted,
+        &[],
+        &mut next_id_s,
+        &ec,
+        true,
+    );
+
+    println!("\n╔══════════════════════════════════════════════════════╗");
+    println!("║ PHASE I — CRAFTED SHARED-SUBTERM CORPUS              ║");
+    println!("╚══════════════════════════════════════════════════════╝");
+    println!("\n▶ Crafted corpus (40 terms with deliberate shared subterms)");
+    println!("  Shapes: add(mul(n,2), 0), mul(mul(n,2), 3), add(add(n,1), 0), mul(add(n,1), 5)");
+    println!("  Shared inner subterms: mul(n,2), add(n,1)");
+
+    println!("\n▶ Vanilla root-AU extraction ({} rules)", rules_v.len());
+    for rule in &rules_v {
+        let lhs = mathscape_core::eval::anonymize_term(&rule.lhs);
+        let rhs = mathscape_core::eval::anonymize_term(&rule.rhs);
+        println!("    {} :: {} => {}", rule.name, lhs, rhs);
+    }
+
+    println!("\n▶ Subterm-AU extraction ({} rules)", rules_s.len());
+    for rule in &rules_s {
+        let lhs = mathscape_core::eval::anonymize_term(&rule.lhs);
+        let rhs = mathscape_core::eval::anonymize_term(&rule.rhs);
+        println!("    {} :: {} => {}", rule.name, lhs, rhs);
+    }
+
+    let vanilla_lhs: std::collections::HashSet<String> = rules_v
+        .iter()
+        .map(|r| format!("{}", mathscape_core::eval::anonymize_term(&r.lhs)))
+        .collect();
+    let subterm_lhs: std::collections::HashSet<String> = rules_s
+        .iter()
+        .map(|r| format!("{}", mathscape_core::eval::anonymize_term(&r.lhs)))
+        .collect();
+    let new_under_subterm: Vec<&String> = subterm_lhs
+        .difference(&vanilla_lhs)
+        .collect();
+    let lost_under_subterm: Vec<&String> = vanilla_lhs
+        .difference(&subterm_lhs)
+        .collect();
+
+    println!("\n▶ Shape delta (anonymized)");
+    println!("  new patterns under subterm AU: {}", new_under_subterm.len());
+    for p in &new_under_subterm {
+        println!("    + {p}");
+    }
+    println!("  patterns lost under subterm AU: {}", lost_under_subterm.len());
+    for p in &lost_under_subterm {
+        println!("    − {p}");
+    }
+}
+
+#[test]
+#[ignore = "phase I: subterm AU vs bettyfine — does new machinery produce a non-trivial bettyfine? ~15s, --ignored"]
+fn phase_i_subterm_au_bettyfine() {
+    // Phase I gate: compare bettyfine under subterm-AU-enabled
+    // machinery vs vanilla root-only AU. If the modal basin's rule
+    // content is structurally different, subterm AU genuinely
+    // extends the machine's reach into the mathscape. If it's the
+    // same canonical trivial form, phase I didn't penetrate further
+    // at this machinery scale (need phase J or K).
+    use mathscape_compress::extract::ExtractConfig as EC;
+    use std::collections::HashMap;
+
+    const N_SEEDS: u64 = 64;
+    const BUDGET: usize = 15;
+    const DEPTH: usize = 4;
+    let ec = EC {
+        min_shared_size: 2,
+        min_matches: 2,
+        max_new_rules: 10,
+    };
+
+    let mut vanilla_basins: HashMap<Vec<(String, String)>, usize> = HashMap::new();
+    let mut vanilla_rules_per_basin: HashMap<
+        Vec<(String, String)>,
+        Vec<mathscape_core::eval::RewriteRule>,
+    > = HashMap::new();
+    let mut subterm_basins: HashMap<Vec<(String, String)>, usize> = HashMap::new();
+    let mut subterm_rules_per_basin: HashMap<
+        Vec<(String, String)>,
+        Vec<mathscape_core::eval::RewriteRule>,
+    > = HashMap::new();
+
+    for seed in 1..=N_SEEDS {
+        // Vanilla
+        let v = run_traversal_pure_procedural_with_extract(seed, BUDGET, DEPTH, ec.clone());
+        let v_fp = structural_fingerprint(&v.axiomatized_rules_full);
+        *vanilla_basins.entry(v_fp.clone()).or_default() += 1;
+        vanilla_rules_per_basin
+            .entry(v_fp)
+            .or_insert(v.axiomatized_rules_full);
+
+        // Subterm AU
+        let s = run_with_subterm_au(seed, BUDGET, DEPTH, ec.clone());
+        let s_fp = structural_fingerprint(&s.axiomatized_rules_full);
+        *subterm_basins.entry(s_fp.clone()).or_default() += 1;
+        subterm_rules_per_basin
+            .entry(s_fp)
+            .or_insert(s.axiomatized_rules_full);
+    }
+
+    let v_modal_fp = vanilla_basins
+        .iter()
+        .max_by_key(|(_, c)| *c)
+        .map(|(fp, _)| fp.clone())
+        .unwrap_or_default();
+    let v_modal_count = *vanilla_basins.get(&v_modal_fp).unwrap_or(&0);
+    let s_modal_fp = subterm_basins
+        .iter()
+        .max_by_key(|(_, c)| *c)
+        .map(|(fp, _)| fp.clone())
+        .unwrap_or_default();
+    let s_modal_count = *subterm_basins.get(&s_modal_fp).unwrap_or(&0);
+
+    println!("\n╔══════════════════════════════════════════════════════╗");
+    println!("║ PHASE I — SUBTERM AU vs CANONICAL BETTYFINE          ║");
+    println!("╚══════════════════════════════════════════════════════╝");
+    println!("\n▶ Vanilla (root-only AU)");
+    println!("  basins: {}", vanilla_basins.len());
+    println!("  modal : {}/{N_SEEDS} ({:.1}%)",
+        v_modal_count, v_modal_count as f64 / N_SEEDS as f64 * 100.0);
+    if let Some(rules) = vanilla_rules_per_basin.get(&v_modal_fp) {
+        for rule in rules {
+            let lhs_anon = mathscape_core::eval::anonymize_term(&rule.lhs);
+            let rhs_anon = mathscape_core::eval::anonymize_term(&rule.rhs);
+            println!("    {} :: {} => {}", rule.name, lhs_anon, rhs_anon);
+        }
+    }
+
+    println!("\n▶ Subterm AU enabled");
+    println!("  basins: {}", subterm_basins.len());
+    println!("  modal : {}/{N_SEEDS} ({:.1}%)",
+        s_modal_count, s_modal_count as f64 / N_SEEDS as f64 * 100.0);
+    if let Some(rules) = subterm_rules_per_basin.get(&s_modal_fp) {
+        for rule in rules {
+            let lhs_anon = mathscape_core::eval::anonymize_term(&rule.lhs);
+            let rhs_anon = mathscape_core::eval::anonymize_term(&rule.rhs);
+            println!("    {} :: {} => {}", rule.name, lhs_anon, rhs_anon);
+        }
+    }
+
+    let same_shape = v_modal_fp == s_modal_fp;
+    println!("\n▶ Verdict");
+    if same_shape {
+        println!("  SAME BETTYFINE — subterm AU didn't produce a structurally");
+        println!("  different modal basin at this machinery scale. Same");
+        println!("  canonical trivial form emerges. Either subterm AU isn't");
+        println!("  producing new candidate patterns that survive the prover,");
+        println!("  or those patterns are subsumed by the canonical ones.");
+    } else {
+        println!("  NEW BETTYFINE — subterm AU unlocked a different modal");
+        println!("  basin. The machine now discovers structure invisible to");
+        println!("  root-only AU. This IS the penetration.");
+    }
+}
+
+fn run_with_subterm_au(
+    seed_offset: u64,
+    procedural_budget: usize,
+    max_depth: usize,
+    extract_config: mathscape_compress::extract::ExtractConfig,
+) -> TraversalReportWithLibrary {
+    let mut zoo: Vec<(String, Vec<Term>)> = Vec::new();
+    for i in 1..=procedural_budget as u64 {
+        let seed = seed_offset.wrapping_add(i);
+        let depth = 2 + (i as usize % (max_depth - 1).max(1));
+        let count = 16 + (i as usize % 8);
+        zoo.push((
+            format!("proc-s{seed}-d{depth}"),
+            procedural(seed, depth, count),
+        ));
+    }
+    let base =
+        CompressionGenerator::new(extract_config.clone(), 1).with_subterm_au();
+    let meta = MetaPatternGenerator::new(
+        ExtractConfig {
+            min_shared_size: 1,
+            min_matches: 2,
+            max_new_rules: 12,
+        },
+        10_000,
+    );
+    let mut epoch = Epoch::new(
+        CompositeGenerator::new(base, meta),
+        mathscape_reward::StatisticalProver::new(
+            mathscape_reward::reward::RewardConfig::default(),
+            0.0,
+        ),
+        RuleEmitter,
+        InMemoryRegistry::new(),
+    );
+    for (_, corpus) in &zoo {
+        for _ in 0..3 {
+            let _ = epoch.step_with_action(
+                corpus,
+                mathscape_core::control::EpochAction::Discover,
+            );
+        }
+        let _ = epoch.step_with_action(
+            corpus,
+            mathscape_core::control::EpochAction::Reinforce,
+        );
+    }
+    let mut names = Vec::new();
+    let mut full = Vec::new();
+    for artifact in epoch.registry.all() {
+        let s = epoch
+            .registry
+            .status_of(artifact.content_hash)
+            .unwrap_or_else(|| artifact.certificate.status.clone());
+        if matches!(s, ProofStatus::Axiomatized) {
+            names.push(artifact.rule.name.clone());
+            full.push(artifact.rule.clone());
+        }
+    }
+    TraversalReportWithLibrary {
+        axiomatized_rule_names: names,
+        axiomatized_rules_full: full,
+    }
+}
+
+#[test]
 #[ignore = "phase M10: bettyfine uniqueness probe — do different configs produce different bettyfines?, ~30s, --ignored"]
 fn bettyfine_family_probe() {
     // User's question: "bettyfine seems a bit not unique so far

@@ -28,13 +28,32 @@ impl Default for ExtractConfig {
 /// Extract new rewrite rules from a corpus by pairwise anti-unification.
 ///
 /// Samples pairs of expressions, anti-unifies them, and promotes
-/// patterns that appear frequently into named rules.
+/// patterns that appear frequently into named rules. Backward-
+/// compatible wrapper around `extract_rules_with_options` with
+/// `subterm_au = false` (classical root-only AU).
 pub fn extract_rules(
     corpus: &[Term],
     existing_library: &[RewriteRule],
     next_symbol_id: &mut SymbolId,
     config: &ExtractConfig,
 ) -> Vec<RewriteRule> {
+    extract_rules_with_options(corpus, existing_library, next_symbol_id, config, false)
+}
+
+/// Phase I-aware extraction. When `subterm_au = true`, each pair is
+/// anti-unified at multiple positions (root + subterms) and all
+/// resulting candidates enter the selection pool. This unlocks
+/// patterns whose roots differ but whose inner structure matches —
+/// invisible to root-only AU. Default `extract_rules` passes
+/// `false` to preserve existing bettyfine measurements.
+pub fn extract_rules_with_options(
+    corpus: &[Term],
+    existing_library: &[RewriteRule],
+    next_symbol_id: &mut SymbolId,
+    config: &ExtractConfig,
+    subterm_au: bool,
+) -> Vec<RewriteRule> {
+    use crate::antiunify::subterm_anti_unify;
     if corpus.len() < 2 {
         return vec![];
     }
@@ -52,10 +71,26 @@ pub fn extract_rules(
                 break 'outer;
             }
 
-            let result = anti_unify(&corpus[i], &corpus[j]);
-
-            if result.shared_size >= config.min_shared_size && result.var_count > 0 {
-                candidates.push((result, corpus[i].clone(), corpus[j].clone()));
+            if subterm_au {
+                // Phase I: collect multiple candidates per pair
+                // from subterm-level AU.
+                let results = subterm_anti_unify(
+                    &corpus[i],
+                    &corpus[j],
+                    config.min_shared_size,
+                );
+                for result in results {
+                    if result.shared_size >= config.min_shared_size
+                        && result.var_count > 0
+                    {
+                        candidates.push((result, corpus[i].clone(), corpus[j].clone()));
+                    }
+                }
+            } else {
+                let result = anti_unify(&corpus[i], &corpus[j]);
+                if result.shared_size >= config.min_shared_size && result.var_count > 0 {
+                    candidates.push((result, corpus[i].clone(), corpus[j].clone()));
+                }
             }
             pair_count += 1;
         }

@@ -22,6 +22,92 @@ pub struct AntiUnifyResult {
     pub var_count: usize,
 }
 
+/// Phase I extension: subterm-aware anti-unification.
+///
+/// Classical `anti_unify` returns ONE pattern per (t1, t2) pair — the
+/// root-level least general generalization. When roots differ, the
+/// pattern is just a fresh variable at root, losing all inner
+/// structure the terms might share at subterm positions.
+///
+/// `subterm_anti_unify` additionally tries anti-unifying at subterm
+/// positions: each subterm of t1 against t2, each subterm of t2
+/// against t1. The resulting set includes the root-level result plus
+/// any subterm-level candidates whose `shared_size` exceeds a
+/// threshold. This lets `extract_rules` surface patterns invisible
+/// to root-only matching.
+///
+/// Example:
+///   t1 = add(mul(x, 2), 0)
+///   t2 = mul(x, 3)
+///   Root anti-unify: fresh var at root, shared_size ≈ 1
+///   Subterm anti-unify also tries: (mul(x, 2), mul(x, 3))
+///     → shared: mul(?x, ?y), shared_size 3
+///
+/// The subterm variant is additive — it extends what `extract_rules`
+/// can see without replacing classical AU.
+pub fn subterm_anti_unify(t1: &Term, t2: &Term, min_shared_size: usize) -> Vec<AntiUnifyResult> {
+    let mut results = Vec::new();
+    // Always include the root-level result.
+    results.push(anti_unify(t1, t2));
+
+    // Each subterm of t1 paired with t2.
+    for sub1 in collect_subterms(t1) {
+        let r = anti_unify(&sub1, t2);
+        if r.shared_size >= min_shared_size {
+            results.push(r);
+        }
+    }
+    // Each subterm of t2 paired with t1.
+    for sub2 in collect_subterms(t2) {
+        let r = anti_unify(t1, &sub2);
+        if r.shared_size >= min_shared_size {
+            results.push(r);
+        }
+    }
+
+    // Dedup by pattern structural equality, keep max shared_size.
+    results.sort_by(|a, b| b.shared_size.cmp(&a.shared_size));
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    let mut unique = Vec::new();
+    for r in results {
+        let key = format!("{}", r.pattern);
+        if seen.insert(key) {
+            unique.push(r);
+        }
+    }
+    unique
+}
+
+/// Collect all non-leaf subterms of a term (excluding the term
+/// itself). Used by subterm_anti_unify to enumerate positions where
+/// subterm-level shared structure might live.
+fn collect_subterms(t: &Term) -> Vec<Term> {
+    let mut out = Vec::new();
+    collect_subterms_inner(t, &mut out, true);
+    out
+}
+
+fn collect_subterms_inner(t: &Term, out: &mut Vec<Term>, is_root: bool) {
+    if !is_root {
+        out.push(t.clone());
+    }
+    match t {
+        Term::Apply(f, args) => {
+            collect_subterms_inner(f, out, false);
+            for a in args {
+                collect_subterms_inner(a, out, false);
+            }
+        }
+        Term::Fn(_, body) => collect_subterms_inner(body, out, false),
+        Term::Symbol(_, args) => {
+            for a in args {
+                collect_subterms_inner(a, out, false);
+            }
+        }
+        _ => {}
+    }
+}
+
 /// Anti-unify two terms: find their most specific common generalization.
 ///
 /// Fresh-var counter starts above the maximum var id present in either
@@ -212,6 +298,57 @@ mod tests {
         // The Apply structure is shared but the function differs
         assert!(result.shared_size >= 1, "Apply node itself should be shared");
         assert_eq!(result.var_count, 1, "function position should be a variable");
+    }
+
+    #[test]
+    fn subterm_anti_unify_finds_shared_subterm_across_different_roots() {
+        // Phase I test: t1 and t2 have different root operators but
+        // share an inner subterm. Classical AU gives a fresh var at
+        // root, shared_size ≈ 1. Subterm AU should find the shared
+        // inner structure.
+        let t1 = apply(var(2), vec![apply(var(3), vec![nat(5), nat(6)]), nat(0)]);
+        // = add(mul(5, 6), 0)
+        let t2 = apply(var(3), vec![nat(5), nat(6)]);
+        // = mul(5, 6)  (exact subterm of t1)
+        let results = subterm_anti_unify(&t1, &t2, 2);
+        assert!(
+            results.iter().any(|r| r.shared_size >= 3),
+            "subterm AU should find the shared mul(5, 6) subterm with \
+             shared_size >= 3; got results: {:?}",
+            results.iter().map(|r| r.shared_size).collect::<Vec<_>>(),
+        );
+    }
+
+    #[test]
+    fn subterm_anti_unify_includes_root_result() {
+        // Even when subterm results are better, the root-level
+        // result should still appear in the output.
+        let t1 = apply(var(2), vec![nat(1), nat(2)]);
+        let t2 = apply(var(2), vec![nat(3), nat(4)]);
+        let results = subterm_anti_unify(&t1, &t2, 1);
+        assert!(
+            !results.is_empty(),
+            "subterm AU should always return at least the root result"
+        );
+    }
+
+    #[test]
+    fn subterm_anti_unify_dedups_equivalent_patterns() {
+        // If multiple subterm pairs anti-unify to the same pattern
+        // (e.g., repeated structure), results should be deduped.
+        let t1 = apply(var(2), vec![nat(1), nat(1)]);
+        let t2 = apply(var(2), vec![nat(2), nat(2)]);
+        let results = subterm_anti_unify(&t1, &t2, 1);
+        // At minimum the root pattern. Any additional entries should
+        // be structurally distinct from each other.
+        let mut patterns: std::collections::HashSet<String> = std::collections::HashSet::new();
+        for r in &results {
+            assert!(
+                patterns.insert(format!("{}", r.pattern)),
+                "duplicate pattern in results: {}",
+                r.pattern
+            );
+        }
     }
 
     #[test]

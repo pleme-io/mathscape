@@ -6,7 +6,7 @@
 //! library as a `Vec<RewriteRule>`, asks `extract_rules` for new
 //! patterns, and wraps each as a `Candidate`.
 
-use crate::extract::{extract_rules, ExtractConfig};
+use crate::extract::ExtractConfig;
 use mathscape_core::{
     epoch::{Artifact, Candidate, Generator},
     eval::{pattern_equivalent, pattern_match, RewriteRule},
@@ -83,6 +83,12 @@ pub struct CompressionGenerator {
     pub next_symbol_id: SymbolId,
     /// Origin tag attached to every emitted candidate.
     pub origin: String,
+    /// Phase I: enable subterm-aware anti-unification. When true,
+    /// `propose` uses `extract_rules_with_options(..., true)`, so
+    /// candidates span subterm positions, not just roots. Unlocks
+    /// patterns invisible to root-only AU. Off by default to
+    /// preserve the established bettyfine.
+    pub subterm_au: bool,
 }
 
 impl CompressionGenerator {
@@ -92,7 +98,17 @@ impl CompressionGenerator {
             config,
             next_symbol_id,
             origin: "compress/antiunify".into(),
+            subterm_au: false,
         }
+    }
+
+    /// Phase I: builder that enables subterm-aware AU. Candidates
+    /// include patterns from subterm positions, not just roots.
+    #[must_use]
+    pub fn with_subterm_au(mut self) -> Self {
+        self.subterm_au = true;
+        self.origin = "compress/subterm-antiunify".into();
+        self
     }
 }
 
@@ -125,11 +141,12 @@ impl Generator for CompressionGenerator {
                 .collect()
         };
 
-        let rules = extract_rules(
+        let rules = crate::extract::extract_rules_with_options(
             &reduced_corpus,
             &existing,
             &mut self.next_symbol_id,
             &self.config,
+            self.subterm_au,
         );
         // Generator-side dedup (inter-batch AND intra-batch): drop
         // any candidate whose lhs is pattern-equivalent to either an
