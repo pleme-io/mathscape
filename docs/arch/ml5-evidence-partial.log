@@ -1,0 +1,755 @@
+warning: constant `EXTRACT_CONFIGS` is never used
+  --> crates/mathscape-axiom-bridge/tests/edge_riding.rs:87:7
+   |
+87 | const EXTRACT_CONFIGS: &[ExtractConfig] = &[
+   |       ^^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: field `corpora` is never read
+   --> crates/mathscape-axiom-bridge/tests/edge_riding.rs:213:5
+    |
+210 | struct Provenance {
+    |        ---------- field in this struct
+...
+213 |     corpora: BTreeSet<&'static str>,
+    |     ^^^^^^^
+    |
+    = note: `Provenance` has a derived impl for the trait `Clone`, but this is intentionally ignored during dead code analysis
+
+warning: `mathscape-axiom-bridge` (test "edge_riding") generated 2 warnings
+    Finished `release` profile [optimized] target(s) in 0.17s
+     Running tests/edge_riding.rs (target/release/deps/edge_riding-82ffe584809ab77c)
+
+running 1 test
+
+╔══════════════════════════════════════════════════════════════════════╗
+║ PHASE L5 — EDGE-RIDING LOOP (perpetual discovery)                    ║
+║ cycles=30  probes/cycle=4000  keep_top=6  mutants=3             ║
+║ correctness criterion: nonzero novelty rate across every cycle       ║
+╚══════════════════════════════════════════════════════════════════════╝
+
+── cycle 1 / 30 ─────  pool size: 8  substrate size: 0  ledger size: 0
+  sub-campaign: 4000 probes, 209 structural rules, 8 apparatuses with yield
+  new theorems discovered: 16
+    + (?v2 (?v3 1 ?v100) (?v3 1 ?v101)) → (?v2 ?v100 ?v101)
+    + (?v2 (?v3 1 ?v100) (?v3 1 ?v101)) → (?v2 ?v101 ?v100)
+    + (?v2 (?v3 1 ?v100) (?v3 1 ?v101)) → (?v2 ?v100 (?v2 ?v101 0))
+    + (?v2 (?v3 1 ?v100) (?v3 1 ?v101)) → (?v2 ?v100 (?v3 ?v101 1))
+    + (?v2 (?v3 1 ?v100) (?v3 1 ?v101)) → (?v2 ?v100 (?v2 0 ?v101))
+    + (?v2 (?v3 1 ?v100) (?v3 1 ?v101)) → (?v2 ?v100 (?v3 1 ?v101))
+    + (?v2 (?v3 1 ?v100) (?v3 1 ?v101)) → (?v2 ?v101 (?v2 ?v100 0))
+    + (?v2 (?v3 1 ?v100) (?v3 1 ?v101)) → (?v2 ?v101 (?v3 ?v100 1))
+    + (?v2 (?v3 1 ?v100) (?v3 1 ?v101)) → (?v2 ?v101 (?v2 0 ?v100))
+    + (?v2 (?v3 1 ?v100) (?v3 1 ?v101)) → (?v2 ?v101 (?v3 1 ?v100))
+    + (?v2 (?v3 1 ?v100) (?v3 1 ?v101)) → (?v2 0 (?v2 ?v100 ?v101))
+    + (?v2 (?v3 1 ?v100) (?v3 1 ?v101)) → (?v2 0 (?v2 ?v101 ?v100))
+    + (?v2 (?v3 1 ?v100) (?v3 1 ?v101)) → (?v3 1 (?v2 ?v100 ?v101))
+    + (?v2 (?v3 1 ?v100) (?v3 1 ?v101)) → (?v3 1 (?v2 ?v101 ?v100))
+    + (?v2 (?v3 1 ?v100) (?v3 1 ?v101)) → (?v2 (?v2 ?v100 ?v101) 0)
+    + (?v2 (?v3 1 ?v100) (?v3 1 ?v101)) → (?v3 (?v2 ?v100 ?v101) 1)
+  rustified: 4 reducing → substrate | 0 equivalence → ledger only | 12 semantic duplicates rejected
+  top apparatuses (by theorem yield): ["cr+nov=25", "max-pair=24", "novelty-only=24", "meta-heavy=24", "clamped=23", "canonical=21"]
+  cycle elapsed: 5.5s
+
+── cycle 2 / 30 ─────  pool size: 24  substrate size: 4  ledger size: 4
+  sub-campaign: 4000 probes, 185 structural rules, 24 apparatuses with yield
+  new theorems discovered: 16
+    + (?v3 (?v2 ?v100 0) (?v2 ?v101 0)) → (?v3 ?v100 ?v101)
+    + (?v3 (?v2 ?v100 0) (?v2 ?v101 0)) → (?v3 ?v101 ?v100)
+    + (?v3 (?v2 ?v100 0) (?v2 ?v101 0)) → (?v3 ?v100 (?v2 ?v101 0))
+    + (?v3 (?v2 ?v100 0) (?v2 ?v101 0)) → (?v3 ?v100 (?v3 ?v101 1))
+    + (?v3 (?v2 ?v100 0) (?v2 ?v101 0)) → (?v3 ?v100 (?v2 0 ?v101))
+    + (?v3 (?v2 ?v100 0) (?v2 ?v101 0)) → (?v3 ?v100 (?v3 1 ?v101))
+    + (?v3 (?v2 ?v100 0) (?v2 ?v101 0)) → (?v3 ?v101 (?v2 ?v100 0))
+    + (?v3 (?v2 ?v100 0) (?v2 ?v101 0)) → (?v3 ?v101 (?v3 ?v100 1))
+    + (?v3 (?v2 ?v100 0) (?v2 ?v101 0)) → (?v3 ?v101 (?v2 0 ?v100))
+    + (?v3 (?v2 ?v100 0) (?v2 ?v101 0)) → (?v3 ?v101 (?v3 1 ?v100))
+    + (?v3 (?v2 ?v100 0) (?v2 ?v101 0)) → (?v2 0 (?v3 ?v100 ?v101))
+    + (?v3 (?v2 ?v100 0) (?v2 ?v101 0)) → (?v2 0 (?v3 ?v101 ?v100))
+    + (?v3 (?v2 ?v100 0) (?v2 ?v101 0)) → (?v3 1 (?v3 ?v100 ?v101))
+    + (?v3 (?v2 ?v100 0) (?v2 ?v101 0)) → (?v3 1 (?v3 ?v101 ?v100))
+    + (?v3 (?v2 ?v100 0) (?v2 ?v101 0)) → (?v2 (?v3 ?v100 ?v101) 0)
+    + (?v3 (?v2 ?v100 0) (?v2 ?v101 0)) → (?v3 (?v3 ?v100 ?v101) 1)
+  rustified: 4 reducing → substrate | 0 equivalence → ledger only | 12 semantic duplicates rejected
+  top apparatuses (by theorem yield): ["clamped-crgate-0=16", "clamped-crgate-2=15", "novelty-only-crgate-1=14", "max-pair-crgate-1=13", "cr+nov-crmult-1=12", "canonical-meta+-1=12"]
+  cycle elapsed: 4.6s
+
+── cycle 3 / 30 ─────  pool size: 24  substrate size: 8  ledger size: 8
+  sub-campaign: 4000 probes, 213 structural rules, 24 apparatuses with yield
+  new theorems discovered: 16
+    + (?v2 ?v100 ?v101) → (?v2 ?v100 ?v101)
+    + (?v2 ?v100 ?v101) → (?v2 ?v101 ?v100)
+    + (?v2 ?v100 ?v101) → (?v2 ?v100 (?v2 ?v101 0))
+    + (?v2 ?v100 ?v101) → (?v2 ?v100 (?v3 ?v101 1))
+    + (?v2 ?v100 ?v101) → (?v2 ?v100 (?v2 0 ?v101))
+    + (?v2 ?v100 ?v101) → (?v2 ?v100 (?v3 1 ?v101))
+    + (?v2 ?v100 ?v101) → (?v2 ?v101 (?v2 ?v100 0))
+    + (?v2 ?v100 ?v101) → (?v2 ?v101 (?v3 ?v100 1))
+    + (?v2 ?v100 ?v101) → (?v2 ?v101 (?v2 0 ?v100))
+    + (?v2 ?v100 ?v101) → (?v2 ?v101 (?v3 1 ?v100))
+    + (?v2 ?v100 ?v101) → (?v2 0 (?v2 ?v100 ?v101))
+    + (?v2 ?v100 ?v101) → (?v2 0 (?v2 ?v101 ?v100))
+    + (?v2 ?v100 ?v101) → (?v3 1 (?v2 ?v100 ?v101))
+    + (?v2 ?v100 ?v101) → (?v3 1 (?v2 ?v101 ?v100))
+    + (?v2 ?v100 ?v101) → (?v2 (?v2 ?v100 ?v101) 0)
+    + (?v2 ?v100 ?v101) → (?v3 (?v2 ?v100 ?v101) 1)
+  rustified: 0 reducing → substrate | 4 equivalence → ledger only | 12 semantic duplicates rejected
+  top apparatuses (by theorem yield): ["clamped-crgate-0-maxzero-1=18", "canonical-meta+-1-crgate-1=17", "max-pair-crgate-1-x2-0=15", "novelty-only-crgate-1=13", "clamped-crgate-0-maxzero-2=13", "max-pair-crgate-1-clamp-1=13"]
+  cycle elapsed: 4.6s
+
+── cycle 4 / 30 ─────  pool size: 24  substrate size: 8  ledger size: 12
+  sub-campaign: 4000 probes, 225 structural rules, 24 apparatuses with yield
+  new theorems discovered: 16
+    + (?v2 ?v100 ?v101) → (?v2 ?v101 ?v100)
+    + (?v2 ?v100 ?v101) → (?v2 ?v100 (?v2 0 ?v101))
+    + (?v2 ?v100 ?v101) → (?v2 ?v100 (?v3 1 ?v101))
+    + (?v2 ?v100 ?v101) → (?v2 ?v101 (?v2 ?v100 0))
+    + (?v2 ?v100 ?v101) → (?v2 ?v101 (?v3 ?v100 1))
+    + (?v2 ?v100 ?v101) → (?v2 ?v101 (?v2 0 ?v100))
+    + (?v2 ?v100 ?v101) → (?v2 ?v101 (?v3 1 ?v100))
+    + (?v2 ?v100 ?v101) → (?v2 0 (?v2 ?v100 ?v101))
+    + (?v2 ?v100 ?v101) → (?v2 0 (?v2 ?v101 ?v100))
+    + (?v2 ?v100 ?v101) → (?v3 1 (?v2 ?v101 ?v100))
+    + (?v2 ?v100 ?v101) → (?v2 (?v2 ?v100 ?v101) 0)
+    + (?v2 ?v100 ?v101) → (?v3 (?v2 ?v100 ?v101) 1)
+    + (?v2 ?v100 ?v101) → (?v2 (?v2 ?v100 0) ?v101)
+    + (?v2 ?v100 ?v101) → (?v2 (?v3 ?v100 1) ?v101)
+    + (?v2 ?v100 ?v101) → (?v2 (?v2 ?v101 ?v100) 0)
+    + (?v2 ?v100 ?v101) → (?v3 (?v2 ?v101 ?v100) 1)
+  rustified: 0 reducing → substrate | 1 equivalence → ledger only | 15 semantic duplicates rejected
+  top apparatuses (by theorem yield): ["clamped-crgate-0-maxzero-1-x05-1=17", "clamped-crgate-0-maxzero-2-meta+-0=15", "clamped-crgate-0-maxzero-2-meta+-2=14", "max-pair-crgate-1-x2-0=13", "clamped-crgate-0-maxzero-2=13", "clamped-crgate-0-maxzero-1-x2-2=13"]
+  cycle elapsed: 4.7s
+
+── cycle 5 / 30 ─────  pool size: 24  substrate size: 8  ledger size: 13
+  sub-campaign: 4000 probes, 224 structural rules, 24 apparatuses with yield
+  new theorems discovered: 16
+    + (?v3 ?v100 ?v101) → (?v3 ?v100 ?v101)
+    + (?v3 ?v100 ?v101) → (?v3 ?v101 ?v100)
+    + (?v3 ?v100 ?v101) → (?v3 ?v100 (?v2 ?v101 0))
+    + (?v3 ?v100 ?v101) → (?v3 ?v100 (?v3 ?v101 1))
+    + (?v3 ?v100 ?v101) → (?v3 ?v100 (?v2 0 ?v101))
+    + (?v3 ?v100 ?v101) → (?v3 ?v100 (?v3 1 ?v101))
+    + (?v3 ?v100 ?v101) → (?v3 ?v101 (?v2 ?v100 0))
+    + (?v3 ?v100 ?v101) → (?v3 ?v101 (?v3 ?v100 1))
+    + (?v3 ?v100 ?v101) → (?v3 ?v101 (?v2 0 ?v100))
+    + (?v3 ?v100 ?v101) → (?v3 ?v101 (?v3 1 ?v100))
+    + (?v3 ?v100 ?v101) → (?v2 0 (?v3 ?v100 ?v101))
+    + (?v3 ?v100 ?v101) → (?v2 0 (?v3 ?v101 ?v100))
+    + (?v3 ?v100 ?v101) → (?v3 1 (?v3 ?v100 ?v101))
+    + (?v3 ?v100 ?v101) → (?v3 1 (?v3 ?v101 ?v100))
+    + (?v3 ?v100 ?v101) → (?v2 (?v3 ?v100 ?v101) 0)
+    + (?v3 ?v100 ?v101) → (?v3 (?v3 ?v100 ?v101) 1)
+  rustified: 0 reducing → substrate | 4 equivalence → ledger only | 12 semantic duplicates rejected
+  top apparatuses (by theorem yield): ["clamped-crgate-0-maxzero-1-x05-1-x2-1=18", "clamped-crgate-0-maxzero-1-x2-2-x2-1=17", "max-pair-crgate-1-x2-0-clamp-0=15", "clamped-crgate-0-maxzero-2-meta+-2=13", "clamped-crgate-0-maxzero-2=13", "clamped-crgate-0-maxzero-2-meta+-0-clamp-2=13"]
+  cycle elapsed: 4.8s
+
+── cycle 6 / 30 ─────  pool size: 24  substrate size: 8  ledger size: 17
+  sub-campaign: 4000 probes, 221 structural rules, 24 apparatuses with yield
+  new theorems discovered: 16
+    + (?v2 ?v100 ?v101) → (?v2 ?v101 ?v100)
+    + (?v2 ?v100 ?v101) → (?v2 ?v100 (?v2 0 ?v101))
+    + (?v2 ?v100 ?v101) → (?v2 ?v100 (?v3 1 ?v101))
+    + (?v2 ?v100 ?v101) → (?v2 ?v101 (?v2 ?v100 0))
+    + (?v2 ?v100 ?v101) → (?v2 ?v101 (?v3 ?v100 1))
+    + (?v2 ?v100 ?v101) → (?v2 ?v101 (?v2 0 ?v100))
+    + (?v2 ?v100 ?v101) → (?v2 ?v101 (?v3 1 ?v100))
+    + (?v2 ?v100 ?v101) → (?v2 0 (?v2 ?v100 ?v101))
+    + (?v2 ?v100 ?v101) → (?v2 0 (?v2 ?v101 ?v100))
+    + (?v2 ?v100 ?v101) → (?v3 1 (?v2 ?v101 ?v100))
+    + (?v2 ?v100 ?v101) → (?v2 (?v2 ?v100 ?v101) 0)
+    + (?v2 ?v100 ?v101) → (?v3 (?v2 ?v100 ?v101) 1)
+    + (?v2 ?v100 ?v101) → (?v2 (?v2 ?v100 0) ?v101)
+    + (?v2 ?v100 ?v101) → (?v2 (?v2 ?v101 ?v100) 0)
+    + (?v2 ?v100 ?v101) → (?v3 (?v2 ?v101 ?v100) 1)
+    + (?v2 ?v100 ?v101) → (?v2 (?v2 ?v101 0) ?v100)
+  rustified: 0 reducing → substrate | 0 equivalence → ledger only | 16 semantic duplicates rejected
+  top apparatuses (by theorem yield): ["clamped-crgate-0-maxzero-2-meta+-0-clamp-2-x05-1=17", "clamped-crgate-0-maxzero-2-meta+-2-maxzero-0=15", "clamped-crgate-0-maxzero-2-x05-0=14", "max-pair-crgate-1-x2-0-clamp-0=13", "clamped-crgate-0-maxzero-2=13", "clamped-crgate-0-maxzero-1-x2-2-x2-1-maxzero-2=13"]
+  cycle elapsed: 4.5s
+
+── cycle 7 / 30 ─────  pool size: 24  substrate size: 8  ledger size: 17
+  sub-campaign: 4000 probes, 227 structural rules, 24 apparatuses with yield
+  new theorems discovered: 16
+    + (?v3 ?v100 ?v101) → (?v3 ?v101 ?v100)
+    + (?v3 ?v100 ?v101) → (?v3 ?v100 (?v2 0 ?v101))
+    + (?v3 ?v100 ?v101) → (?v3 ?v100 (?v3 1 ?v101))
+    + (?v3 ?v100 ?v101) → (?v3 ?v101 (?v2 ?v100 0))
+    + (?v3 ?v100 ?v101) → (?v3 ?v101 (?v3 ?v100 1))
+    + (?v3 ?v100 ?v101) → (?v3 ?v101 (?v2 0 ?v100))
+    + (?v3 ?v100 ?v101) → (?v3 ?v101 (?v3 1 ?v100))
+    + (?v3 ?v100 ?v101) → (?v2 0 (?v3 ?v101 ?v100))
+    + (?v3 ?v100 ?v101) → (?v3 1 (?v3 ?v100 ?v101))
+    + (?v3 ?v100 ?v101) → (?v3 1 (?v3 ?v101 ?v100))
+    + (?v3 ?v100 ?v101) → (?v2 (?v3 ?v100 ?v101) 0)
+    + (?v3 ?v100 ?v101) → (?v3 (?v3 ?v100 ?v101) 1)
+    + (?v3 ?v100 ?v101) → (?v3 (?v2 ?v100 0) ?v101)
+    + (?v3 ?v100 ?v101) → (?v3 (?v3 ?v100 1) ?v101)
+    + (?v3 ?v100 ?v101) → (?v2 (?v3 ?v101 ?v100) 0)
+    + (?v3 ?v100 ?v101) → (?v3 (?v3 ?v101 ?v100) 1)
+  rustified: 0 reducing → substrate | 1 equivalence → ledger only | 15 semantic duplicates rejected
+  top apparatuses (by theorem yield): ["clamped-crgate-0-maxzero-2-meta+-0-clamp-2-x05-1-crgate-1=17", "clamped-crgate-0-maxzero-1-x2-2-x2-1-maxzero-2-maxzero-1=17", "clamped-crgate-0-maxzero-2-x2-0=15", "clamped-crgate-0-maxzero-2-x2-2=14", "clamped-crgate-0-maxzero-2-x05-0=13", "clamped-crgate-0-maxzero-2=13"]
+  cycle elapsed: 4.5s
+
+── cycle 8 / 30 ─────  pool size: 24  substrate size: 8  ledger size: 18
+  sub-campaign: 4000 probes, 231 structural rules, 24 apparatuses with yield
+  new theorems discovered: 16
+    + (?v3 ?v100 ?v101) → (?v3 ?v101 ?v100)
+    + (?v3 ?v100 ?v101) → (?v3 ?v100 (?v2 0 ?v101))
+    + (?v3 ?v100 ?v101) → (?v3 ?v100 (?v3 1 ?v101))
+    + (?v3 ?v100 ?v101) → (?v3 ?v101 (?v2 ?v100 0))
+    + (?v3 ?v100 ?v101) → (?v3 ?v101 (?v3 ?v100 1))
+    + (?v3 ?v100 ?v101) → (?v3 ?v101 (?v2 0 ?v100))
+    + (?v3 ?v100 ?v101) → (?v3 ?v101 (?v3 1 ?v100))
+    + (?v3 ?v100 ?v101) → (?v2 0 (?v3 ?v101 ?v100))
+    + (?v3 ?v100 ?v101) → (?v3 1 (?v3 ?v100 ?v101))
+    + (?v3 ?v100 ?v101) → (?v3 1 (?v3 ?v101 ?v100))
+    + (?v3 ?v100 ?v101) → (?v2 (?v3 ?v100 ?v101) 0)
+    + (?v3 ?v100 ?v101) → (?v3 (?v3 ?v100 ?v101) 1)
+    + (?v3 ?v100 ?v101) → (?v3 (?v3 ?v100 1) ?v101)
+    + (?v3 ?v100 ?v101) → (?v2 (?v3 ?v101 ?v100) 0)
+    + (?v3 ?v100 ?v101) → (?v3 (?v3 ?v101 ?v100) 1)
+    + (?v3 ?v100 ?v101) → (?v3 (?v2 ?v101 0) ?v100)
+  rustified: 0 reducing → substrate | 0 equivalence → ledger only | 16 semantic duplicates rejected
+  top apparatuses (by theorem yield): ["clamped-crgate-0-maxzero-2-meta+-0-clamp-2-x05-1-crgate-1-meta+-1=17", "clamped-crgate-0-maxzero-2-clamp-1=17", "clamped-crgate-0-maxzero-2-x2-2-crgate-0=15", "clamped-crgate-0-maxzero-2-x05-0-maxzero-0=14", "clamped-crgate-0-maxzero-2-x2-0=13", "clamped-crgate-0-maxzero-1-x2-2-x2-1-maxzero-2-maxzero-1-x05-2=13"]
+  cycle elapsed: 4.7s
+
+── cycle 9 / 30 ─────  pool size: 24  substrate size: 8  ledger size: 18
+  sub-campaign: 4000 probes, 221 structural rules, 24 apparatuses with yield
+  new theorems discovered: 16
+    + (?v3 ?v100 ?v101) → (?v3 ?v101 ?v100)
+    + (?v3 ?v100 ?v101) → (?v3 ?v100 (?v2 0 ?v101))
+    + (?v3 ?v100 ?v101) → (?v3 ?v100 (?v3 1 ?v101))
+    + (?v3 ?v100 ?v101) → (?v3 ?v101 (?v2 ?v100 0))
+    + (?v3 ?v100 ?v101) → (?v3 ?v101 (?v3 ?v100 1))
+    + (?v3 ?v100 ?v101) → (?v3 ?v101 (?v2 0 ?v100))
+    + (?v3 ?v100 ?v101) → (?v3 ?v101 (?v3 1 ?v100))
+    + (?v3 ?v100 ?v101) → (?v2 0 (?v3 ?v101 ?v100))
+    + (?v3 ?v100 ?v101) → (?v3 1 (?v3 ?v100 ?v101))
+    + (?v3 ?v100 ?v101) → (?v3 1 (?v3 ?v101 ?v100))
+    + (?v3 ?v100 ?v101) → (?v2 (?v3 ?v100 ?v101) 0)
+    + (?v3 ?v100 ?v101) → (?v3 (?v3 ?v100 ?v101) 1)
+    + (?v3 ?v100 ?v101) → (?v3 (?v3 ?v100 1) ?v101)
+    + (?v3 ?v100 ?v101) → (?v2 (?v3 ?v101 ?v100) 0)
+    + (?v3 ?v100 ?v101) → (?v3 (?v3 ?v101 ?v100) 1)
+    + (?v3 ?v100 ?v101) → (?v3 (?v2 ?v101 0) ?v100)
+  rustified: 0 reducing → substrate | 0 equivalence → ledger only | 16 semantic duplicates rejected
+  top apparatuses (by theorem yield): ["clamped-crgate-0-maxzero-1-x2-2-x2-1-maxzero-2-maxzero-1-x05-2-clamp-1=17", "clamped-crgate-0-maxzero-2-x2-0-clamp-0=15", "clamped-crgate-0-maxzero-2-x2-0-clamp-2=14", "clamped-crgate-0-maxzero-2-x2-2-crgate-0=13", "clamped-crgate-0-maxzero-2-x2-0=13", "clamped-crgate-0-maxzero-2-x2-2-crgate-0-maxzero-1=13"]
+  cycle elapsed: 4.7s
+
+  ⚠ SATURATION DETECTED — last 2 cycles produced 0 admissions
+    current mechanism: cms=5, ccap=30, cbd=4, sft=false, emss=2, vsa=24, emn=8
+    invoking saturation response...
+test edge_riding_loop has been running for over 60 seconds
+    ✓ self-mutation: BumpCandidateMaxSize(-1) (22.8s)
+    new mechanism: cms=4, ccap=30, cbd=4, sft=false, emss=2, vsa=24, emn=8
+
+── cycle 10 / 30 ─────  pool size: 24  substrate size: 8  ledger size: 18
+  sub-campaign: 4000 probes, 230 structural rules, 24 apparatuses with yield
+  new theorems discovered: 16
+    + (?v2 ?v100 ?v101) → (?v2 ?v101 ?v100)
+    + (?v3 ?v100 (?v2 ?v101 1)) → (?v3 ?v100 (?v1 ?v101))
+    + (?v3 ?v100 (?v2 ?v101 1)) → (?v3 (?v1 ?v101) ?v100)
+    + (?v3 ?v100 ?v101) → (?v3 ?v101 ?v100)
+    + (?v2 ?v100 0) → ?v100
+    + (?v2 ?v100 0) → (?v2 ?v100 0)
+    + (?v2 ?v100 0) → (?v3 ?v100 1)
+    + (?v2 ?v100 0) → (?v2 0 ?v100)
+    + (?v2 ?v100 0) → (?v3 1 ?v100)
+    + (?v2 ?v100 0) → (?v3 ?v100 (?v1 0))
+    + (?v2 ?v100 0) → (?v3 (?v1 0) ?v100)
+    + (?v3 ?v100 1) → ?v100
+    + (?v3 ?v100 1) → (?v2 ?v100 0)
+    + (?v3 ?v100 1) → (?v3 ?v100 1)
+    + (?v3 ?v100 1) → (?v2 0 ?v100)
+    + (?v3 ?v100 1) → (?v3 1 ?v100)
+  rustified: 4 reducing → substrate | 5 equivalence → ledger only | 7 semantic duplicates rejected
+  top apparatuses (by theorem yield): ["clamped-crgate-0-maxzero-2-x2-2-crgate-0-meta+-0=11", "clamped-crgate-0-maxzero-2-x2-0-crgate-0=11", "clamped-crgate-0-maxzero-2-x2-2-crgate-0-maxzero-1-maxzero-1=11", "clamped-crgate-0-maxzero-2-x2-0=10", "clamped-crgate-0-maxzero-2-x2-0-crgate-2=10", "clamped-crgate-0-maxzero-2-x2-0-clamp-0=9"]
+  cycle elapsed: 3.8s
+
+── cycle 11 / 30 ─────  pool size: 24  substrate size: 12  ledger size: 27
+  sub-campaign: 4000 probes, 221 structural rules, 24 apparatuses with yield
+  new theorems discovered: 16
+    + (?v2 ?v100 ?v101) → (?v2 ?v101 ?v100)
+    + (?v2 0 ?v100) → ?v100
+    + (?v2 0 ?v100) → (?v2 ?v100 0)
+    + (?v2 0 ?v100) → (?v3 ?v100 1)
+    + (?v2 0 ?v100) → (?v2 0 ?v100)
+    + (?v2 0 ?v100) → (?v3 1 ?v100)
+    + (?v2 0 ?v100) → (?v3 ?v100 (?v1 0))
+    + (?v2 0 ?v100) → (?v3 (?v1 0) ?v100)
+    + (?v3 ?v100 ?v101) → (?v3 ?v101 ?v100)
+    + (?v3 1 ?v100) → ?v100
+    + (?v3 1 ?v100) → (?v2 ?v100 0)
+    + (?v3 1 ?v100) → (?v3 ?v100 1)
+    + (?v3 1 ?v100) → (?v2 0 ?v100)
+    + (?v3 1 ?v100) → (?v3 1 ?v100)
+    + (?v3 1 ?v100) → (?v3 ?v100 (?v1 0))
+    + (?v3 1 ?v100) → (?v3 (?v1 0) ?v100)
+  rustified: 0 reducing → substrate | 1 equivalence → ledger only | 15 semantic duplicates rejected
+  top apparatuses (by theorem yield): ["clamped-crgate-0-maxzero-2-x2-0=12", "clamped-crgate-0-maxzero-2-x2-0-crgate-2=12", "clamped-crgate-0-maxzero-2-x2-2-crgate-0-meta+-0-meta+-1=12", "clamped-crgate-0-maxzero-2-x2-0-crgate-0=11", "clamped-crgate-0-maxzero-2-x2-0-x2-0=10", "clamped-crgate-0-maxzero-2-x2-2-crgate-0-meta+-0-maxzero-0=9"]
+  cycle elapsed: 4.5s
+
+── cycle 12 / 30 ─────  pool size: 24  substrate size: 12  ledger size: 28
+  sub-campaign: 4000 probes, 225 structural rules, 23 apparatuses with yield
+  new theorems discovered: 16
+    + (?v3 ?v100 (?v2 ?v101 2)) → (?v2 (?v3 ?v100 (?v1 ?v101)) ?v100)
+    + (?v3 ?v100 (?v2 ?v101 2)) → (?v2 (?v3 ?v100 (?v1 ?v101)) (?v2 ?v100 0))
+    + (?v3 ?v100 (?v2 ?v101 2)) → (?v2 (?v3 ?v100 (?v1 ?v101)) (?v3 ?v100 1))
+    + (?v3 ?v100 (?v2 ?v101 2)) → (?v2 (?v3 ?v100 (?v1 ?v101)) (?v3 ?v100 (?v1 0)))
+    + (?v3 ?v100 (?v2 ?v101 2)) → (?v2 (?v3 (?v1 ?v101) ?v100) ?v100)
+    + (?v3 ?v100 (?v2 ?v101 2)) → (?v2 (?v3 (?v1 ?v101) ?v100) (?v2 ?v100 0))
+    + (?v3 ?v100 (?v2 ?v101 2)) → (?v2 (?v3 (?v1 ?v101) ?v100) (?v3 ?v100 1))
+    + (?v3 ?v100 (?v2 ?v101 2)) → (?v2 (?v3 (?v1 ?v101) ?v100) (?v3 ?v100 (?v1 0)))
+    + (?v3 ?v100 (?v2 ?v101 2)) → (?v2 ?v100 (?v3 ?v100 (?v1 ?v101)))
+    + (?v3 ?v100 (?v2 ?v101 2)) → (?v2 ?v100 (?v3 (?v1 ?v101) ?v100))
+    + (?v3 ?v100 (?v2 ?v101 2)) → (?v2 (?v2 ?v100 0) (?v3 ?v100 (?v1 ?v101)))
+    + (?v3 ?v100 (?v2 ?v101 2)) → (?v2 (?v2 ?v100 0) (?v3 (?v1 ?v101) ?v100))
+    + (?v3 ?v100 (?v2 ?v101 2)) → (?v2 (?v3 ?v100 1) (?v3 ?v100 (?v1 ?v101)))
+    + (?v3 ?v100 (?v2 ?v101 2)) → (?v2 (?v3 ?v100 1) (?v3 (?v1 ?v101) ?v100))
+    + (?v3 ?v100 (?v2 ?v101 2)) → (?v2 (?v3 ?v100 (?v1 0)) (?v3 ?v100 (?v1 ?v101)))
+    + (?v3 ?v100 (?v2 ?v101 2)) → (?v2 (?v3 ?v100 (?v1 0)) (?v3 (?v1 ?v101) ?v100))
+  rustified: 0 reducing → substrate | 8 equivalence → ledger only | 8 semantic duplicates rejected
+  top apparatuses (by theorem yield): ["clamped-crgate-0-maxzero-2-x2-0-x2-0=13", "clamped-crgate-0-maxzero-2-x2-0-x2-0=13", "clamped-crgate-0-maxzero-2-x2-0-crgate-0=12", "clamped-crgate-0-maxzero-2-x2-0-crgate-1=12", "clamped-crgate-0-maxzero-2-x2-0-crgate-0-meta+-1=11", "clamped-crgate-0-maxzero-2-x2-0-crgate-2=10"]
+  cycle elapsed: 4.7s
+
+── cycle 13 / 30 ─────  pool size: 24  substrate size: 12  ledger size: 36
+  sub-campaign: 4000 probes, 209 structural rules, 23 apparatuses with yield
+  new theorems discovered: 16
+    + (?v3 ?v100 ?v101) → (?v3 ?v101 ?v100)
+    + (?v2 ?v100 ?v101) → (?v2 ?v101 ?v100)
+    + (?v3 1 ?v100) → ?v100
+    + (?v3 1 ?v100) → (?v2 ?v100 0)
+    + (?v3 1 ?v100) → (?v3 ?v100 1)
+    + (?v3 1 ?v100) → (?v2 0 ?v100)
+    + (?v3 1 ?v100) → (?v3 1 ?v100)
+    + (?v3 1 ?v100) → (?v3 (?v1 0) ?v100)
+    + (?v2 0 ?v100) → ?v100
+    + (?v2 0 ?v100) → (?v2 ?v100 0)
+    + (?v2 0 ?v100) → (?v3 ?v100 1)
+    + (?v2 0 ?v100) → (?v2 0 ?v100)
+    + (?v2 0 ?v100) → (?v3 1 ?v100)
+    + (?v2 0 ?v100) → (?v3 ?v100 (?v1 0))
+    + (?v2 0 ?v100) → (?v3 (?v1 0) ?v100)
+    + (?v3 ?v100 (?v2 ?v101 2)) → (?v2 ?v100 (?v3 ?v100 (?v1 ?v101)))
+  rustified: 0 reducing → substrate | 0 equivalence → ledger only | 16 semantic duplicates rejected
+  top apparatuses (by theorem yield): ["clamped-crgate-0-maxzero-2-x2-0-crgate-0-meta+-1=12", "clamped-crgate-0-maxzero-2-x2-0-crgate-1-crgate-1=11", "clamped-crgate-0-maxzero-2-x2-0-x2-0=10", "clamped-crgate-0-maxzero-2-x2-0-x2-0=10", "clamped-crgate-0-maxzero-2-x2-0-crgate-1=10", "clamped-crgate-0-maxzero-2-x2-0-crgate-1-clamp-0=10"]
+  cycle elapsed: 4.9s
+
+── cycle 14 / 30 ─────  pool size: 24  substrate size: 12  ledger size: 36
+  sub-campaign: 4000 probes, 222 structural rules, 23 apparatuses with yield
+  new theorems discovered: 16
+    + (?v2 0 ?v100) → ?v100
+    + (?v2 0 ?v100) → (?v2 ?v100 0)
+    + (?v2 0 ?v100) → (?v3 ?v100 1)
+    + (?v2 0 ?v100) → (?v2 0 ?v100)
+    + (?v2 0 ?v100) → (?v3 1 ?v100)
+    + (?v2 0 ?v100) → (?v3 ?v100 (?v1 0))
+    + (?v2 0 ?v100) → (?v3 (?v1 0) ?v100)
+    + (?v3 ?v100 ?v101) → (?v3 ?v101 ?v100)
+    + (?v3 1 ?v100) → ?v100
+    + (?v3 1 ?v100) → (?v2 ?v100 0)
+    + (?v3 1 ?v100) → (?v3 ?v100 1)
+    + (?v3 1 ?v100) → (?v2 0 ?v100)
+    + (?v3 1 ?v100) → (?v3 1 ?v100)
+    + (?v3 1 ?v100) → (?v3 (?v1 0) ?v100)
+    + (?v2 ?v100 ?v101) → (?v2 ?v101 ?v100)
+    + (?v3 ?v100 (?v2 ?v101 2)) → (?v2 ?v100 (?v3 ?v100 (?v1 ?v101)))
+  rustified: 0 reducing → substrate | 0 equivalence → ledger only | 16 semantic duplicates rejected
+  top apparatuses (by theorem yield): ["clamped-crgate-0-maxzero-2-x2-0-x2-0=12", "clamped-crgate-0-maxzero-2-x2-0-x2-0=12", "clamped-crgate-0-maxzero-2-x2-0-crgate-1=12", "clamped-crgate-0-maxzero-2-x2-0-crgate-0-meta+-1-x2-1=11", "clamped-crgate-0-maxzero-2-x2-0-crgate-1-crgate-1=10", "clamped-crgate-0-maxzero-2-x2-0-x2-0-maxzero-0=10"]
+  cycle elapsed: 4.9s
+
+  ⚠ SATURATION DETECTED — last 2 cycles produced 0 admissions
+    current mechanism: cms=4, ccap=30, cbd=4, sft=false, emss=2, vsa=24, emn=8
+    invoking saturation response...
+    ✓ self-mutation: Compound([BumpExtractMinShared(1), BumpCandidateMaxSize(1)]) (109.4s)
+    new mechanism: cms=5, ccap=30, cbd=4, sft=false, emss=3, vsa=24, emn=8
+
+── cycle 15 / 30 ─────  pool size: 24  substrate size: 12  ledger size: 36
+  sub-campaign: 4000 probes, 624 structural rules, 22 apparatuses with yield
+  new theorems discovered: 16
+    + (?v2 0 ?v100) → ?v100
+    + (?v2 0 ?v100) → (?v2 ?v100 0)
+    + (?v2 0 ?v100) → (?v3 ?v100 1)
+    + (?v2 0 ?v100) → (?v2 0 ?v100)
+    + (?v2 0 ?v100) → (?v3 1 ?v100)
+    + (?v2 0 ?v100) → (?v3 ?v100 (?v1 0))
+    + (?v2 0 ?v100) → (?v3 (?v1 0) ?v100)
+    + (?v2 0 ?v100) → (?v2 ?v100 (?v3 ?v100 0))
+    + (?v2 0 ?v100) → (?v2 ?v100 (?v3 0 ?v100))
+    + (?v2 0 ?v100) → (?v2 ?v100 (?v2 0 0))
+    + (?v2 0 ?v100) → (?v2 ?v100 (?v3 0 0))
+    + (?v2 0 ?v100) → (?v3 ?v100 (?v2 0 1))
+    + (?v2 0 ?v100) → (?v2 ?v100 (?v3 0 1))
+    + (?v2 0 ?v100) → (?v3 ?v100 (?v2 1 0))
+    + (?v2 0 ?v100) → (?v2 ?v100 (?v3 1 0))
+    + (?v2 0 ?v100) → (?v3 ?v100 (?v3 1 1))
+  rustified: 0 reducing → substrate | 6 equivalence → ledger only | 10 semantic duplicates rejected
+  top apparatuses (by theorem yield): ["clamped-crgate-0-maxzero-2-x2-0-crgate-0-meta+-1-x2-1-x2-1=23", "clamped-crgate-0-maxzero-2-x2-0-crgate-1-crgate-1-x2-2=23", "clamped-crgate-0-maxzero-2-x2-0-x2-0=22", "clamped-crgate-0-maxzero-2-x2-0-x2-0=22", "clamped-crgate-0-maxzero-2-x2-0-crgate-1=21", "clamped-crgate-0-maxzero-2-x2-0-crgate-1-crgate-1-maxzero-1=21"]
+  cycle elapsed: 6.8s
+
+── cycle 16 / 30 ─────  pool size: 24  substrate size: 12  ledger size: 42
+  sub-campaign: 4000 probes, 632 structural rules, 23 apparatuses with yield
+  new theorems discovered: 16
+    + (?v2 0 ?v100) → ?v100
+    + (?v2 0 ?v100) → (?v2 ?v100 0)
+    + (?v2 0 ?v100) → (?v3 ?v100 1)
+    + (?v2 0 ?v100) → (?v2 0 ?v100)
+    + (?v2 0 ?v100) → (?v3 1 ?v100)
+    + (?v2 0 ?v100) → (?v3 ?v100 (?v1 0))
+    + (?v2 0 ?v100) → (?v3 (?v1 0) ?v100)
+    + (?v2 0 ?v100) → (?v2 ?v100 (?v3 0 ?v100))
+    + (?v2 0 ?v100) → (?v3 ?v100 (?v2 1 0))
+    + (?v2 0 ?v100) → (?v2 ?v100 (?v3 1 0))
+    + (?v2 0 ?v100) → (?v2 0 (?v2 ?v100 0))
+    + (?v2 0 ?v100) → (?v2 0 (?v3 ?v100 1))
+    + (?v2 0 ?v100) → (?v2 0 (?v2 0 ?v100))
+    + (?v2 0 ?v100) → (?v2 0 (?v3 1 ?v100))
+    + (?v2 0 ?v100) → (?v3 1 (?v2 ?v100 0))
+    + (?v2 0 ?v100) → (?v3 1 (?v3 ?v100 1))
+  rustified: 0 reducing → substrate | 2 equivalence → ledger only | 14 semantic duplicates rejected
+  top apparatuses (by theorem yield): ["clamped-crgate-0-maxzero-2-x2-0-x2-0=24", "clamped-crgate-0-maxzero-2-x2-0-x2-0=24", "clamped-crgate-0-maxzero-2-x2-0-x2-0-x05-1=24", "clamped-crgate-0-maxzero-2-x2-0-crgate-1-maxzero-2=23", "clamped-crgate-0-maxzero-2-x2-0-crgate-1-crgate-1-maxzero-1-nov+-1=21", "clamped-crgate-0-maxzero-2-x2-0-x2-0-nov+-1=20"]
+  cycle elapsed: 7.5s
+
+── cycle 17 / 30 ─────  pool size: 24  substrate size: 12  ledger size: 44
+  sub-campaign: 4000 probes, 638 structural rules, 23 apparatuses with yield
+  new theorems discovered: 16
+    + (?v3 ?v100 (?v2 ?v101 2)) → (?v3 ?v100 (?v1 (?v1 ?v101)))
+    + (?v3 ?v100 (?v2 ?v101 2)) → (?v3 (?v1 (?v1 ?v101)) ?v100)
+    + (?v3 ?v100 (?v2 ?v101 2)) → (?v2 (?v3 ?v100 (?v1 ?v101)) (?v2 ?v100 (?v3 ?v100 0)))
+    + (?v3 ?v100 (?v2 ?v101 2)) → (?v2 (?v3 ?v100 (?v1 ?v101)) (?v2 ?v100 (?v2 0 0)))
+    + (?v3 ?v100 (?v2 ?v101 2)) → (?v2 (?v3 ?v100 (?v1 ?v101)) (?v2 ?v100 (?v3 0 0)))
+    + (?v3 ?v100 (?v2 ?v101 2)) → (?v2 (?v3 ?v100 (?v1 ?v101)) (?v3 ?v100 (?v2 0 1)))
+    + (?v3 ?v100 (?v2 ?v101 2)) → (?v2 (?v3 ?v100 (?v1 ?v101)) (?v2 ?v100 (?v3 0 1)))
+    + (?v3 ?v100 (?v2 ?v101 2)) → (?v2 (?v3 ?v100 (?v1 ?v101)) (?v3 ?v100 (?v3 1 1)))
+    + (?v3 ?v100 (?v2 ?v101 2)) → (?v2 (?v3 (?v1 ?v101) ?v100) (?v2 ?v100 (?v3 ?v100 0)))
+    + (?v3 ?v100 (?v2 ?v101 2)) → (?v2 (?v3 (?v1 ?v101) ?v100) (?v2 ?v100 (?v2 0 0)))
+    + (?v3 ?v100 (?v2 ?v101 2)) → (?v2 (?v3 (?v1 ?v101) ?v100) (?v2 ?v100 (?v3 0 0)))
+    + (?v3 ?v100 (?v2 ?v101 2)) → (?v2 (?v3 (?v1 ?v101) ?v100) (?v3 ?v100 (?v2 0 1)))
+    + (?v3 ?v100 (?v2 ?v101 2)) → (?v2 (?v3 (?v1 ?v101) ?v100) (?v2 ?v100 (?v3 0 1)))
+    + (?v3 ?v100 (?v2 ?v101 2)) → (?v2 (?v3 (?v1 ?v101) ?v100) (?v3 ?v100 (?v3 1 1)))
+    + (?v3 ?v100 (?v2 ?v101 2)) → (?v2 ?v100 (?v3 ?v100 (?v1 ?v101)))
+    + (?v3 ?v100 (?v2 ?v101 2)) → (?v2 ?v100 (?v3 (?v1 ?v101) ?v100))
+  rustified: 0 reducing → substrate | 14 equivalence → ledger only | 2 semantic duplicates rejected
+  top apparatuses (by theorem yield): ["clamped-crgate-0-maxzero-2-x2-0-crgate-1-crgate-1-maxzero-1-nov+-1-clamp-2=25", "clamped-crgate-0-maxzero-2-x2-0-x2-0-nov+-1-nov+-2=24", "clamped-crgate-0-maxzero-2-x2-0-x2-0=23", "clamped-crgate-0-maxzero-2-x2-0-x2-0=23", "clamped-crgate-0-maxzero-2-x2-0-crgate-1-maxzero-2-maxzero-1=23", "clamped-crgate-0-maxzero-2-x2-0-x2-0-x05-1=21"]
+  cycle elapsed: 7.8s
+
+── cycle 18 / 30 ─────  pool size: 24  substrate size: 12  ledger size: 58
+  sub-campaign: 4000 probes, 635 structural rules, 23 apparatuses with yield
+  new theorems discovered: 16
+    + (?v3 ?v100 (?v2 ?v101 2)) → (?v2 ?v100 (?v3 ?v100 (?v1 ?v101)))
+    + (?v3 ?v100 (?v2 ?v101 2)) → (?v2 ?v100 (?v3 (?v1 ?v101) ?v100))
+    + (?v3 ?v100 (?v2 ?v101 2)) → (?v2 (?v2 ?v100 0) (?v3 ?v100 (?v1 ?v101)))
+    + (?v3 ?v100 (?v2 ?v101 2)) → (?v2 (?v2 ?v100 0) (?v3 (?v1 ?v101) ?v100))
+    + (?v3 ?v100 (?v2 ?v101 2)) → (?v2 (?v3 ?v100 1) (?v3 ?v100 (?v1 ?v101)))
+    + (?v3 ?v100 (?v2 ?v101 2)) → (?v2 (?v3 ?v100 1) (?v3 (?v1 ?v101) ?v100))
+    + (?v3 ?v100 (?v2 ?v101 2)) → (?v2 (?v3 ?v100 (?v1 0)) (?v3 ?v100 (?v1 ?v101)))
+    + (?v3 ?v100 (?v2 ?v101 2)) → (?v2 (?v3 ?v100 (?v1 0)) (?v3 (?v1 ?v101) ?v100))
+    + (?v3 ?v100 (?v2 ?v101 2)) → (?v2 (?v2 ?v100 (?v3 ?v100 0)) (?v3 ?v100 (?v1 ?v101)))
+    + (?v3 ?v100 (?v2 ?v101 2)) → (?v2 (?v2 ?v100 (?v3 ?v100 0)) (?v3 (?v1 ?v101) ?v100))
+    + (?v3 ?v100 (?v2 ?v101 2)) → (?v2 (?v2 ?v100 (?v2 0 0)) (?v3 ?v100 (?v1 ?v101)))
+    + (?v3 ?v100 (?v2 ?v101 2)) → (?v2 (?v2 ?v100 (?v2 0 0)) (?v3 (?v1 ?v101) ?v100))
+    + (?v3 ?v100 (?v2 ?v101 2)) → (?v2 (?v2 ?v100 (?v3 0 0)) (?v3 ?v100 (?v1 ?v101)))
+    + (?v3 ?v100 (?v2 ?v101 2)) → (?v2 (?v2 ?v100 (?v3 0 0)) (?v3 (?v1 ?v101) ?v100))
+    + (?v3 ?v100 (?v2 ?v101 2)) → (?v2 (?v3 ?v100 (?v2 0 1)) (?v3 ?v100 (?v1 ?v101)))
+    + (?v3 ?v100 (?v2 ?v101 2)) → (?v2 (?v3 ?v100 (?v2 0 1)) (?v3 (?v1 ?v101) ?v100))
+  rustified: 0 reducing → substrate | 0 equivalence → ledger only | 16 semantic duplicates rejected
+  top apparatuses (by theorem yield): ["clamped-crgate-0-maxzero-2-x2-0-x2-0=25", "clamped-crgate-0-maxzero-2-x2-0-x2-0=25", "clamped-crgate-0-maxzero-2-x2-0-crgate-1-crgate-1-maxzero-1-nov+-1-clamp-2=24", "clamped-crgate-0-maxzero-2-x2-0-x2-0-clamp-1=24", "clamped-crgate-0-maxzero-2-x2-0-crgate-1-crgate-1-maxzero-1-nov+-1-clamp-2-clamp-1=23", "clamped-crgate-0-maxzero-2-x2-0-crgate-1-maxzero-2-maxzero-1-crgate-2=23"]
+  cycle elapsed: 8.0s
+
+── cycle 19 / 30 ─────  pool size: 24  substrate size: 12  ledger size: 58
+  sub-campaign: 4000 probes, 658 structural rules, 23 apparatuses with yield
+  new theorems discovered: 16
+    + (?v2 0 ?v100) → ?v100
+    + (?v2 0 ?v100) → (?v2 ?v100 0)
+    + (?v2 0 ?v100) → (?v3 ?v100 1)
+    + (?v2 0 ?v100) → (?v2 0 ?v100)
+    + (?v2 0 ?v100) → (?v3 1 ?v100)
+    + (?v2 0 ?v100) → (?v3 ?v100 (?v1 0))
+    + (?v2 0 ?v100) → (?v3 (?v1 0) ?v100)
+    + (?v2 0 ?v100) → (?v2 ?v100 (?v3 0 ?v100))
+    + (?v2 0 ?v100) → (?v3 ?v100 (?v2 1 0))
+    + (?v2 0 ?v100) → (?v2 ?v100 (?v3 1 0))
+    + (?v2 0 ?v100) → (?v2 0 (?v2 ?v100 0))
+    + (?v2 0 ?v100) → (?v2 0 (?v2 0 ?v100))
+    + (?v2 0 ?v100) → (?v2 0 (?v3 1 ?v100))
+    + (?v2 0 ?v100) → (?v3 1 (?v3 ?v100 1))
+    + (?v2 0 ?v100) → (?v3 1 (?v2 0 ?v100))
+    + (?v2 0 ?v100) → (?v3 1 (?v3 1 ?v100))
+  rustified: 0 reducing → substrate | 0 equivalence → ledger only | 16 semantic duplicates rejected
+  top apparatuses (by theorem yield): ["clamped-crgate-0-maxzero-2-x2-0-x2-0-clamp-1-clamp-1=24", "clamped-crgate-0-maxzero-2-x2-0-x2-0=22", "clamped-crgate-0-maxzero-2-x2-0-x2-0=22", "clamped-crgate-0-maxzero-2-x2-0-crgate-1-crgate-1-maxzero-1-nov+-1-clamp-2=21", "clamped-crgate-0-maxzero-2-x2-0-crgate-1-crgate-1-maxzero-1-nov+-1-clamp-2-clamp-1-crgate-1=21", "clamped-crgate-0-maxzero-2-x2-0-crgate-1-crgate-1-maxzero-1-nov+-1-clamp-2-clamp-1-crmult-2=21"]
+  cycle elapsed: 7.9s
+
+  ⚠ SATURATION DETECTED — last 2 cycles produced 0 admissions
+    current mechanism: cms=5, ccap=30, cbd=4, sft=false, emss=3, vsa=24, emn=8
+    invoking saturation response...
+    ✓ self-mutation: AddCorpusVocabOp(1) (2.6s)
+    new mechanism: cms=5, ccap=30, cbd=4, sft=false, emss=3, vsa=24, emn=8
+
+── cycle 20 / 30 ─────  pool size: 24  substrate size: 12  ledger size: 58
+  sub-campaign: 4000 probes, 628 structural rules, 23 apparatuses with yield
+  new theorems discovered: 16
+    + (?v3 ?v100 (?v2 ?v101 2)) → (?v2 ?v100 (?v3 ?v100 (?v1 ?v101)))
+    + (?v3 ?v100 (?v2 ?v101 2)) → (?v2 ?v100 (?v3 (?v1 ?v101) ?v100))
+    + (?v3 ?v100 (?v2 ?v101 2)) → (?v2 (?v2 ?v100 0) (?v3 ?v100 (?v1 ?v101)))
+    + (?v3 ?v100 (?v2 ?v101 2)) → (?v2 (?v2 ?v100 0) (?v3 (?v1 ?v101) ?v100))
+    + (?v3 ?v100 (?v2 ?v101 2)) → (?v2 (?v3 ?v100 1) (?v3 ?v100 (?v1 ?v101)))
+    + (?v3 ?v100 (?v2 ?v101 2)) → (?v2 (?v3 ?v100 1) (?v3 (?v1 ?v101) ?v100))
+    + (?v3 ?v100 (?v2 ?v101 2)) → (?v2 (?v3 ?v100 (?v1 0)) (?v3 ?v100 (?v1 ?v101)))
+    + (?v3 ?v100 (?v2 ?v101 2)) → (?v2 (?v3 ?v100 (?v1 0)) (?v3 (?v1 ?v101) ?v100))
+    + (?v3 ?v100 (?v2 ?v101 2)) → (?v2 (?v2 ?v100 (?v3 ?v100 0)) (?v3 ?v100 (?v1 ?v101)))
+    + (?v3 ?v100 (?v2 ?v101 2)) → (?v2 (?v2 ?v100 (?v3 ?v100 0)) (?v3 (?v1 ?v101) ?v100))
+    + (?v3 ?v100 (?v2 ?v101 2)) → (?v2 (?v2 ?v100 (?v2 0 0)) (?v3 ?v100 (?v1 ?v101)))
+    + (?v3 ?v100 (?v2 ?v101 2)) → (?v2 (?v2 ?v100 (?v2 0 0)) (?v3 (?v1 ?v101) ?v100))
+    + (?v3 ?v100 (?v2 ?v101 2)) → (?v2 (?v2 ?v100 (?v3 0 0)) (?v3 ?v100 (?v1 ?v101)))
+    + (?v3 ?v100 (?v2 ?v101 2)) → (?v2 (?v2 ?v100 (?v3 0 0)) (?v3 (?v1 ?v101) ?v100))
+    + (?v3 ?v100 (?v2 ?v101 2)) → (?v2 (?v3 ?v100 (?v2 0 1)) (?v3 ?v100 (?v1 ?v101)))
+    + (?v3 ?v100 (?v2 ?v101 2)) → (?v2 (?v3 ?v100 (?v2 0 1)) (?v3 (?v1 ?v101) ?v100))
+  rustified: 0 reducing → substrate | 0 equivalence → ledger only | 16 semantic duplicates rejected
+  top apparatuses (by theorem yield): ["clamped-crgate-0-maxzero-2-x2-0-x2-0=26", "clamped-crgate-0-maxzero-2-x2-0-x2-0=26", "clamped-crgate-0-maxzero-2-x2-0-crgate-1-crgate-1-maxzero-1-nov+-1-clamp-2=25", "clamped-crgate-0-maxzero-2-x2-0-crgate-1-crgate-1-maxzero-1-nov+-1-clamp-2-maxzero-1=24", "clamped-crgate-0-maxzero-2-x2-0-crgate-1-crgate-1-maxzero-1-nov+-1-clamp-2-clamp-1-crgate-1-meta+-2=23", "clamped-crgate-0-maxzero-2-x2-0-crgate-1-crgate-1-maxzero-1-nov+-1-clamp-2-clamp-1-crgate-1-meta+-1=21"]
+  cycle elapsed: 7.5s
+
+  ⚠ SATURATION DETECTED — last 2 cycles produced 0 admissions
+    current mechanism: cms=5, ccap=30, cbd=4, sft=false, emss=3, vsa=24, emn=8
+    invoking saturation response...
+    ✓ self-mutation: RemoveCorpusVocabOp(7) (2.8s)
+    new mechanism: cms=5, ccap=30, cbd=4, sft=false, emss=3, vsa=24, emn=8
+
+── cycle 21 / 30 ─────  pool size: 24  substrate size: 12  ledger size: 58
+  sub-campaign: 4000 probes, 642 structural rules, 23 apparatuses with yield
+  new theorems discovered: 16
+    + (?v2 ?v100 3) → (?v1 (?v1 (?v1 ?v100)))
+    + (?v2 ?v100 3) → (?v1 (?v1 (?v2 ?v100 1)))
+    + (?v2 ?v100 3) → (?v1 (?v1 (?v2 1 ?v100)))
+    + (?v2 ?v100 3) → (?v1 (?v2 ?v100 (?v1 1)))
+    + (?v2 ?v100 3) → (?v1 (?v2 1 (?v1 ?v100)))
+    + (?v2 ?v100 3) → (?v1 (?v2 (?v1 ?v100) 1))
+    + (?v2 ?v100 3) → (?v1 (?v2 (?v1 1) ?v100))
+    + (?v2 ?v100 3) → (?v2 ?v100 (?v1 (?v1 1)))
+    + (?v2 ?v100 3) → (?v2 1 (?v1 (?v1 ?v100)))
+    + (?v2 ?v100 3) → (?v2 (?v1 ?v100) (?v1 1))
+    + (?v2 ?v100 3) → (?v2 (?v1 1) (?v1 ?v100))
+    + (?v2 ?v100 3) → (?v2 (?v1 (?v1 ?v100)) 1)
+    + (?v2 ?v100 3) → (?v2 (?v1 (?v1 1)) ?v100)
+    + (?v3 1 ?v100) → ?v100
+    + (?v3 1 ?v100) → (?v2 ?v100 0)
+    + (?v3 1 ?v100) → (?v3 ?v100 1)
+  rustified: 0 reducing → substrate | 7 equivalence → ledger only | 9 semantic duplicates rejected
+  top apparatuses (by theorem yield): ["clamped-crgate-0-maxzero-2-x2-0-crgate-1-crgate-1-maxzero-1-nov+-1-clamp-2-clamp-1-crgate-1-meta+-2-nov+-2=25", "clamped-crgate-0-maxzero-2-x2-0-crgate-1-crgate-1-maxzero-1-nov+-1-clamp-2-maxzero-1=24", "clamped-crgate-0-maxzero-2-x2-0-x2-0=23", "clamped-crgate-0-maxzero-2-x2-0-x2-0=23", "clamped-crgate-0-maxzero-2-x2-0-crgate-1-crgate-1-maxzero-1-nov+-1-clamp-2-maxzero-1-x05-1=23", "clamped-crgate-0-maxzero-2-x2-0-crgate-1-crgate-1-maxzero-1-nov+-1-clamp-2=21"]
+  cycle elapsed: 8.3s
+
+── cycle 22 / 30 ─────  pool size: 24  substrate size: 12  ledger size: 65
+  sub-campaign: 4000 probes, 629 structural rules, 23 apparatuses with yield
+  new theorems discovered: 16
+    + (?v3 1 ?v100) → ?v100
+    + (?v3 1 ?v100) → (?v2 ?v100 0)
+    + (?v3 1 ?v100) → (?v3 ?v100 1)
+    + (?v3 1 ?v100) → (?v2 0 ?v100)
+    + (?v3 1 ?v100) → (?v3 1 ?v100)
+    + (?v3 1 ?v100) → (?v3 (?v1 0) ?v100)
+    + (?v3 1 ?v100) → (?v2 ?v100 (?v3 ?v100 0))
+    + (?v3 1 ?v100) → (?v2 ?v100 (?v3 0 ?v100))
+    + (?v3 1 ?v100) → (?v2 ?v100 (?v2 0 0))
+    + (?v3 1 ?v100) → (?v2 ?v100 (?v3 0 0))
+    + (?v3 1 ?v100) → (?v3 ?v100 (?v2 0 1))
+    + (?v3 1 ?v100) → (?v2 ?v100 (?v3 0 1))
+    + (?v3 1 ?v100) → (?v3 ?v100 (?v2 1 0))
+    + (?v3 1 ?v100) → (?v2 ?v100 (?v3 1 0))
+    + (?v3 1 ?v100) → (?v3 ?v100 (?v3 1 1))
+    + (?v3 1 ?v100) → (?v2 0 (?v2 ?v100 0))
+  rustified: 0 reducing → substrate | 6 equivalence → ledger only | 10 semantic duplicates rejected
+  top apparatuses (by theorem yield): ["clamped-crgate-0-maxzero-2-x2-0-crgate-1-crgate-1-maxzero-1-nov+-1-clamp-2-clamp-1-crgate-1-meta+-2-nov+-2=24", "clamped-crgate-0-maxzero-2-x2-0-x2-0=24", "clamped-crgate-0-maxzero-2-x2-0-x2-0=24", "clamped-crgate-0-maxzero-2-x2-0-x2-0-x2-1=23", "clamped-crgate-0-maxzero-2-x2-0-crgate-1-crgate-1-maxzero-1-nov+-1-clamp-2-maxzero-1-x05-1-x05-2=23", "clamped-crgate-0-maxzero-2-x2-0-crgate-1-crgate-1-maxzero-1-nov+-1-clamp-2-maxzero-2=23"]
+  cycle elapsed: 8.0s
+
+── cycle 23 / 30 ─────  pool size: 24  substrate size: 12  ledger size: 71
+  sub-campaign: 4000 probes, 638 structural rules, 23 apparatuses with yield
+  new theorems discovered: 16
+    + (?v3 1 ?v100) → ?v100
+    + (?v3 1 ?v100) → (?v2 ?v100 0)
+    + (?v3 1 ?v100) → (?v3 ?v100 1)
+    + (?v3 1 ?v100) → (?v2 0 ?v100)
+    + (?v3 1 ?v100) → (?v3 1 ?v100)
+    + (?v3 1 ?v100) → (?v3 (?v1 0) ?v100)
+    + (?v3 1 ?v100) → (?v2 ?v100 (?v3 0 ?v100))
+    + (?v3 1 ?v100) → (?v3 ?v100 (?v2 1 0))
+    + (?v3 1 ?v100) → (?v2 ?v100 (?v3 1 0))
+    + (?v3 1 ?v100) → (?v2 0 (?v2 ?v100 0))
+    + (?v3 1 ?v100) → (?v2 0 (?v3 ?v100 1))
+    + (?v3 1 ?v100) → (?v2 0 (?v2 0 ?v100))
+    + (?v3 1 ?v100) → (?v2 0 (?v3 1 ?v100))
+    + (?v3 1 ?v100) → (?v3 1 (?v2 ?v100 0))
+    + (?v3 1 ?v100) → (?v3 1 (?v3 ?v100 1))
+    + (?v3 1 ?v100) → (?v3 1 (?v2 0 ?v100))
+  rustified: 0 reducing → substrate | 2 equivalence → ledger only | 14 semantic duplicates rejected
+  top apparatuses (by theorem yield): ["clamped-crgate-0-maxzero-2-x2-0-x2-0=25", "clamped-crgate-0-maxzero-2-x2-0-x2-0=25", "clamped-crgate-0-maxzero-2-x2-0-crgate-1-crgate-1-maxzero-1-nov+-1-clamp-2-clamp-1-crgate-1-meta+-2-nov+-2=24", "clamped-crgate-0-maxzero-2-x2-0-crgate-1-crgate-1-maxzero-1-nov+-1-clamp-2-maxzero-2-x2-2=24", "clamped-crgate-0-maxzero-2-x2-0-crgate-1-crgate-1-maxzero-1-nov+-1-clamp-2-maxzero-1-x05-1-x05-2-x2-2=23", "clamped-crgate-0-maxzero-2-x2-0-x2-0-x2-1-crmult-1=22"]
+  cycle elapsed: 8.3s
+
+── cycle 24 / 30 ─────  pool size: 24  substrate size: 12  ledger size: 73
+  sub-campaign: 4000 probes, 628 structural rules, 23 apparatuses with yield
+  new theorems discovered: 16
+    + (?v2 0 ?v100) → ?v100
+    + (?v2 0 ?v100) → (?v2 ?v100 0)
+    + (?v2 0 ?v100) → (?v3 ?v100 1)
+    + (?v2 0 ?v100) → (?v2 0 ?v100)
+    + (?v2 0 ?v100) → (?v3 1 ?v100)
+    + (?v2 0 ?v100) → (?v3 ?v100 (?v1 0))
+    + (?v2 0 ?v100) → (?v3 (?v1 0) ?v100)
+    + (?v2 0 ?v100) → (?v2 ?v100 (?v3 0 ?v100))
+    + (?v2 0 ?v100) → (?v3 ?v100 (?v2 1 0))
+    + (?v2 0 ?v100) → (?v2 ?v100 (?v3 1 0))
+    + (?v2 0 ?v100) → (?v2 0 (?v2 ?v100 0))
+    + (?v2 0 ?v100) → (?v2 0 (?v2 0 ?v100))
+    + (?v2 0 ?v100) → (?v2 0 (?v3 1 ?v100))
+    + (?v2 0 ?v100) → (?v3 1 (?v3 ?v100 1))
+    + (?v2 0 ?v100) → (?v3 1 (?v2 0 ?v100))
+    + (?v2 0 ?v100) → (?v3 1 (?v3 1 ?v100))
+  rustified: 0 reducing → substrate | 0 equivalence → ledger only | 16 semantic duplicates rejected
+  top apparatuses (by theorem yield): ["clamped-crgate-0-maxzero-2-x2-0-crgate-1-crgate-1-maxzero-1-nov+-1-clamp-2-maxzero-2-x2-2=24", "clamped-crgate-0-maxzero-2-x2-0-crgate-1-crgate-1-maxzero-1-nov+-1-clamp-2-maxzero-2-x2-2-crgate-1=23", "clamped-crgate-0-maxzero-2-x2-0-crgate-1-crgate-1-maxzero-1-nov+-1-clamp-2-maxzero-1-x05-1-x05-2-x2-2-maxzero-2=23", "clamped-crgate-0-maxzero-2-x2-0-x2-0=22", "clamped-crgate-0-maxzero-2-x2-0-x2-0=22", "clamped-crgate-0-maxzero-2-x2-0-crgate-1-crgate-1-maxzero-1-nov+-1-clamp-2-clamp-1-crgate-1-meta+-2-nov+-2=21"]
+  cycle elapsed: 7.9s
+
+── cycle 25 / 30 ─────  pool size: 24  substrate size: 12  ledger size: 73
+  sub-campaign: 4000 probes, 655 structural rules, 23 apparatuses with yield
+  new theorems discovered: 16
+    + (?v3 1 ?v100) → ?v100
+    + (?v3 1 ?v100) → (?v2 ?v100 0)
+    + (?v3 1 ?v100) → (?v3 ?v100 1)
+    + (?v3 1 ?v100) → (?v2 0 ?v100)
+    + (?v3 1 ?v100) → (?v3 1 ?v100)
+    + (?v3 1 ?v100) → (?v3 (?v1 0) ?v100)
+    + (?v3 1 ?v100) → (?v2 ?v100 (?v3 0 ?v100))
+    + (?v3 1 ?v100) → (?v3 ?v100 (?v2 1 0))
+    + (?v3 1 ?v100) → (?v2 ?v100 (?v3 1 0))
+    + (?v3 1 ?v100) → (?v2 0 (?v2 ?v100 0))
+    + (?v3 1 ?v100) → (?v2 0 (?v2 0 ?v100))
+    + (?v3 1 ?v100) → (?v2 0 (?v3 1 ?v100))
+    + (?v3 1 ?v100) → (?v3 1 (?v3 ?v100 1))
+    + (?v3 1 ?v100) → (?v3 1 (?v2 0 ?v100))
+    + (?v3 1 ?v100) → (?v3 1 (?v3 1 ?v100))
+    + (?v3 1 ?v100) → (?v2 (?v2 ?v100 0) 0)
+  rustified: 0 reducing → substrate | 0 equivalence → ledger only | 16 semantic duplicates rejected
+  top apparatuses (by theorem yield): ["clamped-crgate-0-maxzero-2-x2-0-crgate-1-crgate-1-maxzero-1-nov+-1-clamp-2-maxzero-2-x2-2=24", "clamped-crgate-0-maxzero-2-x2-0-crgate-1-crgate-1-maxzero-1-nov+-1-clamp-2-clamp-1-crgate-1-meta+-2-nov+-2-nov+-2=24", "clamped-crgate-0-maxzero-2-x2-0-x2-0-meta+-1=23", "clamped-crgate-0-maxzero-2-x2-0-x2-0-clamp-2=23", "clamped-crgate-0-maxzero-2-x2-0-crgate-1-crgate-1-maxzero-1-nov+-1-clamp-2-maxzero-2-x2-2-nov+-1=22", "clamped-crgate-0-maxzero-2-x2-0-x2-0=21"]
+  cycle elapsed: 8.0s
+
+  ⚠ SATURATION DETECTED — last 2 cycles produced 0 admissions
+    current mechanism: cms=5, ccap=30, cbd=4, sft=false, emss=3, vsa=24, emn=8
+    invoking saturation response...
+    ✓ self-mutation: Compound([BumpExtractMinShared(1), BumpCandidateMaxSize(1)]) (24.1s)
+    new mechanism: cms=6, ccap=30, cbd=4, sft=false, emss=4, vsa=24, emn=8
+
+── cycle 26 / 30 ─────  pool size: 24  substrate size: 12  ledger size: 73
+  sub-campaign: 4000 probes, 642 structural rules, 23 apparatuses with yield
+  new theorems discovered: 16
+    + (?v2 (?v3 ?v100 ?v101) ?v100) → (?v3 ?v100 (?v1 ?v101))
+    + (?v2 (?v3 ?v100 ?v101) ?v100) → (?v3 (?v1 ?v101) ?v100)
+    + (?v2 (?v3 ?v100 ?v101) ?v100) → (?v2 ?v100 (?v3 ?v100 ?v101))
+    + (?v2 (?v3 ?v100 ?v101) ?v100) → (?v2 ?v100 (?v3 ?v101 ?v100))
+    + (?v2 (?v3 ?v100 ?v101) ?v100) → (?v3 ?v100 (?v2 ?v101 1))
+    + (?v2 (?v3 ?v100 ?v101) ?v100) → (?v3 ?v100 (?v2 1 ?v101))
+    + (?v2 (?v3 ?v100 ?v101) ?v100) → (?v2 (?v3 ?v100 ?v101) ?v100)
+    + (?v2 (?v3 ?v100 ?v101) ?v100) → (?v2 (?v3 ?v101 ?v100) ?v100)
+    + (?v2 (?v3 ?v100 ?v101) ?v100) → (?v3 (?v2 ?v101 1) ?v100)
+    + (?v2 (?v3 ?v100 ?v101) ?v100) → (?v3 (?v2 1 ?v101) ?v100)
+    + (?v2 (?v3 ?v100 ?v101) ?v100) → (?v3 ?v100 (?v1 (?v2 ?v101 0)))
+    + (?v2 (?v3 ?v100 ?v101) ?v100) → (?v3 ?v100 (?v1 (?v3 ?v101 1)))
+    + (?v2 (?v3 ?v100 ?v101) ?v100) → (?v3 ?v100 (?v1 (?v2 0 ?v101)))
+    + (?v2 (?v3 ?v100 ?v101) ?v100) → (?v3 ?v100 (?v1 (?v3 1 ?v101)))
+    + (?v2 (?v3 ?v100 ?v101) ?v100) → (?v3 ?v100 (?v2 ?v101 (?v1 0)))
+    + (?v2 (?v3 ?v100 ?v101) ?v100) → (?v3 ?v100 (?v2 0 (?v1 ?v101)))
+  rustified: 2 reducing → substrate | 8 equivalence → ledger only | 6 semantic duplicates rejected
+  top apparatuses (by theorem yield): ["clamped-crgate-0-maxzero-2-x2-0-x2-0-clamp-2-nov+-1=14", "clamped-crgate-0-maxzero-2-x2-0-crgate-1-crgate-1-maxzero-1-nov+-1-clamp-2-maxzero-2-x2-2-nov+-1=13", "clamped-crgate-0-maxzero-2-x2-0-crgate-1-crgate-1-maxzero-1-nov+-1-clamp-2-maxzero-2-x2-2-nov+-1=13", "clamped-crgate-0-maxzero-2-x2-0-crgate-1-crgate-1-maxzero-1-nov+-1-clamp-2-clamp-1-crgate-1-meta+-2-nov+-2-nov+-2-meta+-0=12", "clamped-crgate-0-maxzero-2-x2-0-crgate-1-crgate-1-maxzero-1-nov+-1-clamp-2-maxzero-2-x2-2-nov+-1-crgate-2=12", "clamped-crgate-0-maxzero-2-x2-0-crgate-1-crgate-1-maxzero-1-nov+-1-clamp-2-maxzero-2-x2-2=11"]
+  cycle elapsed: 96.0s
+
+── cycle 27 / 30 ─────  pool size: 24  substrate size: 14  ledger size: 83
+  sub-campaign: 4000 probes, 698 structural rules, 23 apparatuses with yield
+  new theorems discovered: 16
+    + (?v3 ?v100 (?v1 ?v101)) → (?v3 ?v100 (?v1 ?v101))
+    + (?v3 ?v100 (?v1 ?v101)) → (?v3 (?v1 ?v101) ?v100)
+    + (?v3 ?v100 (?v1 ?v101)) → (?v2 ?v100 (?v3 ?v100 ?v101))
+    + (?v3 ?v100 (?v1 ?v101)) → (?v2 ?v100 (?v3 ?v101 ?v100))
+    + (?v3 ?v100 (?v1 ?v101)) → (?v3 ?v100 (?v2 ?v101 1))
+    + (?v3 ?v100 (?v1 ?v101)) → (?v3 ?v100 (?v2 1 ?v101))
+    + (?v3 ?v100 (?v1 ?v101)) → (?v2 (?v3 ?v100 ?v101) ?v100)
+    + (?v3 ?v100 (?v1 ?v101)) → (?v2 (?v3 ?v101 ?v100) ?v100)
+    + (?v3 ?v100 (?v1 ?v101)) → (?v3 (?v2 ?v101 1) ?v100)
+    + (?v3 ?v100 (?v1 ?v101)) → (?v3 (?v2 1 ?v101) ?v100)
+    + (?v3 ?v100 (?v1 ?v101)) → (?v3 ?v100 (?v1 (?v2 ?v101 0)))
+    + (?v3 ?v100 (?v1 ?v101)) → (?v3 ?v100 (?v1 (?v3 ?v101 1)))
+    + (?v3 ?v100 (?v1 ?v101)) → (?v3 ?v100 (?v1 (?v2 0 ?v101)))
+    + (?v3 ?v100 (?v1 ?v101)) → (?v3 ?v100 (?v1 (?v3 1 ?v101)))
+    + (?v3 ?v100 (?v1 ?v101)) → (?v3 ?v100 (?v2 ?v101 (?v1 0)))
+    + (?v3 ?v100 (?v1 ?v101)) → (?v3 ?v100 (?v2 0 (?v1 ?v101)))
+  rustified: 0 reducing → substrate | 10 equivalence → ledger only | 6 semantic duplicates rejected
+  top apparatuses (by theorem yield): ["clamped-crgate-0-maxzero-2-x2-0-crgate-1-crgate-1-maxzero-1-nov+-1-clamp-2-maxzero-2-x2-2=14", "clamped-crgate-0-maxzero-2-x2-0-crgate-1-crgate-1-maxzero-1-nov+-1-clamp-2-maxzero-2-x2-2-nov+-1-x2-2=14", "clamped-crgate-0-maxzero-2-x2-0-crgate-1-crgate-1-maxzero-1-nov+-1-clamp-2-maxzero-2-x2-2-nov+-1-x2-0=13", "clamped-crgate-0-maxzero-2-x2-0-x2-0-clamp-2-nov+-1=12", "clamped-crgate-0-maxzero-2-x2-0-crgate-1-crgate-1-maxzero-1-nov+-1-clamp-2-maxzero-2-x2-2-nov+-1=12", "clamped-crgate-0-maxzero-2-x2-0-crgate-1-crgate-1-maxzero-1-nov+-1-clamp-2-maxzero-2-x2-2-nov+-1=12"]
+  cycle elapsed: 116.6s
+
+── cycle 28 / 30 ─────  pool size: 24  substrate size: 14  ledger size: 93
+  sub-campaign: 4000 probes, 710 structural rules, 23 apparatuses with yield
+  new theorems discovered: 16
+    + (?v3 ?v100 (?v2 ?v101 2)) → (?v3 ?v100 (?v1 (?v2 ?v101 1)))
+    + (?v3 ?v100 (?v2 ?v101 2)) → (?v3 ?v100 (?v1 (?v2 1 ?v101)))
+    + (?v3 ?v100 (?v2 ?v101 2)) → (?v2 ?v100 (?v3 ?v100 (?v1 ?v101)))
+    + (?v3 ?v100 (?v2 ?v101 2)) → (?v3 ?v100 (?v2 ?v101 (?v1 1)))
+    + (?v3 ?v100 (?v2 ?v101 2)) → (?v3 ?v100 (?v2 1 (?v1 ?v101)))
+    + (?v3 ?v100 (?v2 ?v101 2)) → (?v2 ?v100 (?v3 (?v1 ?v101) ?v100))
+    + (?v3 ?v100 (?v2 ?v101 2)) → (?v3 ?v100 (?v2 (?v1 ?v101) 1))
+    + (?v3 ?v100 (?v2 ?v101 2)) → (?v3 ?v100 (?v2 (?v1 1) ?v101))
+    + (?v3 ?v100 (?v2 ?v101 2)) → (?v3 (?v1 (?v2 ?v101 1)) ?v100)
+    + (?v3 ?v100 (?v2 ?v101 2)) → (?v3 (?v1 (?v2 1 ?v101)) ?v100)
+    + (?v3 ?v100 (?v2 ?v101 2)) → (?v3 (?v2 ?v101 (?v1 1)) ?v100)
+    + (?v3 ?v100 (?v2 ?v101 2)) → (?v3 (?v2 1 (?v1 ?v101)) ?v100)
+    + (?v3 ?v100 (?v2 ?v101 2)) → (?v3 (?v2 (?v1 ?v101) 1) ?v100)
+    + (?v3 ?v100 (?v2 ?v101 2)) → (?v3 (?v2 (?v1 1) ?v101) ?v100)
+    + (?v3 ?v100 (?v2 ?v101 2)) → (?v2 (?v2 ?v100 0) (?v3 ?v100 (?v1 ?v101)))
+    + (?v3 ?v100 (?v2 ?v101 2)) → (?v2 (?v2 ?v100 0) (?v3 (?v1 ?v101) ?v100))
+  rustified: 0 reducing → substrate | 6 equivalence → ledger only | 10 semantic duplicates rejected
+  top apparatuses (by theorem yield): ["clamped-crgate-0-maxzero-2-x2-0-crgate-1-crgate-1-maxzero-1-nov+-1-clamp-2-maxzero-2-x2-2-nov+-1-x2-0-meta+-2=15", "clamped-crgate-0-maxzero-2-x2-0-crgate-1-crgate-1-maxzero-1-nov+-1-clamp-2-maxzero-2-x2-2-nov+-1=14", "clamped-crgate-0-maxzero-2-x2-0-crgate-1-crgate-1-maxzero-1-nov+-1-clamp-2-maxzero-2-x2-2-nov+-1=14", "clamped-crgate-0-maxzero-2-x2-0-crgate-1-crgate-1-maxzero-1-nov+-1-clamp-2-maxzero-2-x2-2-nov+-1-x2-0-meta+-0=13", "clamped-crgate-0-maxzero-2-x2-0-x2-0-clamp-2-nov+-1-meta+-1=13", "clamped-crgate-0-maxzero-2-x2-0-crgate-1-crgate-1-maxzero-1-nov+-1-clamp-2-maxzero-2-x2-2=12"]
+  cycle elapsed: 107.9s
+
+── cycle 29 / 30 ─────  pool size: 24  substrate size: 14  ledger size: 99
+  sub-campaign: 4000 probes, 722 structural rules, 23 apparatuses with yield
+  new theorems discovered: 16
+    + (?v3 ?v100 (?v2 ?v101 2)) → (?v3 ?v100 (?v1 (?v2 1 ?v101)))
+    + (?v3 ?v100 (?v2 ?v101 2)) → (?v2 ?v100 (?v3 ?v100 (?v1 ?v101)))
+    + (?v3 ?v100 (?v2 ?v101 2)) → (?v2 ?v100 (?v3 (?v1 ?v101) ?v100))
+    + (?v3 ?v100 (?v2 ?v101 2)) → (?v3 ?v100 (?v2 (?v1 ?v101) 1))
+    + (?v3 ?v100 (?v2 ?v101 2)) → (?v3 ?v100 (?v2 (?v1 1) ?v101))
+    + (?v3 ?v100 (?v2 ?v101 2)) → (?v3 (?v1 (?v2 1 ?v101)) ?v100)
+    + (?v3 ?v100 (?v2 ?v101 2)) → (?v3 (?v2 (?v1 ?v101) 1) ?v100)
+    + (?v3 ?v100 (?v2 ?v101 2)) → (?v3 (?v2 (?v1 1) ?v101) ?v100)
+    + (?v3 ?v100 (?v2 ?v101 2)) → (?v2 (?v2 ?v100 0) (?v3 ?v100 (?v1 ?v101)))
+    + (?v3 ?v100 (?v2 ?v101 2)) → (?v2 (?v2 ?v100 0) (?v3 (?v1 ?v101) ?v100))
+    + (?v3 ?v100 (?v2 ?v101 2)) → (?v2 (?v3 ?v100 1) (?v3 ?v100 (?v1 ?v101)))
+    + (?v3 ?v100 (?v2 ?v101 2)) → (?v2 (?v3 ?v100 1) (?v3 (?v1 ?v101) ?v100))
+    + (?v3 ?v100 (?v2 ?v101 2)) → (?v2 (?v3 ?v100 (?v1 0)) (?v3 ?v100 (?v1 ?v101)))
+    + (?v3 ?v100 (?v2 ?v101 2)) → (?v2 (?v3 ?v100 (?v1 0)) (?v3 (?v1 ?v101) ?v100))
+    + (?v3 ?v100 (?v2 ?v101 2)) → (?v2 (?v2 ?v100 (?v3 ?v100 0)) (?v3 ?v100 (?v1 ?v101)))
+    + (?v3 ?v100 (?v2 ?v101 2)) → (?v2 (?v2 ?v100 (?v3 ?v100 0)) (?v3 (?v1 ?v101) ?v100))
+  rustified: 0 reducing → substrate | 0 equivalence → ledger only | 16 semantic duplicates rejected
+  top apparatuses (by theorem yield): ["clamped-crgate-0-maxzero-2-x2-0-crgate-1-crgate-1-maxzero-1-nov+-1-clamp-2-maxzero-2-x2-2-nov+-1-nov+-2=15", "clamped-crgate-0-maxzero-2-x2-0-crgate-1-crgate-1-maxzero-1-nov+-1-clamp-2-maxzero-2-x2-2=14", "clamped-crgate-0-maxzero-2-x2-0-crgate-1-crgate-1-maxzero-1-nov+-1-clamp-2-maxzero-2-x2-2-nov+-1-nov+-0=14", "clamped-crgate-0-maxzero-2-x2-0-crgate-1-crgate-1-maxzero-1-nov+-1-clamp-2-maxzero-2-x2-2-nov+-1-x2-0-meta+-2=12", "clamped-crgate-0-maxzero-2-x2-0-crgate-1-crgate-1-maxzero-1-nov+-1-clamp-2-maxzero-2-x2-2-nov+-1=12", "clamped-crgate-0-maxzero-2-x2-0-crgate-1-crgate-1-maxzero-1-nov+-1-clamp-2-maxzero-2-x2-2-nov+-1=12"]
+  cycle elapsed: 137.4s
+
+── cycle 30 / 30 ─────  pool size: 24  substrate size: 14  ledger size: 99
+  sub-campaign: 4000 probes, 732 structural rules, 23 apparatuses with yield
+  new theorems discovered: 16
+    + (?v3 ?v100 (?v2 ?v101 2)) → (?v3 ?v100 (?v1 (?v2 1 ?v101)))
+    + (?v3 ?v100 (?v2 ?v101 2)) → (?v2 ?v100 (?v3 ?v100 (?v1 ?v101)))
+    + (?v3 ?v100 (?v2 ?v101 2)) → (?v2 ?v100 (?v3 (?v1 ?v101) ?v100))
+    + (?v3 ?v100 (?v2 ?v101 2)) → (?v3 ?v100 (?v2 (?v1 ?v101) 1))
+    + (?v3 ?v100 (?v2 ?v101 2)) → (?v3 ?v100 (?v2 (?v1 1) ?v101))
+    + (?v3 ?v100 (?v2 ?v101 2)) → (?v3 (?v1 (?v2 1 ?v101)) ?v100)
+    + (?v3 ?v100 (?v2 ?v101 2)) → (?v3 (?v2 (?v1 ?v101) 1) ?v100)
+    + (?v3 ?v100 (?v2 ?v101 2)) → (?v3 (?v2 (?v1 1) ?v101) ?v100)
+    + (?v3 ?v100 (?v2 ?v101 2)) → (?v2 (?v2 ?v100 0) (?v3 ?v100 (?v1 ?v101)))
+    + (?v3 ?v100 (?v2 ?v101 2)) → (?v2 (?v2 ?v100 0) (?v3 (?v1 ?v101) ?v100))
+    + (?v3 ?v100 (?v2 ?v101 2)) → (?v2 (?v3 ?v100 1) (?v3 ?v100 (?v1 ?v101)))
+    + (?v3 ?v100 (?v2 ?v101 2)) → (?v2 (?v3 ?v100 1) (?v3 (?v1 ?v101) ?v100))
+    + (?v3 ?v100 (?v2 ?v101 2)) → (?v2 (?v3 ?v100 (?v1 0)) (?v3 ?v100 (?v1 ?v101)))
+    + (?v3 ?v100 (?v2 ?v101 2)) → (?v2 (?v3 ?v100 (?v1 0)) (?v3 (?v1 ?v101) ?v100))
+    + (?v3 ?v100 (?v2 ?v101 2)) → (?v2 (?v2 ?v100 (?v3 ?v100 0)) (?v3 ?v100 (?v1 ?v101)))
+    + (?v3 ?v100 (?v2 ?v101 2)) → (?v2 (?v2 ?v100 (?v3 ?v100 0)) (?v3 (?v1 ?v101) ?v100))
+  rustified: 0 reducing → substrate | 0 equivalence → ledger only | 16 semantic duplicates rejected
+  top apparatuses (by theorem yield): ["clamped-crgate-0-maxzero-2-x2-0-crgate-1-crgate-1-maxzero-1-nov+-1-clamp-2-maxzero-2-x2-2-nov+-1=14", "clamped-crgate-0-maxzero-2-x2-0-crgate-1-crgate-1-maxzero-1-nov+-1-clamp-2-maxzero-2-x2-2-nov+-1=14", "clamped-crgate-0-maxzero-2-x2-0-crgate-1-crgate-1-maxzero-1-nov+-1-clamp-2-maxzero-2-x2-2-clamp-0=13", "clamped-crgate-0-maxzero-2-x2-0-crgate-1-crgate-1-maxzero-1-nov+-1-clamp-2-maxzero-2-x2-2-nov+-1-nov+-2=12", "clamped-crgate-0-maxzero-2-x2-0-crgate-1-crgate-1-maxzero-1-nov+-1-clamp-2-maxzero-2-x2-2-nov+-1-nov+-2-x2-1=12", "clamped-crgate-0-maxzero-2-x2-0-crgate-1-crgate-1-maxzero-1-nov+-1-clamp-2-maxzero-2-x2-2-nov+-1-nov+-0-crgate-0=12"]
+  cycle elapsed: 134.6s
+
+  ⚠ SATURATION DETECTED — last 2 cycles produced 0 admissions
+    current mechanism: cms=6, ccap=30, cbd=4, sft=false, emss=4, vsa=24, emn=8
+    invoking saturation response...

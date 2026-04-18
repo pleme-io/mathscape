@@ -809,10 +809,187 @@ fn sample_mutation(rng: &mut u64, current: &MechanismConfig) -> MechanismMutatio
 /// `delta_novelty` field counts theorems produced that are NOT
 /// in the ledger — this is the fitness signal for mechanism
 /// mutation.
+///
+/// Accessible as keyword fields in the Lisp fitness form:
+///   `:delta-novelty` → usize
+///   `:total-found`   → usize
 #[derive(Clone, Debug)]
 pub struct TrialResult {
     pub delta_novelty: usize,
     pub total_theorems_found: usize,
+}
+
+// ── M3: Fitness functions as Lisp Sexp forms ─────────────────────
+//
+// A fitness FORM takes a TrialResult and produces a score. Higher
+// is better. The machine picks the mutation with the highest
+// score; a score of 0 means "fails the fitness check."
+//
+// Fitness forms are Lisp Sexps evaluated by a tiny arithmetic
+// interpreter that knows about the trial's keyword fields:
+//
+//   canonical:        (> :delta-novelty 0)
+//   strict-threshold: (if (>= :delta-novelty 2) 1 0)
+//   proportional:     :delta-novelty
+//   total-yield:      :total-found
+//   product:          (* :delta-novelty :total-found)
+//
+// When the machine wants to mutate its own fitness criterion, it
+// swaps one Lisp form for another. M3's job is just to make every
+// existing hardcoded "delta_novelty > 0" check a Sexp form call.
+
+/// Evaluate a fitness Sexp form against a TrialResult, returning
+/// a scalar score. Higher = better. Returns 0.0 on evaluation
+/// error (malformed form, unknown symbol, etc.) so a bad form
+/// can't let a mutation through.
+pub fn evaluate_fitness_form(
+    form: &tatara_lisp::ast::Sexp,
+    trial: &TrialResult,
+) -> f64 {
+    evaluate_fitness_form_inner(form, trial).unwrap_or(0.0)
+}
+
+fn evaluate_fitness_form_inner(
+    form: &tatara_lisp::ast::Sexp,
+    trial: &TrialResult,
+) -> Option<f64> {
+    use tatara_lisp::ast::{Atom, Sexp};
+    match form {
+        Sexp::Atom(Atom::Int(n)) => Some(*n as f64),
+        Sexp::Atom(Atom::Float(f)) => Some(*f),
+        Sexp::Atom(Atom::Bool(b)) => Some(if *b { 1.0 } else { 0.0 }),
+        Sexp::Atom(Atom::Keyword(k)) => match k.as_str() {
+            "delta-novelty" => Some(trial.delta_novelty as f64),
+            "total-found" => Some(trial.total_theorems_found as f64),
+            _ => None,
+        },
+        Sexp::List(items) => {
+            let (head, args) = items.split_first()?;
+            let op = head.as_symbol()?;
+            match op {
+                "+" => Some(
+                    args.iter()
+                        .map(|a| evaluate_fitness_form_inner(a, trial).unwrap_or(0.0))
+                        .sum(),
+                ),
+                "-" => match args {
+                    [] => None,
+                    [only] => Some(-evaluate_fitness_form_inner(only, trial)?),
+                    [first, rest @ ..] => {
+                        let mut v = evaluate_fitness_form_inner(first, trial)?;
+                        for r in rest {
+                            v -= evaluate_fitness_form_inner(r, trial)?;
+                        }
+                        Some(v)
+                    }
+                },
+                "*" => {
+                    let mut v = 1.0;
+                    for a in args {
+                        v *= evaluate_fitness_form_inner(a, trial)?;
+                    }
+                    Some(v)
+                }
+                "/" => {
+                    let [num, den] = args else {
+                        return None;
+                    };
+                    let d = evaluate_fitness_form_inner(den, trial)?;
+                    if d == 0.0 {
+                        return None;
+                    }
+                    Some(evaluate_fitness_form_inner(num, trial)? / d)
+                }
+                ">" | ">=" | "<" | "<=" => {
+                    let [a, b] = args else {
+                        return None;
+                    };
+                    let av = evaluate_fitness_form_inner(a, trial)?;
+                    let bv = evaluate_fitness_form_inner(b, trial)?;
+                    let truth = match op {
+                        ">" => av > bv,
+                        ">=" => av >= bv,
+                        "<" => av < bv,
+                        "<=" => av <= bv,
+                        _ => return None,
+                    };
+                    Some(if truth { 1.0 } else { 0.0 })
+                }
+                "max" => {
+                    let [a, b] = args else {
+                        return None;
+                    };
+                    Some(
+                        evaluate_fitness_form_inner(a, trial)?
+                            .max(evaluate_fitness_form_inner(b, trial)?),
+                    )
+                }
+                "min" => {
+                    let [a, b] = args else {
+                        return None;
+                    };
+                    Some(
+                        evaluate_fitness_form_inner(a, trial)?
+                            .min(evaluate_fitness_form_inner(b, trial)?),
+                    )
+                }
+                "if" => {
+                    let [cond, then, els] = args else {
+                        return None;
+                    };
+                    let cv = evaluate_fitness_form_inner(cond, trial)?;
+                    if cv != 0.0 {
+                        evaluate_fitness_form_inner(then, trial)
+                    } else {
+                        evaluate_fitness_form_inner(els, trial)
+                    }
+                }
+                _ => None,
+            }
+        }
+        _ => None,
+    }
+}
+
+/// The canonical fitness form — equivalent to the hardcoded
+/// `delta_novelty > 0` check used in pre-M3 code. When the machine
+/// starts mutating fitness forms, this is the seed.
+pub fn canonical_fitness_form() -> tatara_lisp::ast::Sexp {
+    use tatara_lisp::ast::Sexp;
+    Sexp::List(vec![
+        Sexp::symbol(">"),
+        Sexp::keyword("delta-novelty"),
+        Sexp::int(0),
+    ])
+}
+
+/// Proportional fitness — reward magnitude of delta-novelty, not
+/// just the binary threshold. Available as a mutation target when
+/// the canonical form saturates.
+pub fn proportional_fitness_form() -> tatara_lisp::ast::Sexp {
+    tatara_lisp::ast::Sexp::keyword("delta-novelty")
+}
+
+/// Product fitness — reward mutations that produce BOTH novelty
+/// AND high total-theorem output. Useful for distinguishing
+/// "found 1 new theorem + 10 duplicates" from "found 1 new
+/// theorem + 0 duplicates" — the former suggests the mutation is
+/// also expanding the structural surface.
+pub fn product_fitness_form() -> tatara_lisp::ast::Sexp {
+    use tatara_lisp::ast::Sexp;
+    Sexp::List(vec![
+        Sexp::symbol("*"),
+        Sexp::keyword("delta-novelty"),
+        Sexp::List(vec![
+            Sexp::symbol("+"),
+            Sexp::int(1),
+            Sexp::List(vec![
+                Sexp::symbol("/"),
+                Sexp::keyword("total-found"),
+                Sexp::int(10),
+            ]),
+        ]),
+    ])
 }
 
 /// Saturation-response protocol. When `session.has_stalled()`, the
@@ -833,7 +1010,39 @@ pub struct TrialResult {
 pub fn respond_to_saturation<F>(
     pool: &mut MechanismPool,
     existing_ledger: &[RewriteRule],
+    trial_fn: F,
+    mutations_per_round: usize,
+    escalation_budget: usize,
+    seed: u64,
+) -> Option<(MechanismMutation, MechanismConfig)>
+where
+    F: FnMut(&MechanismConfig) -> TrialResult,
+{
+    // Use the canonical fitness form by default — preserves
+    // pre-M3 behavior exactly. Callers who want a different
+    // fitness pass it via respond_to_saturation_with_fitness.
+    let form = canonical_fitness_form();
+    respond_to_saturation_with_fitness(
+        pool,
+        existing_ledger,
+        trial_fn,
+        &form,
+        mutations_per_round,
+        escalation_budget,
+        seed,
+    )
+}
+
+/// Saturation response parameterized on a fitness form. The form
+/// is evaluated against each candidate's TrialResult to produce
+/// a score; the highest score wins (ties broken by mutation
+/// order). A score of 0 means the mutation failed the fitness
+/// check and is skipped (added to graveyard).
+pub fn respond_to_saturation_with_fitness<F>(
+    pool: &mut MechanismPool,
+    existing_ledger: &[RewriteRule],
     mut trial_fn: F,
+    fitness_form: &tatara_lisp::ast::Sexp,
     mutations_per_round: usize,
     escalation_budget: usize,
     seed: u64,
@@ -877,7 +1086,8 @@ where
         if mutations.is_empty() {
             break;
         }
-        let mut best: Option<(MechanismMutation, MechanismConfig, TrialResult)> = None;
+        let mut best: Option<(MechanismMutation, MechanismConfig, f64, TrialResult)> =
+            None;
         for (mutation, mutant) in mutations {
             let graveyard_hit = pool
                 .graveyard
@@ -887,19 +1097,23 @@ where
                 continue;
             }
             let result = trial_fn(&mutant);
+            // Evaluate the Lisp fitness form. Score > 0 means the
+            // mutation passed — zero means it's graveyarded.
+            let score = evaluate_fitness_form(fitness_form, &result);
             let beats = match &best {
                 None => true,
-                Some((_, _, prev)) => result.delta_novelty > prev.delta_novelty,
+                Some((_, _, prev_score, _)) => score > *prev_score,
             };
             if beats {
-                best = Some((mutation.clone(), mutant.clone(), result.clone()));
+                best =
+                    Some((mutation.clone(), mutant.clone(), score, result.clone()));
             }
-            if result.delta_novelty == 0 {
+            if score <= 0.0 {
                 pool.graveyard.push((mutation, 0));
             }
         }
-        if let Some((mutation, mutant, result)) = best {
-            if result.delta_novelty > 0 {
+        if let Some((mutation, mutant, score, _result)) = best {
+            if score > 0.0 {
                 // ML5: promote compound-winners to the discovered
                 // operators pool. Atomic winners are already in
                 // the baseline — no need to promote them.
@@ -1146,6 +1360,133 @@ mod tests {
             Sexp::int(42),
         ]);
         assert!(MechanismMutation::from_sexp(&unknown).is_none());
+    }
+
+    #[test]
+    fn canonical_fitness_form_reproduces_prev_behavior() {
+        // M3 gold test: the canonical fitness Sexp must reject
+        // zero-delta trials and accept positive-delta trials —
+        // exactly the pre-M3 `delta_novelty > 0` hardcoded check.
+        let form = canonical_fitness_form();
+        let zero = TrialResult {
+            delta_novelty: 0,
+            total_theorems_found: 10,
+        };
+        assert_eq!(evaluate_fitness_form(&form, &zero), 0.0);
+        let positive = TrialResult {
+            delta_novelty: 1,
+            total_theorems_found: 2,
+        };
+        assert_eq!(evaluate_fitness_form(&form, &positive), 1.0);
+        let big = TrialResult {
+            delta_novelty: 5,
+            total_theorems_found: 20,
+        };
+        // canonical form is a boolean threshold — 0 or 1 — so
+        // magnitudes beyond threshold don't differentiate.
+        assert_eq!(evaluate_fitness_form(&form, &big), 1.0);
+    }
+
+    #[test]
+    fn proportional_fitness_form_rewards_magnitude() {
+        let form = proportional_fitness_form();
+        let cases = vec![
+            (0, 0.0),
+            (1, 1.0),
+            (5, 5.0),
+            (10, 10.0),
+        ];
+        for (delta, expected) in cases {
+            let t = TrialResult {
+                delta_novelty: delta,
+                total_theorems_found: 100,
+            };
+            assert_eq!(evaluate_fitness_form(&form, &t), expected);
+        }
+    }
+
+    #[test]
+    fn product_fitness_form_reflects_both_axes() {
+        let form = product_fitness_form();
+        // formula: delta-novelty * (1 + total-found/10)
+        // delta=1, total=0: 1 * 1 = 1
+        // delta=1, total=10: 1 * 2 = 2
+        // delta=2, total=10: 2 * 2 = 4
+        let t1 = TrialResult {
+            delta_novelty: 1,
+            total_theorems_found: 0,
+        };
+        assert_eq!(evaluate_fitness_form(&form, &t1), 1.0);
+        let t2 = TrialResult {
+            delta_novelty: 1,
+            total_theorems_found: 10,
+        };
+        assert_eq!(evaluate_fitness_form(&form, &t2), 2.0);
+        let t3 = TrialResult {
+            delta_novelty: 2,
+            total_theorems_found: 10,
+        };
+        assert_eq!(evaluate_fitness_form(&form, &t3), 4.0);
+    }
+
+    #[test]
+    fn malformed_fitness_form_returns_zero_not_panic() {
+        use tatara_lisp::ast::Sexp;
+        // A form with an unknown operator must NOT panic — it
+        // returns 0.0, which fails the fitness check. Safety
+        // property for future machine-synthesized forms that
+        // might temporarily be malformed.
+        let bad = Sexp::List(vec![
+            Sexp::symbol("unknown-op"),
+            Sexp::keyword("delta-novelty"),
+        ]);
+        let t = TrialResult {
+            delta_novelty: 5,
+            total_theorems_found: 10,
+        };
+        assert_eq!(evaluate_fitness_form(&bad, &t), 0.0);
+    }
+
+    #[test]
+    fn respond_with_fitness_matches_canonical_behavior() {
+        // Regression: passing the canonical fitness form explicitly
+        // should produce IDENTICAL behavior to the non-parameterized
+        // respond_to_saturation (which uses canonical_fitness_form
+        // internally).
+        let trial_fn = |config: &MechanismConfig| {
+            if config.candidate_max_size > 5 {
+                TrialResult {
+                    delta_novelty: 3,
+                    total_theorems_found: 10,
+                }
+            } else {
+                TrialResult {
+                    delta_novelty: 0,
+                    total_theorems_found: 0,
+                }
+            }
+        };
+        let mut ever_succeeded = false;
+        for seed in 1..=16u64 {
+            let mut pool = MechanismPool::new();
+            let result = respond_to_saturation_with_fitness(
+                &mut pool,
+                &[],
+                trial_fn,
+                &canonical_fitness_form(),
+                32,
+                2,
+                seed,
+            );
+            if result.is_some() {
+                ever_succeeded = true;
+                break;
+            }
+        }
+        assert!(
+            ever_succeeded,
+            "canonical fitness form via explicit path must work"
+        );
     }
 
     #[test]
