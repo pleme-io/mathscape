@@ -76,6 +76,11 @@ fn format_term(t: &Term) -> String {
     match t {
         Term::Var(v) => format!("?v{v}"),
         Term::Number(Value::Nat(n)) => n.to_string(),
+        // R7: Int prints with an 'i' suffix to distinguish in
+        // theorem keys — e.g. 3i for Int(3), 3 for Nat(3). Keeps
+        // cross-domain theorems structurally distinct in the
+        // theorem_key.
+        Term::Number(Value::Int(n)) => format!("{n}i"),
         Term::Apply(f, args) => {
             let fs = format_term(f);
             let ass: Vec<String> = args.iter().map(format_term).collect();

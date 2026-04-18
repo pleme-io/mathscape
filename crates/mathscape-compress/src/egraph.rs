@@ -78,6 +78,19 @@ define_language! {
 pub fn term_to_recexpr(term: &Term, expr: &mut RecExpr<MathscapeLang>) -> Id {
     match term {
         Term::Number(Value::Nat(n)) => expr.add(MathscapeLang::Num(*n)),
+        // R7 (2026-04-18): Int encoded into egg by reinterpreting
+        // the i64 bits as u64. Egg's Num node is u64; the kernel
+        // round-trips Int via this reinterpretation. Equivalence
+        // saturation doesn't care about semantic distinction — it
+        // operates on syntactic structure — so Int vs Nat are
+        // distinct at the egg level if the u64-bit encodings
+        // differ. For small positive Ints (common case) the bit
+        // pattern matches Nat, which is fine because the kernel
+        // never inserts cross-domain candidates into the same
+        // e-graph run.
+        Term::Number(Value::Int(n)) => {
+            expr.add(MathscapeLang::Num(*n as u64))
+        }
         Term::Var(v) => {
             let id_node = expr.add(MathscapeLang::Num(*v as u64));
             expr.add(MathscapeLang::Var([id_node]))

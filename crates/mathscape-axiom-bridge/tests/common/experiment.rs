@@ -499,6 +499,7 @@ pub fn format_term(t: &Term) -> String {
     match t {
         Term::Var(v) => format!("?v{v}"),
         Term::Number(Value::Nat(n)) => n.to_string(),
+        Term::Number(Value::Int(n)) => format!("{n}i"),
         Term::Apply(f, args) => {
             let fs = format_term(f);
             let ass: Vec<String> = args.iter().map(format_term).collect();

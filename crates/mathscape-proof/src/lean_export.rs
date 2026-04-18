@@ -141,6 +141,11 @@ fn term_to_lean(t: &Term, params: &[String]) -> String {
             }
         }
         Term::Number(Value::Nat(n)) => format!("({n} : Nat)"),
+        // R7: Int mapped to Lean's signed Int type. Lean has a
+        // distinct Int type from Nat; exporting cross-domain
+        // theorems keeps them annotated so Lean picks the right
+        // instance.
+        Term::Number(Value::Int(n)) => format!("({n} : Int)"),
         Term::Point(p) => format!("(Point.mk {p})"),
         Term::Apply(f, args) => match f.as_ref() {
             Term::Var(2) if args.len() == 2 => format!(

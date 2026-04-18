@@ -2,30 +2,94 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 
 /// A numeric value in the expression system.
-/// Starts with naturals (Peano-style), extensible to rationals/reals later.
+///
+/// R7 (2026-04-18): added `Int(i64)` as the second numeric domain.
+/// Before R7, Value was single-variant (Nat only) — the enum layer
+/// was nominally extensible but the extension had never been made,
+/// and every `match` on Value was exhaustive on one variant. Adding
+/// Int proves the enum really is extensible AND opens a second
+/// numeric domain for the machine to discover theorems in.
+///
+/// Domains are INDEPENDENT: a Nat builtin (id 0..=3) rejects Int
+/// args (returns `None` from eval), and vice versa for Int
+/// builtins (id 10..=14). No implicit promotion Nat→Int. The
+/// machine would have to discover a promotion operator itself if
+/// it wanted one — that's precisely the kind of structural
+/// discovery R7 is supposed to make tractable.
 #[derive(
     Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize,
 )]
 pub enum Value {
-    /// Natural number (Peano encoding for small values, direct for large)
+    /// Natural number. Successor-only semantics: zero is the
+    /// identity, succ is `n -> n+1`. No negation.
     Nat(u64),
+    /// Signed integer. Supports negation and a two-sided successor
+    /// semantics. Distinct from Nat at the value level — promoting
+    /// `Nat(3)` to `Int(3)` requires an explicit operator, it's not
+    /// automatic.
+    Int(i64),
 }
 
 impl Value {
+    /// Nat zero — the additive identity for the Nat domain.
+    pub fn zero_nat() -> Self {
+        Value::Nat(0)
+    }
+
+    /// Int zero — the additive identity for the Int domain.
+    pub fn zero_int() -> Self {
+        Value::Int(0)
+    }
+
+    /// Deprecated: prefer `zero_nat` / `zero_int` for explicit
+    /// domain. Kept for backward compatibility.
+    #[deprecated(note = "use zero_nat() or zero_int() — domain must be explicit post-R7")]
     pub fn zero() -> Self {
         Value::Nat(0)
     }
 
+    /// Successor — defined for both Nat and Int. Maps each value
+    /// to its +1 in its own domain.
     pub fn succ(&self) -> Self {
         match self {
             Value::Nat(n) => Value::Nat(n + 1),
+            Value::Int(n) => Value::Int(n + 1),
         }
     }
 
+    /// Negation — defined only for Int. Nat has no negatives; caller
+    /// gets `None` for Nat input. Machine-side, a would-be `neg(Nat)`
+    /// rule would fail at eval and be rejected by the prover.
+    pub fn neg(&self) -> Option<Self> {
+        match self {
+            Value::Nat(_) => None,
+            Value::Int(n) => Some(Value::Int(-n)),
+        }
+    }
+
+    /// View as Nat; `None` if this value lives in another domain.
     pub fn as_nat(&self) -> Option<u64> {
         match self {
             Value::Nat(n) => Some(*n),
+            Value::Int(_) => None,
         }
+    }
+
+    /// View as Int; `None` if this value lives in another domain.
+    pub fn as_int(&self) -> Option<i64> {
+        match self {
+            Value::Int(n) => Some(*n),
+            Value::Nat(_) => None,
+        }
+    }
+
+    /// True if both values live in the same numeric domain. Used
+    /// by eval rules that reject cross-domain args.
+    pub fn same_domain(&self, other: &Value) -> bool {
+        matches!(
+            (self, other),
+            (Value::Nat(_), Value::Nat(_)) | (Value::Int(_), Value::Int(_))
+        )
     }
 }
 
@@ -33,6 +97,13 @@ impl fmt::Display for Value {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Value::Nat(n) => write!(f, "{n}"),
+            // Int rendering disambiguates from Nat with a leading
+            // sign when negative; positive Ints print as plain
+            // digits to keep tests/golden files readable. A reader
+            // can't tell Nat(3) from Int(3) in display alone —
+            // that's by design; Display is for humans, Debug is
+            // for the machine.
+            Value::Int(n) => write!(f, "{n}"),
         }
     }
 }
@@ -40,5 +111,95 @@ impl fmt::Display for Value {
 impl From<u64> for Value {
     fn from(n: u64) -> Self {
         Value::Nat(n)
+    }
+}
+
+impl From<i64> for Value {
+    fn from(n: i64) -> Self {
+        Value::Int(n)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn nat_and_int_are_distinct_values() {
+        // Same numeric content, different domains — structurally
+        // distinct. The kernel "no equal terms" invariant applies
+        // within a domain; across domains the values are genuinely
+        // different.
+        let a = Value::Nat(3);
+        let b = Value::Int(3);
+        assert_ne!(a, b);
+    }
+
+    #[test]
+    fn succ_works_in_both_domains() {
+        assert_eq!(Value::Nat(5).succ(), Value::Nat(6));
+        assert_eq!(Value::Int(-1).succ(), Value::Int(0));
+        assert_eq!(Value::Int(5).succ(), Value::Int(6));
+    }
+
+    #[test]
+    fn neg_defined_only_for_int() {
+        assert_eq!(Value::Int(7).neg(), Some(Value::Int(-7)));
+        // Nat has no negatives — neg must refuse.
+        assert_eq!(Value::Nat(7).neg(), None);
+        // Involution: neg(neg(x)) = x for Int.
+        let once = Value::Int(42).neg().unwrap();
+        let twice = once.neg().unwrap();
+        assert_eq!(twice, Value::Int(42));
+    }
+
+    #[test]
+    fn as_nat_and_as_int_are_domain_sensitive() {
+        assert_eq!(Value::Nat(5).as_nat(), Some(5));
+        assert_eq!(Value::Nat(5).as_int(), None);
+        assert_eq!(Value::Int(5).as_int(), Some(5));
+        assert_eq!(Value::Int(5).as_nat(), None);
+    }
+
+    #[test]
+    fn same_domain_predicate() {
+        assert!(Value::Nat(3).same_domain(&Value::Nat(8)));
+        assert!(Value::Int(3).same_domain(&Value::Int(8)));
+        assert!(!Value::Nat(3).same_domain(&Value::Int(3)));
+        assert!(!Value::Int(3).same_domain(&Value::Nat(3)));
+    }
+
+    #[test]
+    fn ord_puts_nat_before_int() {
+        // Derived Ord orders variants by declaration order; Nat
+        // declared first, so Nat(anything) < Int(anything). This
+        // affects canonical sort: in an AC args list with mixed
+        // domains, Nats cluster before Ints. (Though in practice
+        // the kernel rejects mixed-domain eval, so canonical form
+        // wouldn't need to mix them.)
+        assert!(Value::Nat(1_000_000) < Value::Int(-5));
+    }
+
+    #[test]
+    fn zero_nat_and_zero_int_are_different() {
+        assert_eq!(Value::zero_nat(), Value::Nat(0));
+        assert_eq!(Value::zero_int(), Value::Int(0));
+        assert_ne!(Value::zero_nat(), Value::zero_int());
+    }
+
+    #[test]
+    fn from_u64_yields_nat_from_i64_yields_int() {
+        let a: Value = 42u64.into();
+        let b: Value = 42i64.into();
+        assert_eq!(a, Value::Nat(42));
+        assert_eq!(b, Value::Int(42));
+        assert_ne!(a, b);
+    }
+
+    #[test]
+    fn display_renders_both_domains() {
+        assert_eq!(format!("{}", Value::Nat(7)), "7");
+        assert_eq!(format!("{}", Value::Int(7)), "7");
+        assert_eq!(format!("{}", Value::Int(-3)), "-3");
     }
 }
