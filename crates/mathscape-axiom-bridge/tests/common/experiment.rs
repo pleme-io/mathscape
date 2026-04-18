@@ -642,6 +642,191 @@ pub fn print_report(r: &ExperimentReport) {
     }
 }
 
+// ── Phase L1: adaptive corpus generation ─────────────────────────
+//
+// The production half of the producer-consumer loop. As the
+// substrate absorbs theorems (consuming reachable structure),
+// these generators produce corpora that contain structure
+// survivable past the substrate's reduction — patterns at the
+// NEXT LAYER that the substrate can't fully close.
+
+/// Walks a term counting nodes.
+pub fn term_size(t: &Term) -> usize {
+    match t {
+        Term::Point(_) | Term::Number(_) | Term::Var(_) => 1,
+        Term::Apply(f, args) => {
+            1 + term_size(f) + args.iter().map(term_size).sum::<usize>()
+        }
+        Term::Symbol(_, args) => 1 + args.iter().map(term_size).sum::<usize>(),
+        Term::Fn(params, body) => 1 + params.len() + term_size(body),
+    }
+}
+
+fn xorshift_u64(state: &mut u64) -> u64 {
+    if *state == 0 {
+        *state = 0x9E37_79B9_7F4A_7C15;
+    }
+    *state ^= *state << 13;
+    *state ^= *state >> 7;
+    *state ^= *state << 17;
+    *state
+}
+
+/// Pick a random available operator. `{add=2, mul=3, succ=4}` is
+/// the base Peano vocab. The generator can mix in other ops (sub=5,
+/// div=6, pred=7) when the adaptive-corpus caller supplies them.
+fn pick_operator(state: &mut u64, vocab: &[u32]) -> u32 {
+    vocab[(xorshift_u64(state) as usize) % vocab.len()]
+}
+
+fn op_arity(op: u32) -> usize {
+    match op {
+        1 | 4 | 7 => 1, // succ / pred / unary
+        _ => 2,         // add, mul, sub, div — binary
+    }
+}
+
+/// Build a random leaf term — a small natural.
+fn random_leaf(state: &mut u64, max_value: u64) -> Term {
+    nat(xorshift_u64(state) % max_value)
+}
+
+/// Instantiate a substrate rule's LHS by replacing pattern variables
+/// with randomly-generated subterms of the given depth. Produces a
+/// term that WILL match the rule's LHS and therefore reduce to the
+/// rule's RHS under substrate application.
+fn instantiate_rule_lhs(
+    rule: &mathscape_core::eval::RewriteRule,
+    state: &mut u64,
+    depth: usize,
+    vocab: &[u32],
+    max_value: u64,
+) -> Term {
+    let mut lhs = rule.lhs.clone();
+    // Collect pattern variables in rule.lhs (ids >= 100).
+    let mut vars: Vec<u32> = Vec::new();
+    collect_vars(&lhs, &mut vars);
+    vars.sort();
+    vars.dedup();
+    for v in vars {
+        let sub = build_residue_term(state, depth, vocab, max_value);
+        lhs = lhs.substitute(v, &sub);
+    }
+    lhs
+}
+
+fn collect_vars(t: &Term, out: &mut Vec<u32>) {
+    match t {
+        Term::Var(v) if *v >= 100 => out.push(*v),
+        Term::Var(_) => {}
+        Term::Apply(f, args) => {
+            collect_vars(f, out);
+            for a in args {
+                collect_vars(a, out);
+            }
+        }
+        Term::Symbol(_, args) => {
+            for a in args {
+                collect_vars(a, out);
+            }
+        }
+        Term::Fn(_, body) => collect_vars(body, out),
+        _ => {}
+    }
+}
+
+/// Build a recursive random term over the vocabulary. Depth-bounded.
+/// Used to fill pattern-variable slots when instantiating substrate
+/// rules — produces subterms that the substrate will further reduce,
+/// keeping nested structure alive across multiple reduction steps.
+fn build_residue_term(
+    state: &mut u64,
+    depth: usize,
+    vocab: &[u32],
+    max_value: u64,
+) -> Term {
+    if depth == 0 || xorshift_u64(state) % 3 == 0 {
+        return random_leaf(state, max_value);
+    }
+    let op = pick_operator(state, vocab);
+    let arity = op_arity(op);
+    let mut args = Vec::with_capacity(arity);
+    for _ in 0..arity {
+        args.push(build_residue_term(state, depth - 1, vocab, max_value));
+    }
+    apply(var(op), args)
+}
+
+/// Build a term where the OUTER shell is a random operator
+/// (non-reducible at root) and the CHILDREN are mixes of:
+///   - substrate-rule instantiations (will reduce at that subtree)
+///   - recursive residue terms
+///
+/// Post-reduction, the outer shell persists (no substrate root-match)
+/// while children collapse — yielding a residue with NEW patterns
+/// that the anti-unifier can discover.
+fn build_shelled_term(
+    substrate: &[mathscape_core::eval::RewriteRule],
+    state: &mut u64,
+    depth: usize,
+    vocab: &[u32],
+    max_value: u64,
+) -> Term {
+    if depth == 0 || substrate.is_empty() {
+        return build_residue_term(state, depth, vocab, max_value);
+    }
+    let op = pick_operator(state, vocab);
+    let arity = op_arity(op);
+    let mut args = Vec::with_capacity(arity);
+    for _ in 0..arity {
+        if xorshift_u64(state) % 2 == 0 {
+            let rule_idx = (xorshift_u64(state) as usize) % substrate.len();
+            args.push(instantiate_rule_lhs(
+                &substrate[rule_idx],
+                state,
+                depth - 1,
+                vocab,
+                max_value,
+            ));
+        } else {
+            args.push(build_shelled_term(
+                substrate,
+                state,
+                depth - 1,
+                vocab,
+                max_value,
+            ));
+        }
+    }
+    apply(var(op), args)
+}
+
+/// Public entry point. Build an adaptive corpus of `count` terms.
+/// Depth scales with substrate size so post-reduction terms still
+/// have structure to anti-unify over. When substrate is empty,
+/// falls back to the existing procedural generator.
+pub fn adaptive_corpus(
+    substrate: &[mathscape_core::eval::RewriteRule],
+    seed: u64,
+    base_depth: usize,
+    count: usize,
+    vocab: &[u32],
+    max_value: u64,
+) -> Vec<Term> {
+    // Depth scales with substrate size — more Rustified theorems
+    // mean we need deeper nesting to keep the residue interesting.
+    // +1 per 3 substrate rules is empirical; conservative enough
+    // not to blow up term size.
+    let depth = base_depth + substrate.len() / 3;
+    let mut state = seed.wrapping_mul(0x9E37_79B9_7F4A_7C15);
+    let mut out = Vec::with_capacity(count);
+    for _ in 0..count {
+        let t = build_shelled_term(substrate, &mut state, depth, vocab, max_value);
+        out.push(t);
+    }
+    out
+}
+
 // ── Canonical apparatus sets ─────────────────────────────────────
 //
 // Reusable apparatus sets the catalog can reference. Keeping these

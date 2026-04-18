@@ -186,66 +186,171 @@ pub fn generate_semantic_candidates(rule: &RewriteRule) -> Vec<SemanticCandidate
         });
     }
 
-    // 3. Binary-reshape candidates if the LHS has 2 free vars and
-    //    is a two-arg Apply — try swapping them or reshaping with
-    //    builtin ops.
-    if free_vars.len() == 2 {
-        let a = Term::Var(free_vars[0]);
-        let b = Term::Var(free_vars[1]);
-        // Commuted over each builtin binary operator.
-        for op in [2u32, 3] {
-            // add, mul
-            let reshape = Term::Apply(
-                Box::new(Term::Var(op)),
-                vec![b.clone(), a.clone()],
-            );
-            out.push(SemanticCandidate {
-                rule: RewriteRule {
-                    name: format!(
-                        "{}::reshape-commute-op{op}",
-                        rule.name
-                    ),
-                    lhs: rule.lhs.clone(),
-                    rhs: reshape.clone(),
-                },
-                kind: CandidateKind::Reshape(reshape),
-            });
+    out
+}
+
+/// Term enumerator: produces every term of size ≤ `max_size`
+/// built from `{succ, add, mul}` over leaves `{free_vars} ∪
+/// {0, 1}`. Dedup'd by structural equality. This is the machine's
+/// generic candidate source — no hand-coded specific equations,
+/// just enumeration over its current vocabulary.
+fn enumerate_candidate_terms(free_vars: &[u32], max_size: usize) -> Vec<Term> {
+    // Seed: size-1 terms (leaves).
+    let mut by_size: Vec<Vec<Term>> = vec![Vec::new()];
+    let mut size_1 = Vec::new();
+    for v in free_vars {
+        size_1.push(Term::Var(*v));
+    }
+    size_1.push(Term::Number(Value::Nat(0)));
+    size_1.push(Term::Number(Value::Nat(1)));
+    by_size.push(size_1);
+
+    // Builtin ops we can synthesize with:
+    //   Var(1) = succ (unary)
+    //   Var(2) = add  (binary)
+    //   Var(3) = mul  (binary)
+    for target_size in 2..=max_size {
+        let mut at_size: Vec<Term> = Vec::new();
+        // Unary: succ(x) where x has size target_size - 1.
+        let inner_size = target_size - 1;
+        if inner_size >= 1 && inner_size < by_size.len() {
+            for x in &by_size[inner_size] {
+                at_size.push(Term::Apply(
+                    Box::new(Term::Var(1)),
+                    vec![x.clone()],
+                ));
+            }
+        }
+        // Binary: op(a, b) where size(a) + size(b) + 1 = target_size.
+        for a_size in 1..target_size - 1 {
+            let b_size = target_size - 1 - a_size;
+            if a_size >= by_size.len() || b_size >= by_size.len() {
+                continue;
+            }
+            for a in &by_size[a_size] {
+                for b in &by_size[b_size] {
+                    for op in [2u32, 3] {
+                        at_size.push(Term::Apply(
+                            Box::new(Term::Var(op)),
+                            vec![a.clone(), b.clone()],
+                        ));
+                    }
+                }
+            }
+        }
+        by_size.push(at_size);
+    }
+    // Flatten all sizes 1..=max_size.
+    let mut out: Vec<Term> = Vec::new();
+    for (size, terms) in by_size.iter().enumerate().skip(1) {
+        let _ = size;
+        for t in terms {
+            if !out.contains(t) {
+                out.push(t.clone());
+            }
         }
     }
+    out
+}
 
-    // 4. Single-free-var reshape candidates — wrap ?v in succ, or
-    //    apply add/mul to ?v and a constant. These catch equations
-    //    like `add(?x, ?x) = mul(?x, 2)`.
-    if free_vars.len() == 1 {
-        let v = Term::Var(free_vars[0]);
-        // succ(?v)
+/// Self-bootstrapping candidate generator. Given the bootstrap
+/// candidates from `generate_semantic_candidates` PLUS a ledger of
+/// previously-validated theorems, adapt each theorem's RHS shape
+/// into a reshape candidate for this rule.
+///
+/// This is the mechanism that keeps the machine's candidate set
+/// growing by merit of its own discoveries. No human enrichment —
+/// every validated theorem contributes its RHS shape as a template
+/// future rules can be tested against.
+///
+/// Adaptation: take theorem T's free variables (in first-appearance
+/// order) and map them to this rule's free variables (also in
+/// first-appearance order). When the rule has FEWER free vars than
+/// the theorem, that theorem is skipped. When the rule has MORE,
+/// excess free vars in the rule are unused (no candidate proposed).
+/// When the counts match, the theorem's RHS becomes a candidate
+/// with the variable renaming applied.
+#[must_use]
+pub fn generate_semantic_candidates_with_ledger(
+    rule: &RewriteRule,
+    ledger: &[RewriteRule],
+) -> Vec<SemanticCandidate> {
+    let mut out = generate_semantic_candidates(rule);
+    let rule_vars = collect_free_vars(&rule.lhs);
+    if rule_vars.is_empty() {
+        return out;
+    }
+
+    // Generic term enumeration: every term of size ≤ K built from
+    // {succ, add, mul} over {free_vars, 0, 1}. This is the machine's
+    // uniform candidate source — no hand-coded equations. Size cap
+    // keeps combinatorics in check.
+    let max_size = 3; // gives ~30-50 candidates per 2-free-var rule
+    let enumerated = enumerate_candidate_terms(&rule_vars, max_size);
+    for (i, candidate_rhs) in enumerated.into_iter().enumerate() {
+        // Skip RHSs already in the bootstrap set (projection + constants)
+        // to avoid duplicates.
+        let already = out.iter().any(|c| c.rule.rhs == candidate_rhs);
+        if already {
+            continue;
+        }
         out.push(SemanticCandidate {
             rule: RewriteRule {
-                name: format!("{}::reshape-succ", rule.name),
+                name: format!("{}::enum-{i}", rule.name),
                 lhs: rule.lhs.clone(),
-                rhs: Term::Apply(Box::new(Term::Var(1)), vec![v.clone()]),
+                rhs: candidate_rhs.clone(),
             },
-            kind: CandidateKind::Reshape(Term::Apply(
-                Box::new(Term::Var(1)),
-                vec![v.clone()],
-            )),
-        });
-        // add(?v, 1)
-        let add_one = Term::Apply(
-            Box::new(Term::Var(2)),
-            vec![v.clone(), Term::Number(Value::Nat(1))],
-        );
-        out.push(SemanticCandidate {
-            rule: RewriteRule {
-                name: format!("{}::reshape-add-1", rule.name),
-                lhs: rule.lhs.clone(),
-                rhs: add_one.clone(),
-            },
-            kind: CandidateKind::Reshape(add_one),
+            kind: CandidateKind::Reshape(candidate_rhs),
         });
     }
 
+    // Ledger-driven candidates: every validated theorem's RHS
+    // shape becomes a candidate for this rule too (with var-remapping).
+    for (i, theorem) in ledger.iter().enumerate() {
+        let theorem_vars = collect_free_vars(&theorem.lhs);
+        if theorem_vars.is_empty() || theorem_vars.len() > rule_vars.len() {
+            continue;
+        }
+        let mut adapted = theorem.rhs.clone();
+        for (j, tv) in theorem_vars.iter().enumerate() {
+            if *tv == rule_vars[j] {
+                continue;
+            }
+            adapted = adapted.substitute(*tv, &Term::Var(rule_vars[j]));
+        }
+        let already = out.iter().any(|c| c.rule.rhs == adapted);
+        if already {
+            continue;
+        }
+        out.push(SemanticCandidate {
+            rule: RewriteRule {
+                name: format!("{}::ledger-{i}", rule.name),
+                lhs: rule.lhs.clone(),
+                rhs: adapted.clone(),
+            },
+            kind: CandidateKind::Reshape(adapted),
+        });
+    }
     out
+}
+
+/// Self-bootstrapping variant of `discover_semantic_projections`.
+/// Tests every ledger-derived candidate along with the bootstrap
+/// set. Returns only validated candidates.
+#[must_use]
+pub fn discover_semantic_projections_with_ledger(
+    rule: &RewriteRule,
+    ledger: &[RewriteRule],
+    config: &ValidationConfig,
+) -> Vec<(SemanticCandidate, SemanticVerdict)> {
+    generate_semantic_candidates_with_ledger(rule, ledger)
+        .into_iter()
+        .map(|c| {
+            let verdict = validate_semantically(&c.rule, config);
+            (c, verdict)
+        })
+        .filter(|(_, v)| matches!(v, SemanticVerdict::Valid { .. }))
+        .collect()
 }
 
 /// Validate a single rule empirically. For each of K substitutions,
@@ -463,11 +568,13 @@ mod tests {
             rhs: Term::Symbol(0, vec![Term::Var(2), Term::Var(100)]),
         };
         let candidates = generate_semantic_candidates(&rule);
-        // Must include at least: proj-v100, const-0, const-1, succ(?v),
-        // add(?v, 1) — 5 candidates at minimum for 1 free var.
+        // Bootstrap set: projection + const-0 + const-1 = 3.
+        // Reshape candidates come from ledger-driven enrichment,
+        // not from the bootstrap. The self-bootstrapping design
+        // keeps the bootstrap minimal.
         assert!(
-            candidates.len() >= 5,
-            "candidate count too low: {}",
+            candidates.len() >= 3,
+            "bootstrap candidate count too low: {}",
             candidates.len()
         );
         assert!(candidates.iter().any(|c| matches!(c.kind, CandidateKind::Projection(100))));
@@ -497,39 +604,57 @@ mod tests {
     }
 
     #[test]
-    fn discover_finds_multiple_projections_for_doubling() {
-        // add(?x, ?x) = 2 * ?x — the "doubling" pattern.
-        // Projections that should validate: (none — ?x alone isn't right)
-        // Reshape mul(?x, 2)? Well, we propose mul(?y, ?x) which is
-        // commutation — that would validate only if ?y = ?x.
-        // We also propose add(?y, ?x) commuted. That's add(?x, ?y) — only
-        // validates when ?y == ?x in the substitution.
-        //
-        // In this test we just verify the mechanism finds SOMETHING
-        // for a rule where a reasonable projection exists.
+    fn bootstrap_candidates_for_singleton_pattern() {
+        // Bootstrap set for a 1-free-var rule: projection + two
+        // constants. That's 3 candidates minimum from the pure
+        // bootstrap path (generate_semantic_candidates with no
+        // ledger).
         let rule = RewriteRule {
-            name: "doubling-pattern".into(),
-            lhs: apply(var(2), vec![var(100), var(100)]),
+            name: "singleton".into(),
+            lhs: apply(var(2), vec![var(100), nat(0)]),
             rhs: Term::Symbol(0, vec![Term::Var(100)]),
         };
-        let validated = discover_semantic_projections(
-            &rule,
-            &ValidationConfig::default(),
-        );
-        // Hmm — the only candidate that validates here is projection
-        // to ?v100 when... no, add(x, x) != x. No projection to const
-        // holds. So this should return EMPTY, demonstrating the
-        // validator correctly rejects when no semantic shape in our
-        // candidate set matches.
-        //
-        // This IS informative — means the machine knows this rule is
-        // NOT a simple projection/const/single-reshape and needs a
-        // richer candidate set (e.g., mul(?x, 2)) which we don't
-        // propose yet.
+        let candidates = generate_semantic_candidates(&rule);
+        // projection-v100 + const-0 + const-1 = 3 minimum.
         assert!(
-            validated.is_empty(),
-            "add(x,x) has no simple projection in current candidate set; got {:?}",
-            validated.iter().map(|(c, _)| c.kind.to_string()).collect::<Vec<_>>()
+            candidates.len() >= 3,
+            "bootstrap must produce at least projection + 2 constants, got {}",
+            candidates.len()
+        );
+    }
+
+    #[test]
+    fn ledger_driven_candidate_includes_validated_rhs_shape() {
+        // A previously-validated theorem's RHS becomes a candidate
+        // for future rules. This is the self-bootstrapping
+        // mechanism — no human-coded addition to the generator.
+        let ledger = vec![
+            RewriteRule {
+                name: "succ-rule".into(),
+                // LHS doesn't matter for the ledger-extraction —
+                // we only harvest RHS shape + LHS-free-vars count.
+                lhs: apply(var(2), vec![var(100), nat(1)]),
+                rhs: apply(var(1), vec![var(100)]),
+                // i.e., add(?x, 1) → succ(?x) — validated earlier
+            },
+        ];
+        let rule = RewriteRule {
+            name: "new-rule".into(),
+            lhs: apply(var(1), vec![var(200)]),
+            rhs: Term::Symbol(0, vec![Term::Var(200)]),
+        };
+        let candidates = generate_semantic_candidates_with_ledger(&rule, &ledger);
+        // The ledger-derived candidate should propose `succ(?v200)`
+        // as RHS (theorem's RHS with var-remapping from
+        // theorem's first free-var ?v100 → rule's first free-var
+        // ?v200).
+        let ledger_candidate = candidates.iter().any(|c| {
+            matches!(&c.kind, CandidateKind::Reshape(t) if t == &apply(var(1), vec![var(200)]))
+        });
+        assert!(
+            ledger_candidate,
+            "ledger-derived candidate missing; got: {:?}",
+            candidates.iter().map(|c| c.kind.to_string()).collect::<Vec<_>>()
         );
     }
 

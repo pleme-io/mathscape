@@ -35,12 +35,15 @@
 
 mod common;
 
-use common::experiment::{format_term, run_probe_fast_with_substrate, CorpusFamily};
+use common::experiment::{
+    adaptive_corpus, format_term, run_probe_fast_with_substrate, CorpusFamily,
+};
 use mathscape_compress::extract::ExtractConfig;
 use mathscape_core::eval::{anonymize_term, RewriteRule};
 use mathscape_core::term::Term;
 use mathscape_proof::semantic::{
-    discover_semantic_projections, SemanticCandidate, SemanticVerdict, ValidationConfig,
+    discover_semantic_projections_with_ledger, SemanticCandidate, SemanticVerdict,
+    ValidationConfig,
 };
 use rayon::prelude::*;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
@@ -213,6 +216,12 @@ fn rule_key(r: &RewriteRule) -> String {
 }
 
 /// Run a single probe. Returns (rules, apparatus name).
+///
+/// Phase L1: if substrate is non-empty, at least half of probes
+/// use the adaptive corpus (substrate-aware generator) instead of
+/// one of the fixed families. This is what keeps the edge
+/// receding — adaptive corpus produces structure at rank N+1
+/// when substrate covers rank N.
 fn run_probe(
     iter: u64,
     apparatuses: &[Apparatus],
@@ -221,7 +230,8 @@ fn run_probe(
     let mut r = xorshift(iter.wrapping_mul(2654435761));
     let apparatus = &apparatuses[(r as usize) % apparatuses.len()];
     r = xorshift(r);
-    let corp = CORPORA[(r as usize) % CORPORA.len()];
+    let use_adaptive = !substrate.is_empty() && r % 2 == 0;
+    let corp_index = (r as usize) % CORPORA.len();
     r = xorshift(r);
     let seed = r % 100_000;
     r = xorshift(r);
@@ -233,7 +243,30 @@ fn run_probe(
     r = xorshift(r);
     let min_score = MIN_SCORES[(r as usize) % MIN_SCORES.len()];
 
-    let corpus_instance = corp.build(seed, budget, depth);
+    let corpus_instance: Vec<(String, Vec<Term>)> = if use_adaptive {
+        // Generate several adaptive-corpus slabs, each labeled so
+        // they appear to the Epoch as distinct "corpus instances".
+        let vocab: [u32; 5] = [2, 3, 4, 5, 7]; // add, mul, succ, sub, pred
+        let slabs = budget.min(4).max(2);
+        let per_slab = 20;
+        (0..slabs)
+            .map(|i| {
+                let name = format!("adaptive-s{seed}-slab{i}");
+                let terms = adaptive_corpus(
+                    substrate,
+                    seed.wrapping_add(i as u64 * 101),
+                    depth,
+                    per_slab,
+                    &vocab,
+                    10,
+                );
+                (name, terms)
+            })
+            .collect()
+    } else {
+        CORPORA[corp_index].build(seed, budget, depth)
+    };
+
     let rules = run_probe_fast_with_substrate(
         &apparatus.src,
         &corpus_instance,
@@ -263,6 +296,7 @@ fn run_sub_campaign(
     n_probes: usize,
     apparatuses: &[Apparatus],
     substrate: &[RewriteRule],
+    ledger_rules: &[RewriteRule],
 ) -> (HashMap<String, Provenance>, BTreeMap<String, usize>) {
     let provenance: Mutex<HashMap<String, Provenance>> = Mutex::new(HashMap::new());
     const CHUNK: usize = 256;
@@ -302,7 +336,7 @@ fn run_sub_campaign(
             .par_iter()
             .filter_map(|(k, p)| {
                 let rule = p.exemplar.as_ref()?;
-                let results = discover_semantic_projections(rule, &vconfig);
+                let results = discover_semantic_projections_with_ledger(rule, ledger_rules, &vconfig);
                 if results.is_empty() {
                     None
                 } else {
@@ -331,17 +365,7 @@ fn theorem_key(rule: &RewriteRule) -> String {
     format!("{}={}", format_term(&rule.lhs), format_term(&rule.rhs))
 }
 
-/// Count nodes in a term — used to detect REDUCING rules.
-fn term_size(t: &Term) -> usize {
-    match t {
-        Term::Point(_) | Term::Number(_) | Term::Var(_) => 1,
-        Term::Apply(f, args) => {
-            1 + term_size(f) + args.iter().map(term_size).sum::<usize>()
-        }
-        Term::Symbol(_, args) => 1 + args.iter().map(term_size).sum::<usize>(),
-        Term::Fn(params, body) => 1 + params.len() + term_size(body),
-    }
-}
+use common::experiment::term_size;
 
 /// A rule is "substrate-eligible" iff it strictly REDUCES: the
 /// RHS tree is smaller than the LHS tree. Equivalences (commutativity,
@@ -359,6 +383,7 @@ fn is_reducing(rule: &RewriteRule) -> bool {
 fn extract_new_theorems(
     provenance: &HashMap<String, Provenance>,
     theorem_ledger: &HashSet<String>,
+    ledger_rules: &[RewriteRule],
     top_k: usize,
 ) -> Vec<RewriteRule> {
     let vconfig = ValidationConfig::default();
@@ -371,7 +396,8 @@ fn extract_new_theorems(
         let Some(rule) = p.exemplar.as_ref() else {
             continue;
         };
-        let verdicts = discover_semantic_projections(rule, &vconfig);
+        let verdicts =
+            discover_semantic_projections_with_ledger(rule, ledger_rules, &vconfig);
         for (cand, _) in verdicts {
             let tk = theorem_key(&cand.rule);
             if theorem_ledger.contains(&tk) || seen_this_cycle.contains(&tk) {
@@ -421,6 +447,10 @@ fn edge_riding_loop() {
     // Substrate starts empty (just the primitive evaluator).
     // As theorems validate, they get appended.
     let mut substrate: Vec<RewriteRule> = Vec::new();
+    // All validated theorems as full rules — feeds the ledger-
+    // driven candidate generator. Includes equivalence theorems
+    // (like commutativity) that don't enter substrate.
+    let mut ledger_rules: Vec<RewriteRule> = Vec::new();
     let mut theorem_ledger: HashSet<String> = HashSet::new();
     let mut trajectory: Vec<(usize, usize, usize, usize)> = Vec::new(); // (cycle, structural, new_theorems, substrate_size)
 
@@ -438,8 +468,12 @@ fn edge_riding_loop() {
         );
 
         // 1. Run sub-campaign.
-        let (provenance, yield_by_app) =
-            run_sub_campaign(PROBES_PER_CYCLE, &pool, &substrate);
+        let (provenance, yield_by_app) = run_sub_campaign(
+            PROBES_PER_CYCLE,
+            &pool,
+            &substrate,
+            &ledger_rules,
+        );
 
         println!(
             "  sub-campaign: {} probes, {} structural rules, {} apparatuses with yield",
@@ -459,8 +493,12 @@ fn edge_riding_loop() {
         }
         ledger_keys.extend(theorem_ledger.iter().cloned());
 
-        let new_theorems =
-            extract_new_theorems(&provenance, &ledger_keys, RUSTIFY_TOP_K);
+        let new_theorems = extract_new_theorems(
+            &provenance,
+            &ledger_keys,
+            &ledger_rules,
+            RUSTIFY_TOP_K,
+        );
         println!("  new theorems discovered: {}", new_theorems.len());
         for t in &new_theorems {
             println!(
@@ -481,6 +519,7 @@ fn edge_riding_loop() {
         let mut ledger_only = 0usize;
         for t in &new_theorems {
             theorem_ledger.insert(theorem_key(t));
+            ledger_rules.push(t.clone());
             if is_reducing(t) {
                 substrate.push(t.clone());
                 added_to_substrate += 1;
