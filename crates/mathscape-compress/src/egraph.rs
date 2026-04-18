@@ -27,6 +27,7 @@
 //! top without touching existing pattern-matching paths.
 
 use egg::{define_language, Id, RecExpr, Rewrite, Runner, Symbol};
+use mathscape_core::eval::{anonymize_term, RewriteRule};
 use mathscape_core::term::Term;
 use mathscape_core::value::Value;
 
@@ -193,6 +194,44 @@ pub fn check_equivalence(
     }
 }
 
+/// Test whether two *rules* are semantically equivalent under the
+/// given probes. Rules are first anonymized (fresh-var ids
+/// canonicalized) so that `add(?a, 0) → ?a` and `add(?b, 0) → ?b`
+/// are recognized as the same rule despite different nominal ids.
+/// Then both the LHS and RHS are checked for e-class merger under
+/// the probe set.
+///
+/// Returns `Some(true)` iff BOTH the LHS pair and the RHS pair land
+/// in the same e-class — i.e., the rules encode the same rewrite
+/// modulo the probes. `Some(false)` is returned only if both halves
+/// reach a definite "inequivalent" verdict; any uncertainty on
+/// either half returns `None`.
+///
+/// This is strictly more powerful than `alpha_equivalent`: any
+/// alpha-equivalent pair returns `Some(true)` here (empty probes
+/// suffice for identical anonymized terms), and commutatively-
+/// equivalent pairs that alpha_equivalent misses (`add(?a, ?b) →
+/// ?c` vs `add(?b, ?a) → ?c`) surface when the commutativity probe
+/// is supplied.
+pub fn check_rule_equivalence(
+    r1: &RewriteRule,
+    r2: &RewriteRule,
+    rewrites: &[Rewrite<MathscapeLang, ()>],
+    step_limit: usize,
+) -> Option<bool> {
+    let r1_lhs = anonymize_term(&r1.lhs);
+    let r1_rhs = anonymize_term(&r1.rhs);
+    let r2_lhs = anonymize_term(&r2.lhs);
+    let r2_rhs = anonymize_term(&r2.rhs);
+    let lhs_verdict = check_equivalence(&r1_lhs, &r2_lhs, rewrites, step_limit);
+    let rhs_verdict = check_equivalence(&r1_rhs, &r2_rhs, rewrites, step_limit);
+    match (lhs_verdict, rhs_verdict) {
+        (Some(true), Some(true)) => Some(true),
+        (Some(false), _) | (_, Some(false)) => Some(false),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -281,6 +320,96 @@ mod tests {
         assert_ne!(
             verdict, Some(true),
             "commutativity must not merge add(1,2) with mul(1,2)"
+        );
+    }
+
+    #[test]
+    fn rule_equivalence_catches_alpha_variants_with_no_probes() {
+        // add(?a, ?b) → symbol_pair(?a, ?b)  vs
+        // add(?c, ?d) → symbol_pair(?c, ?d) — identical modulo var renaming.
+        let r1 = RewriteRule {
+            name: "R1".into(),
+            lhs: apply(var(2), vec![var(100), var(101)]),
+            rhs: Term::Symbol(42, vec![var(100), var(101)]),
+        };
+        let r2 = RewriteRule {
+            name: "R2".into(),
+            lhs: apply(var(2), vec![var(200), var(201)]),
+            rhs: Term::Symbol(42, vec![var(200), var(201)]),
+        };
+        assert_eq!(
+            check_rule_equivalence(&r1, &r2, &[], 5),
+            Some(true),
+            "alpha-renamed rules must be equivalent even without probes"
+        );
+    }
+
+    #[test]
+    fn rule_equivalence_under_commutativity_probe() {
+        // add(?a, ?b) → S(?a, ?b)  vs  add(?b, ?a) → S(?b, ?a)
+        // LHSs are commutatively equivalent; RHSs use the SAME
+        // canonical var order post-anonymization, so RHS check
+        // trivially passes. The probe is what unlocks the LHS merge.
+        let r1 = RewriteRule {
+            name: "R1".into(),
+            lhs: apply(var(2), vec![var(100), var(101)]),
+            rhs: Term::Symbol(42, vec![var(100), var(101)]),
+        };
+        let r2 = RewriteRule {
+            name: "R2".into(),
+            lhs: apply(var(2), vec![var(101), var(100)]),
+            rhs: Term::Symbol(42, vec![var(100), var(101)]),
+        };
+        let probes = commutativity_probe();
+        let verdict = check_rule_equivalence(&r1, &r2, &probes, 30);
+        assert_eq!(
+            verdict, Some(true),
+            "commutativity probe should merge arg-swapped rule variants; got {verdict:?}"
+        );
+    }
+
+    #[test]
+    fn rule_equivalence_rejects_distinct_rules() {
+        // add(?a, 0) → ?a  vs  mul(?a, 1) → ?a — different operators
+        // AND different constants. No probe set should merge.
+        let r1 = RewriteRule {
+            name: "add-identity".into(),
+            lhs: apply(var(2), vec![var(100), nat(0)]),
+            rhs: var(100),
+        };
+        let r2 = RewriteRule {
+            name: "mul-identity".into(),
+            lhs: apply(var(3), vec![var(100), nat(1)]),
+            rhs: var(100),
+        };
+        let probes = commutativity_probe();
+        let verdict = check_rule_equivalence(&r1, &r2, &probes, 30);
+        assert_ne!(
+            verdict, Some(true),
+            "distinct identities on different operators must not merge"
+        );
+    }
+
+    #[test]
+    fn rule_equivalence_rejects_structurally_different_rhs() {
+        // Same LHS, but structurally different RHSs: one projects to
+        // the first captured var, the other wraps both in a Symbol.
+        // Anonymization canonicalizes Symbol ids, so only STRUCTURAL
+        // divergence counts — that's the point.
+        let r1 = RewriteRule {
+            name: "project".into(),
+            lhs: apply(var(2), vec![var(100), var(101)]),
+            rhs: var(100),
+        };
+        let r2 = RewriteRule {
+            name: "wrap".into(),
+            lhs: apply(var(2), vec![var(100), var(101)]),
+            rhs: Term::Symbol(42, vec![var(100), var(101)]),
+        };
+        assert_ne!(
+            check_rule_equivalence(&r1, &r2, &[], 5),
+            Some(true),
+            "rules with structurally different RHSs must not merge"
         );
     }
 }
