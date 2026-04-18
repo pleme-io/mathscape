@@ -340,6 +340,30 @@ pub fn run_probe_fast(
     extract_config: &ExtractConfig,
     min_score: f64,
 ) -> Vec<RewriteRule> {
+    run_probe_fast_with_substrate(
+        apparatus_src,
+        corpus,
+        extract_config,
+        min_score,
+        &[],
+    )
+}
+
+/// Fast runner with an explicit substrate of pre-validated rules.
+/// The substrate rules are REDUCED through the corpus BEFORE
+/// anti-unification runs. This is the mechanism the edge-riding
+/// loop uses to expand the territory each cycle — Rustified
+/// theorems from previous cycles pre-reduce the corpus so
+/// anti-unification sees the RESIDUE, i.e. the next-layer
+/// unprovable frontier.
+pub fn run_probe_fast_with_substrate(
+    apparatus_src: &str,
+    corpus: &[(String, Vec<Term>)],
+    extract_config: &ExtractConfig,
+    min_score: f64,
+    substrate: &[RewriteRule],
+) -> Vec<RewriteRule> {
+    use mathscape_compress::adapter::rewrite_fixed_point;
     let base = CompressionGenerator::new(extract_config.clone(), 1);
     let prover = {
         let base_prover = StatisticalProver::new(
@@ -357,7 +381,26 @@ pub fn run_probe_fast(
         }
     };
     let mut epoch = Epoch::new(base, prover, RuleEmitter, InMemoryRegistry::new());
-    for (_, c) in corpus {
+
+    // If substrate is nonempty, pre-reduce each corpus instance
+    // through it. The RESIDUE is what the discovery pipeline sees.
+    // This is the Rustification → frontier-expansion mechanism.
+    let reduced_corpus: Vec<(String, Vec<Term>)> = if substrate.is_empty() {
+        corpus.to_vec()
+    } else {
+        corpus
+            .iter()
+            .map(|(name, terms)| {
+                let reduced: Vec<Term> = terms
+                    .iter()
+                    .map(|t| rewrite_fixed_point(t, substrate, 64))
+                    .collect();
+                (name.clone(), reduced)
+            })
+            .collect()
+    };
+
+    for (_, c) in &reduced_corpus {
         let _ = epoch.step_with_action(c, EpochAction::Discover);
         let _ = epoch.step_with_action(c, EpochAction::Reinforce);
     }
