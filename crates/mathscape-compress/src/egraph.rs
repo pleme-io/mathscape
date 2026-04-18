@@ -91,6 +91,20 @@ pub fn term_to_recexpr(term: &Term, expr: &mut RecExpr<MathscapeLang>) -> Id {
         Term::Number(Value::Int(n)) => {
             expr.add(MathscapeLang::Num(*n as u64))
         }
+        // R13: Tensors are opaque to the e-graph (shape + data
+        // don't have e-node representation yet). Encode the
+        // tensor's structural identity as a single hash-like u64
+        // so the e-graph can at least distinguish equal vs
+        // unequal tensors. Richer tensor reasoning — contraction
+        // equivalence, reshape-invariance — is future work.
+        Term::Number(Value::Tensor { shape, data }) => {
+            use std::collections::hash_map::DefaultHasher;
+            use std::hash::{Hash, Hasher};
+            let mut h = DefaultHasher::new();
+            shape.hash(&mut h);
+            data.hash(&mut h);
+            expr.add(MathscapeLang::Num(h.finish()))
+        }
         Term::Var(v) => {
             let id_node = expr.add(MathscapeLang::Num(*v as u64));
             expr.add(MathscapeLang::Var([id_node]))

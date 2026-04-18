@@ -151,6 +151,15 @@ impl Term {
         matches!(self, Term::Point(_) | Term::Number(_) | Term::Var(_))
     }
 
+    /// R13: view as Value::Tensor if this Term is Number(Tensor).
+    /// Useful for tensor builtins' eval rules.
+    pub fn as_tensor_val(&self) -> Option<(&[usize], &[i64])> {
+        match self {
+            Term::Number(v) => v.as_tensor(),
+            _ => None,
+        }
+    }
+
     /// Collect all free variables in the term.
     pub fn free_vars(&self) -> std::collections::HashSet<u32> {
         let mut vars = std::collections::HashSet::new();

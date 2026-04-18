@@ -28,6 +28,18 @@ pub enum Value {
     /// `Nat(3)` to `Int(3)` requires an explicit operator, it's not
     /// automatic.
     Int(i64),
+    /// R13: a shape-tagged integer tensor — the compute-layer
+    /// primitive. `shape` is the dimensions (e.g. `[2, 3]` for a
+    /// 2×3 matrix). `data` is row-major flat storage. The
+    /// invariant `data.len() == shape.iter().product()` is
+    /// maintained by constructor helpers in `impl Value` below;
+    /// direct field construction can break it (avoid).
+    ///
+    /// Integer-only for now: avoids floating-point NaN/ordering
+    /// complexity. Future extension to Float(f64) data requires a
+    /// new variant since Value derives Eq/Ord/Hash and f64
+    /// doesn't satisfy those.
+    Tensor { shape: Vec<usize>, data: Vec<i64> },
 }
 
 impl Value {
@@ -49,21 +61,27 @@ impl Value {
     }
 
     /// Successor — defined for both Nat and Int. Maps each value
-    /// to its +1 in its own domain.
+    /// to its +1 in its own domain. Undefined for Tensor (caller
+    /// gets identity — no increment semantics on a multi-element
+    /// container).
     pub fn succ(&self) -> Self {
         match self {
             Value::Nat(n) => Value::Nat(n + 1),
             Value::Int(n) => Value::Int(n + 1),
+            Value::Tensor { .. } => self.clone(),
         }
     }
 
-    /// Negation — defined only for Int. Nat has no negatives; caller
-    /// gets `None` for Nat input. Machine-side, a would-be `neg(Nat)`
-    /// rule would fail at eval and be rejected by the prover.
+    /// Negation — defined for Int and Tensor (element-wise). Nat has
+    /// no negatives; caller gets `None` for Nat input.
     pub fn neg(&self) -> Option<Self> {
         match self {
             Value::Nat(_) => None,
             Value::Int(n) => Some(Value::Int(-n)),
+            Value::Tensor { shape, data } => Some(Value::Tensor {
+                shape: shape.clone(),
+                data: data.iter().map(|x| -x).collect(),
+            }),
         }
     }
 
@@ -71,7 +89,7 @@ impl Value {
     pub fn as_nat(&self) -> Option<u64> {
         match self {
             Value::Nat(n) => Some(*n),
-            Value::Int(_) => None,
+            _ => None,
         }
     }
 
@@ -79,7 +97,15 @@ impl Value {
     pub fn as_int(&self) -> Option<i64> {
         match self {
             Value::Int(n) => Some(*n),
-            Value::Nat(_) => None,
+            _ => None,
+        }
+    }
+
+    /// View as Tensor; `None` if this is a scalar.
+    pub fn as_tensor(&self) -> Option<(&[usize], &[i64])> {
+        match self {
+            Value::Tensor { shape, data } => Some((shape, data)),
+            _ => None,
         }
     }
 
@@ -88,8 +114,47 @@ impl Value {
     pub fn same_domain(&self, other: &Value) -> bool {
         matches!(
             (self, other),
-            (Value::Nat(_), Value::Nat(_)) | (Value::Int(_), Value::Int(_))
+            (Value::Nat(_), Value::Nat(_))
+                | (Value::Int(_), Value::Int(_))
+                | (Value::Tensor { .. }, Value::Tensor { .. })
         )
+    }
+
+    // ── R13 tensor constructors ──────────────────────────────────
+
+    /// Construct a tensor from shape + data. Validates that
+    /// `data.len()` equals the product of `shape`; returns `None`
+    /// on mismatch.
+    pub fn tensor(shape: Vec<usize>, data: Vec<i64>) -> Option<Self> {
+        let expected: usize = shape.iter().product();
+        if data.len() != expected {
+            return None;
+        }
+        Some(Value::Tensor { shape, data })
+    }
+
+    /// Tensor of all zeros with the given shape.
+    pub fn tensor_zeros(shape: Vec<usize>) -> Self {
+        let n: usize = shape.iter().product();
+        Value::Tensor {
+            shape,
+            data: vec![0; n],
+        }
+    }
+
+    /// Tensor of all ones with the given shape.
+    pub fn tensor_ones(shape: Vec<usize>) -> Self {
+        let n: usize = shape.iter().product();
+        Value::Tensor {
+            shape,
+            data: vec![1; n],
+        }
+    }
+
+    /// Number of elements in a tensor. Undefined for scalars — use
+    /// `as_tensor` first.
+    pub fn tensor_numel(&self) -> Option<usize> {
+        self.as_tensor().map(|(_, d)| d.len())
     }
 }
 
@@ -104,6 +169,24 @@ impl fmt::Display for Value {
             // that's by design; Display is for humans, Debug is
             // for the machine.
             Value::Int(n) => write!(f, "{n}"),
+            // R13: Tensor renders shape + data.
+            //   scalar-shape:  <> means 0-rank (rare)
+            //   1D: [1 2 3]
+            //   2D: [[1 2] [3 4]]  (just flat for now; multi-dim
+            //       pretty-printing is future work)
+            Value::Tensor { shape, data } => {
+                let shape_str = shape
+                    .iter()
+                    .map(|s| s.to_string())
+                    .collect::<Vec<_>>()
+                    .join("x");
+                let data_str = data
+                    .iter()
+                    .map(|d| d.to_string())
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                write!(f, "T<{shape_str}>[{data_str}]")
+            }
         }
     }
 }
@@ -201,5 +284,80 @@ mod tests {
         assert_eq!(format!("{}", Value::Nat(7)), "7");
         assert_eq!(format!("{}", Value::Int(7)), "7");
         assert_eq!(format!("{}", Value::Int(-3)), "-3");
+    }
+
+    // ── R13: Tensor value tests ──────────────────────────────────
+
+    #[test]
+    fn tensor_constructor_validates_shape() {
+        // Good: shape product matches data length.
+        assert!(Value::tensor(vec![2, 3], vec![1, 2, 3, 4, 5, 6]).is_some());
+        // Bad: shape says 6 elements, data has 5.
+        assert!(Value::tensor(vec![2, 3], vec![1, 2, 3, 4, 5]).is_none());
+        // Bad: shape says 0 elements, data has 1.
+        assert!(Value::tensor(vec![0], vec![1]).is_none());
+    }
+
+    #[test]
+    fn tensor_zeros_and_ones_have_correct_size() {
+        let z = Value::tensor_zeros(vec![3, 4]);
+        let (shape, data) = z.as_tensor().unwrap();
+        assert_eq!(shape, &[3, 4]);
+        assert_eq!(data.len(), 12);
+        assert!(data.iter().all(|d| *d == 0));
+
+        let o = Value::tensor_ones(vec![2, 2]);
+        let (shape, data) = o.as_tensor().unwrap();
+        assert_eq!(shape, &[2, 2]);
+        assert_eq!(data, &[1, 1, 1, 1]);
+    }
+
+    #[test]
+    fn tensor_neg_flips_all_elements() {
+        let t = Value::tensor(vec![3], vec![1, -2, 3]).unwrap();
+        let n = t.neg().unwrap();
+        assert_eq!(
+            n,
+            Value::tensor(vec![3], vec![-1, 2, -3]).unwrap()
+        );
+    }
+
+    #[test]
+    fn tensor_same_domain_only_matches_other_tensors() {
+        let t1 = Value::tensor(vec![2], vec![1, 2]).unwrap();
+        let t2 = Value::tensor(vec![5], vec![0, 0, 0, 0, 0]).unwrap();
+        assert!(t1.same_domain(&t2));
+        // Tensor and Int are different domains.
+        assert!(!t1.same_domain(&Value::Int(5)));
+        assert!(!t1.same_domain(&Value::Nat(5)));
+    }
+
+    #[test]
+    fn tensor_display_shows_shape_and_data() {
+        let t = Value::tensor(vec![2, 3], vec![1, 2, 3, 4, 5, 6]).unwrap();
+        assert_eq!(format!("{t}"), "T<2x3>[1 2 3 4 5 6]");
+    }
+
+    #[test]
+    fn tensor_is_distinct_from_int_with_same_content() {
+        // A 1D tensor of length 1 containing 5 is NOT equal to
+        // the scalar Int 5. Domain distinction is preserved.
+        let t = Value::tensor(vec![1], vec![5]).unwrap();
+        assert_ne!(t, Value::Int(5));
+    }
+
+    #[test]
+    fn tensor_numel_counts_elements() {
+        let t = Value::tensor(vec![3, 4], vec![0; 12]).unwrap();
+        assert_eq!(t.tensor_numel(), Some(12));
+        assert_eq!(Value::Int(5).tensor_numel(), None);
+    }
+
+    #[test]
+    fn tensor_roundtrips_via_bincode() {
+        let t = Value::tensor(vec![2, 2], vec![10, 20, 30, 40]).unwrap();
+        let bytes = bincode::serialize(&t).unwrap();
+        let back: Value = bincode::deserialize(&bytes).unwrap();
+        assert_eq!(t, back);
     }
 }

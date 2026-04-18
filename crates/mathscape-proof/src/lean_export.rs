@@ -146,6 +146,18 @@ fn term_to_lean(t: &Term, params: &[String]) -> String {
         // theorems keeps them annotated so Lean picks the right
         // instance.
         Term::Number(Value::Int(n)) => format!("({n} : Int)"),
+        // R13: Tensor — Lean's Array type with element annotations.
+        // Shape info preserved as a comment since Lean doesn't
+        // have a single direct mapping for shape-tagged arrays.
+        Term::Number(Value::Tensor { shape, data }) => {
+            let elems: Vec<String> =
+                data.iter().map(|x| format!("({x} : Int)")).collect();
+            format!(
+                "(#[{}] : Array Int) /- shape: {:?} -/",
+                elems.join(", "),
+                shape
+            )
+        }
         Term::Point(p) => format!("(Point.mk {p})"),
         Term::Apply(f, args) => match f.as_ref() {
             Term::Var(2) if args.len() == 2 => format!(

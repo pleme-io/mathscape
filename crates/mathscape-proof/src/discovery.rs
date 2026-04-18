@@ -81,6 +81,20 @@ fn format_term(t: &Term) -> String {
         // cross-domain theorems structurally distinct in the
         // theorem_key.
         Term::Number(Value::Int(n)) => format!("{n}i"),
+        // R13: Tensor rendered with shape tag for theorem keying.
+        Term::Number(Value::Tensor { shape, data }) => {
+            let s = shape
+                .iter()
+                .map(|x| x.to_string())
+                .collect::<Vec<_>>()
+                .join("x");
+            let d = data
+                .iter()
+                .map(|x| x.to_string())
+                .collect::<Vec<_>>()
+                .join(",");
+            format!("T{s}[{d}]")
+        }
         Term::Apply(f, args) => {
             let fs = format_term(f);
             let ass: Vec<String> = args.iter().map(format_term).collect();

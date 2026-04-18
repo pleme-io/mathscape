@@ -3894,6 +3894,17 @@ fn format_term(t: &mathscape_core::term::Term) -> String {
         Term::Var(v) => format!("?v{v}"),
         Term::Number(Value::Nat(n)) => n.to_string(),
         Term::Number(Value::Int(n)) => format!("{n}i"),
+        Term::Number(Value::Tensor { shape, data }) => {
+            format!(
+                "T{}[{}]",
+                shape
+                    .iter()
+                    .map(|x| x.to_string())
+                    .collect::<Vec<_>>()
+                    .join("x"),
+                data.iter().map(|x| x.to_string()).collect::<Vec<_>>().join(",")
+            )
+        }
         Term::Apply(f, args) => {
             let f_str = format_term(f);
             let args_str: Vec<String> = args.iter().map(format_term).collect();
