@@ -86,6 +86,49 @@ The same two apex rules climb to Axiomatized at every scale:
 - Measured: 100k corpora @ 0.84 ms/corpus — per-corpus cost flat from
   10k upward
 
+### Phase R: kernel reductions — "no equal terms" invariant (2026-04-18)
+
+Kernel-level refactoring per `core-algorithm-review.md`. The machine's
+level-above work shouldn't need to recover facts the kernel can
+structurally enforce. Each R-landmark closes a gap where
+semantically-equal terms had structurally-distinct representations.
+
+All changes preserve the autonomous-traversal milestone (apex
+fingerprint unchanged, deterministic_replay passes, per-corpus cost
+unchanged).
+
+| Landmark | Closes |
+|---|---|
+| **C1** (shared anonymize) | commutativity rule collapsing to identity under independent var-map anonymization |
+| **C2** (BTreeMap bindings) | `pattern_match` non-determinism from HashMap iteration |
+| **R3** (commutative sort) | `add(3, 5) ≠ add(5, 3)` structurally — now sorted by derived Ord |
+| **R4** (associative flatten) | `add(add(1,2), 3) ≠ add(1, add(2,3))` — flatten + binary-left-associate |
+| **R5** (Builtin registry) | magic operator ids scattered across eval, term, downstream — one source of truth |
+| **R6** (constant folding) | `Apply(add, [3, 5]) ≠ Number(8)` — fold reducible Applys via registry's eval rule |
+| **C3** (Fn param binding) | anonymization cloned params verbatim while renumbering body vars, breaking lexical bindings |
+
+**R1 (AC-absorbing alpha_equivalent)** probed and deferred
+2026-04-18. Canonicalizing both rules before anonymization is the
+natural next step — it would close the documented gap in
+`mathscape-compress::egraph::check_rule_equivalence`. Shift
+observed: apex moves from {S_10000, S_040} to {S_10000, S_042}
+with S_042 at 2/12 small-scale support, below the threshold.
+Lynchpin still holds; deterministic_replay still passes. Reverted
+pending structural investigation of the new apex set.
+
+**R2 (TermVisitor trait) and R6-value (Value polymorphism for
+non-Peano domains)** remain pending — marginal cleanup and YAGNI
+respectively.
+
+**Kernel invariant status after Phase R:**
+- Genuine: every operation means what it says mathematically ✓
+- True: evaluator produces correct answers; C3 closes the last
+  known correctness bug ✓
+- Repeatable: deterministic across runs (C2 + BTreeMap bindings) ✓
+- No equal terms: commutative + associative + nullary/unary/binary
+  constant applications all collapse to one canonical form ✓
+  (modulo AC absorption into alpha_equivalent — R1 deferred)
+
 ## Where we go next
 
 Ranked by impact-per-effort. Each extension must preserve the lynchpin.
