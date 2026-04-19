@@ -3,7 +3,7 @@
 Where the machine is, where it's been, and where it goes next. This doc
 is the canonical map. Updated every time a milestone closes.
 
-## Where we are (2026-04-18)
+## Where we are (2026-04-18, post-Phase T)
 
 The machine:
 - Traverses mathscape **autonomously** — discovers primitives, reinforces
@@ -20,6 +20,15 @@ The machine:
 - **Lynchpin holds** at every scale tested (12, 19, 47, 507, 2007,
   10007, 100007 corpora): every rule earns cross-corpus retroactive
   support ≥ 2
+- **Produces a first trained model M0** — empty library → tensor
+  corpus → 4 discovered laws → trained LinearPolicy, fully
+  Lisp-describable AND Lisp-producible via `BootstrapCycleSpec` +
+  `execute_spec_core`. BLAKE3-attested, bit-identical replay
+- **Trains more efficiently** — R37 early-stop cuts ~40% of wall
+  time on single cycles; R39 cascades the same pattern to a ~4×
+  speedup on 4-phase training chains. Autonomous-traversal
+  milestone picks up a ~1.5× bonus from R38 micro-opts inside
+  `paired_anti_unify`
 
 ### Apex fingerprint
 
@@ -200,6 +209,64 @@ Phase R invariants all preserved. Phase S adds:
   level
 - **Convergence**: dedup-enabled cycle reaches a structurally-
   distinct fixed point, not unbounded growth
+
+### Phase T: Lisp-residency + wall-clock efficiency (2026-04-18)
+
+Extends Phase S to make the cycle fully Lisp-describable, fully
+Lisp-producible, and genuinely efficient. Closes the 2026-04-18
+framing: "from this point on we only think in terms of making
+that model exist more efficiently and train more efficiently."
+
+| Landmark | Closes |
+|---|---|
+| **R30** (SubsumptionDeduper + deduplicate_library) | strongest LibraryDeduper — rejects specializations not just alpha-renames; a post-hoc library-cleaning utility on the side |
+| **R31** (First trained model M0 + inspection) | end-to-end demo: cycle produces a trained LinearPolicy, Sexp round-trip, bincode persistence, attestation, score known states |
+| **R32** (BootstrapCycleSpec + Lisp executor) | cycle recipe becomes a pure Lisp value; `execute_spec_core` dispatches layer names. Input Lisp → output Lisp |
+| **R33** (ExperimentScenario multi-phase chain) | sequence of phases, each phase's final library/policy seeds the next. Chain-level BLAKE3 attestation |
+| **R34** (Wall-clock timing instrumentation) | per-iteration corpus/extract/dedup timings + per-cycle total on BootstrapOutcome, scenario-total on ExperimentOutcome. Observational — NOT part of attestation payload |
+| **R35** (Extract phase split via LawGenStats) | eval/anti_unify/rank wall-clock inside `derive_laws_from_corpus_instrumented`. Narrowed the bottleneck: **paired_anti_unify = 92% of extract** |
+| **R36** (MemoizingAntiUnifier) | pass-through cache for `paired_anti_unify` results. Shipped as library machinery; honestly NOT wired into first_model because per-miss Term clone × 4 beats the per-hit savings at current scale. Future R-something: TermRef-keyed cache |
+| **R37** (Early-stop on library plateau) | `BootstrapCycle::run_until_stable(window)` + `BootstrapCycleSpec::early_stop_after_stable` + Lisp bridge. **First real wall-clock win: 1.80× on M0.** Same final library in 3 iterations instead of 5 |
+| **R38** (paired_anti_unify micro-opts) | three sub-landmarks: term_key replaces Debug-format+Vec<u8> with Term clone; subset check replaces BTreeSet × 2 with sorted Vec + binary_search; `exceeds_or_equals_floor` early-exits max_var_id when no pattern var needs bumping. ~9% cumulative on single cycle |
+| **R39** (Scenario-level early-stop demo) | R37 cascades across 4-phase chains: **3.97× wall-clock speedup**, 14 of 20 iterations eliminated, same final library. Plateau detection compounds multiplicatively |
+
+**Phase T headline findings:**
+
+- **Measurement precedes optimization.** R34/R35 instrumentation
+  identified the true bottleneck (`paired_anti_unify` at 92% of
+  extract) that was not the obvious suspect (eval). R36's memoization
+  cache would've looked like a win on paper; measurement said
+  otherwise.
+- **Work elimination > work acceleration.** R37's skip-when-plateau
+  delivered 1.8×; R38's micro-opts on the hot path delivered ~9%.
+  Avoid doing the work beats doing the work faster.
+- **Efficiency wins compound across phases.** R39 demonstrates that
+  per-cycle gains cascade multiplicatively across multi-phase
+  scenarios — 1.8× per phase → ~4× over a 4-phase chain.
+- **Autonomous-traversal benefits too.** R38 micro-opts inside
+  `paired_anti_unify` carry through to the milestone test:
+  medium sweep 96ms (was ~150ms expected), stress sweep 321ms
+  (was ~500ms expected) — ~1.5× speedup without changing
+  determinism or apex fingerprint.
+
+**M0 identity fingerprint (Phase T baseline):**
+- 5-iteration default cycle, 4 rules final library, policy
+  generation=1, trained_steps=5
+- Wall-clock: ~11 ms (was ~12 ms pre-R38 on identical hardware)
+- Under `run_until_stable(1)`: ~6 ms, 3 iterations, identical library
+- Attestation: covers library + policy + trajectory; stable across
+  runs; does NOT include wall-clock timings
+
+**Kernel invariant status after Phase T:**
+All Phase R + Phase S invariants preserved. Phase T adds:
+- **Observational timings**: every cycle + scenario carries
+  wall-clock breakdown. Does NOT enter attestation — two runs
+  with identical inputs produce identical attestations despite
+  clock drift.
+- **Opt-in work elimination**: `early_stop_after_stable` cuts
+  post-plateau iterations without changing the final library on
+  plateau-reaching workloads. Pinned invariant: early-stop produces
+  bit-identical library to full run.
 
 ## Where we go next
 
