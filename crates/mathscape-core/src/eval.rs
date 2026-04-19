@@ -129,12 +129,26 @@ fn step(term: &Term, library: &[RewriteRule]) -> EvalResult {
             }
 
             // Step 5: library rules on the reduced-arg form.
+            //
+            // Phase Z.8 (2026-04-19): match on BOTH the literal
+            // reduced apply AND its canonical form. Rules extracted
+            // as `add(0, ?x) → ?x` normally appear only in
+            // left-oriented form in the library (per CanonicalDeduper);
+            // canonicalizing the input term before pattern matching
+            // lets the stored left-oriented rule reduce right-oriented
+            // inputs like `add(?x, 0)` — same mathematical law,
+            // different syntactic orientation. Closes the
+            // right-identity frontier surfaced by Z.6/Z.7.
             let reduced_apply = Term::Apply(
                 Box::new(reduced_func.clone()),
                 reduced_args.clone(),
             );
+            let canonical_apply = reduced_apply.canonical();
             for rule in library {
-                if let Some(bindings) = pattern_match(&rule.lhs, &reduced_apply)
+                let pattern = rule.lhs.canonical();
+                let try_bindings = pattern_match(&pattern, &canonical_apply)
+                    .or_else(|| pattern_match(&rule.lhs, &reduced_apply));
+                if let Some(bindings) = try_bindings
                 {
                     let mut result = rule.rhs.clone();
                     for (var, val) in &bindings {
