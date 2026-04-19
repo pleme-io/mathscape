@@ -16,6 +16,7 @@ pub mod event;
 pub mod form_tree;
 pub mod hash;
 pub mod lifecycle;
+pub mod mathscape_map;
 pub mod meta;
 pub mod meta_loop;
 
@@ -57,13 +58,15 @@ pub use autograd::{
 pub use adaptive_corpus::AdaptiveCorpusGenerator;
 pub use bootstrap::{
     compute_attestation, deduplicate_library, execute_scenario_core,
-    execute_spec_core, AlphaDeduper, BootstrapCycle, BootstrapCycleSpec,
-    BootstrapOutcome, CanonicalDeduper, CorpusGenerator, CycleTimings,
-    DefaultCorpusGenerator, DefaultModelUpdater, ExperimentOutcome,
-    ExperimentScenario, IterationSnapshot, IterationTimings, LawExtractor,
-    LearningObservation, LibraryDeduper, ModelUpdater, NoDedup, PhaseOutcome,
-    SpecExecutionError, SubsumptionDeduper,
+    execute_spec_core, library_merkle_root, AlphaDeduper, BootstrapCycle,
+    BootstrapCycleSpec, BootstrapOutcome, CanonicalDeduper, CorpusGenerator,
+    CycleTimings, DefaultCorpusGenerator, DefaultModelUpdater,
+    ExperimentOutcome, ExperimentScenario, IterationSnapshot,
+    IterationTimings, LawExtractor, LearningObservation, LibraryDeduper,
+    ModelUpdater, NoDedup, PhaseOutcome, SpecExecutionError,
+    SubsumptionDeduper,
 };
+pub use mathscape_map::{MapSnapshot, MapSummary, MathscapeMap};
 pub use optimizer::{sgd_step_int, sgd_step_tensor};
 pub use meta_loop::{
     AdaptiveProposer, DefaultScenarioExecutor, HeuristicProposer, MetaLoop,

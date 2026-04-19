@@ -830,6 +830,38 @@ impl LearningObservation {
     }
 }
 
+/// Phase V.spin (2026-04-18): the library IS a Merkle tree being
+/// mutated by the motor. Each rule's `canonical_bytes` is a leaf;
+/// the tree root is BLAKE3 over the sorted concatenation. Two
+/// libraries with the same content have the same root regardless
+/// of insertion order — this root IS the discovered-mathscape
+/// fingerprint at a moment in time.
+///
+/// Tracking how this root evolves across phases = tracking how
+/// the map of the mathscape is being mutated. Two runs that
+/// converge on the same root have discovered the same mathematics.
+/// Runs that produce DIFFERENT roots have explored different
+/// regions — the union is the cross-run map.
+#[must_use]
+pub fn library_merkle_root(library: &[RewriteRule]) -> TermRef {
+    // Canonicalize each rule to its (lhs, rhs) serialization.
+    // Sort the serialized bytes so the root is insertion-order-
+    // independent.
+    let mut leaves: Vec<Vec<u8>> = library
+        .iter()
+        .map(|r| bincode::serialize(&(&r.lhs, &r.rhs)).expect("rule serializable"))
+        .collect();
+    leaves.sort();
+    // Concatenate sorted leaf bytes with length prefixes so
+    // adjacent leaves can't be ambiguously spliced.
+    let mut payload: Vec<u8> = Vec::new();
+    for leaf in &leaves {
+        payload.extend_from_slice(&(leaf.len() as u64).to_le_bytes());
+        payload.extend_from_slice(leaf);
+    }
+    TermRef::from_bytes(&payload)
+}
+
 /// Run an `ExperimentScenario` by chaining phase outputs.
 /// Returns the complete outcome with every phase's trace.
 ///

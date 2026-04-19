@@ -3,7 +3,9 @@ use std::fmt;
 
 /// A content-addressed reference to a stored expression.
 /// 32-byte blake3 hash that acts as a pointer into the expression store.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(
+    Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize,
+)]
 pub struct TermRef(pub [u8; 32]);
 
 impl TermRef {
