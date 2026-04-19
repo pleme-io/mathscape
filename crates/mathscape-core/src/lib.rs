@@ -5,6 +5,7 @@ pub mod adaptive_corpus;
 pub mod autograd;
 pub mod bettyfine;
 pub mod bootstrap;
+pub mod certification;
 pub mod builtin;
 pub mod control;
 pub mod corpus;
@@ -65,6 +66,10 @@ pub use bootstrap::{
     IterationTimings, LawExtractor, LearningObservation, LibraryDeduper,
     ModelUpdater, NoDedup, PhaseOutcome, SpecExecutionError,
     SubsumptionDeduper,
+};
+pub use certification::{
+    run_certification_step, CertificationLevel, CertificationStepReport,
+    CertificationVerdict, CertifiedRule, Certifier, DefaultCertifier,
 };
 pub use mathscape_map::{
     BufferedConsumer, MapEvent, MapEventConsumer, MapSnapshot, MapSummary,
