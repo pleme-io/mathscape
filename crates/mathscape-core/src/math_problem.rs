@@ -283,6 +283,97 @@ pub fn canonical_problem_set() -> Vec<MathProblem> {
     ]
 }
 
+/// Harder problems that REQUIRE discovered rules — the kernel
+/// alone can't fold these because they mix concrete and symbolic
+/// terms (Var with id ≥ 100), which the kernel's builtin folders
+/// don't apply to. A library with identity/nested-identity rules
+/// solves them; a library without those rules does not.
+///
+/// This set is the DIAGNOSTIC signal: its solved_fraction
+/// directly measures whether the machine has discovered the
+/// identity-class laws. It starts at 0% with empty library and
+/// climbs as the motor discovers rules.
+#[must_use]
+pub fn harder_problem_set() -> Vec<MathProblem> {
+    use crate::builtin::{ADD, MUL, TENSOR_ADD, TENSOR_MUL};
+    let apply = |h: u32, args: Vec<Term>| -> Term {
+        Term::Apply(Box::new(Term::Var(h)), args)
+    };
+    let nat = |n: u64| Term::Number(Value::Nat(n));
+    let tensor = |shape: Vec<usize>, data: Vec<i64>| {
+        Term::Number(Value::tensor(shape, data).unwrap())
+    };
+    let pv = |id: u32| Term::Var(id);
+
+    vec![
+        // ── Requires `add(0, ?x) = ?x` ───────────────────────────
+        MathProblem {
+            id: "hard-add-id-left-symbolic".into(),
+            description: "add(0, ?x) must reduce to ?x (needs add-identity rule)".into(),
+            input: apply(ADD, vec![nat(0), pv(100)]),
+            expected: pv(100),
+            step_limit: 20,
+        },
+        // ── Requires `mul(1, ?x) = ?x` ───────────────────────────
+        MathProblem {
+            id: "hard-mul-id-left-symbolic".into(),
+            description: "mul(1, ?x) must reduce to ?x (needs mul-identity rule)".into(),
+            input: apply(MUL, vec![nat(1), pv(100)]),
+            expected: pv(100),
+            step_limit: 20,
+        },
+        // ── Requires nested `add(0, add(0, ?x)) = ?x` ────────────
+        MathProblem {
+            id: "hard-nested-add-id".into(),
+            description: "add(0, add(0, ?x)) must reduce to ?x via nested identity".into(),
+            input: apply(ADD, vec![nat(0), apply(ADD, vec![nat(0), pv(100)])]),
+            expected: pv(100),
+            step_limit: 20,
+        },
+        // ── Requires `tensor_add(zeros, ?x) = ?x` ────────────────
+        MathProblem {
+            id: "hard-tensor-add-id-symbolic".into(),
+            description: "tensor_add(zeros, ?x) must reduce to ?x".into(),
+            input: apply(
+                TENSOR_ADD,
+                vec![tensor(vec![2], vec![0, 0]), pv(100)],
+            ),
+            expected: pv(100),
+            step_limit: 20,
+        },
+        // ── Requires `tensor_mul(ones, ?x) = ?x` ─────────────────
+        MathProblem {
+            id: "hard-tensor-mul-id-symbolic".into(),
+            description: "tensor_mul(ones, ?x) must reduce to ?x".into(),
+            input: apply(
+                TENSOR_MUL,
+                vec![tensor(vec![2], vec![1, 1]), pv(100)],
+            ),
+            expected: pv(100),
+            step_limit: 20,
+        },
+        // ── Nested tensor — requires both tensor-identities ──────
+        MathProblem {
+            id: "hard-nested-tensor-add-id".into(),
+            description:
+                "tensor_add(zeros, tensor_add(zeros, ?x)) must reduce to ?x"
+                    .into(),
+            input: apply(
+                TENSOR_ADD,
+                vec![
+                    tensor(vec![2], vec![0, 0]),
+                    apply(
+                        TENSOR_ADD,
+                        vec![tensor(vec![2], vec![0, 0]), pv(100)],
+                    ),
+                ],
+            ),
+            expected: pv(100),
+            step_limit: 20,
+        },
+    ]
+}
+
 /// The ingress point: a consumer that periodically benchmarks
 /// the current library against a fixed problem set and emits
 /// `MapEvent::BenchmarkScored` with delta-from-prior. This is
@@ -540,6 +631,92 @@ mod tests {
         assert!(
             post_bias > pre_bias,
             "trainer bias must rise on first benchmark (100% on empty lib)"
+        );
+    }
+
+    // ── Harder problem set tests ────────────────────────────────
+
+    #[test]
+    fn harder_set_baseline_with_empty_library() {
+        // Kernel alone cannot fold symbolic identities — it needs
+        // the identity rules. Empty-library score should be LOW.
+        let set = harder_problem_set();
+        let report = run_benchmark(&set, &[]);
+        println!(
+            "\n  harder-set bench (empty library): {}/{} solved ({:.0}%)",
+            report.solved_count,
+            report.problem_set_size,
+            report.solved_fraction() * 100.0,
+        );
+        for r in &report.results {
+            let mark = if r.solved { "✓" } else { "✗" };
+            println!("    {mark} {}", r.problem_id);
+        }
+        // Empty library should solve at MOST half — the point of
+        // this set is to leave room for the library to help.
+        assert!(
+            report.solved_fraction() <= 0.5,
+            "harder set should NOT be mostly solved by kernel alone; got {:.0}%",
+            report.solved_fraction() * 100.0
+        );
+    }
+
+    #[test]
+    fn harder_set_improves_with_identity_rules() {
+        use crate::builtin::{ADD, MUL, TENSOR_ADD, TENSOR_MUL};
+        let apply = |h: u32, args: Vec<Term>| {
+            Term::Apply(Box::new(Term::Var(h)), args)
+        };
+        let nat = |n: u64| Term::Number(Value::Nat(n));
+        let tensor = |shape: Vec<usize>, data: Vec<i64>| {
+            Term::Number(Value::tensor(shape, data).unwrap())
+        };
+        let pv = |id: u32| Term::Var(id);
+
+        // Pre-load the library with the identity rules the
+        // machine would discover via Phase I + J.
+        let lib = vec![
+            RewriteRule {
+                name: "add-id-left".into(),
+                lhs: apply(ADD, vec![nat(0), pv(200)]),
+                rhs: pv(200),
+            },
+            RewriteRule {
+                name: "mul-id-left".into(),
+                lhs: apply(MUL, vec![nat(1), pv(200)]),
+                rhs: pv(200),
+            },
+            RewriteRule {
+                name: "tensor-add-id".into(),
+                lhs: apply(
+                    TENSOR_ADD,
+                    vec![tensor(vec![2], vec![0, 0]), pv(200)],
+                ),
+                rhs: pv(200),
+            },
+            RewriteRule {
+                name: "tensor-mul-id".into(),
+                lhs: apply(
+                    TENSOR_MUL,
+                    vec![tensor(vec![2], vec![1, 1]), pv(200)],
+                ),
+                rhs: pv(200),
+            },
+        ];
+        let set = harder_problem_set();
+        let empty_report = run_benchmark(&set, &[]);
+        let full_report = run_benchmark(&set, &lib);
+        println!(
+            "\n  harder-set with identity rules: {}/{} (was {}/{} empty)",
+            full_report.solved_count,
+            full_report.problem_set_size,
+            empty_report.solved_count,
+            empty_report.problem_set_size,
+        );
+        // Library should strictly improve score on harder set.
+        assert!(
+            full_report.solved_count > empty_report.solved_count,
+            "identity-rule library must solve MORE than empty library"
         );
     }
 

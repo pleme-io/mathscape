@@ -85,8 +85,8 @@ pub use meta_loop::{
     ScenarioProposer, SpecArchetype, TerminationReason,
 };
 pub use math_problem::{
-    canonical_problem_set, run_benchmark, solve_problem, BenchmarkConsumer,
-    BenchmarkReport, MathProblem, ProblemResult,
+    canonical_problem_set, harder_problem_set, run_benchmark, solve_problem,
+    BenchmarkConsumer, BenchmarkReport, MathProblem, ProblemResult,
 };
 pub use streaming_policy::StreamingPolicyTrainer;
 pub use bettyfine::{bettyfine_library, standard_bettyfine_cardinality, OperatorSpec};
