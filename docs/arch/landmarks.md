@@ -613,6 +613,118 @@ All prior invariants preserved. Phase W adds:
   gives the same public API running multi-threaded. No logic
   changes; a drop-in scale-up.
 
+### Phase W.5: online experimentation / bandit probes (2026-04-18)
+
+`BanditProbe<T>` — generic ε-greedy bandit over a finite set of
+hyperparameter arms. Subscribes to the hub; on BenchmarkScored,
+attributes `delta_from_prior` to the currently-active arm; every
+`switch_interval` events, picks the next arm via ε-greedy over
+reward EMAs and applies it via a user-supplied closure.
+
+| Landmark | Closes |
+|---|---|
+| `BanditProbe<T>` | generic probe; constructor takes arms, apply-closure, switch_interval, epsilon |
+| SplitMix64 counter-based PRNG | deterministic — two probes seeing the same event sequence pick identically |
+| `Plastic` impl (later, W.8) | decays ε toward 0.05; switches to best arm on reinforce |
+| `inject` / `set_epsilon` / `set_smoothing` / `set_switch_interval` | runtime tuning surface |
+
+Test pins: 5 unit tests (install-first-arm, attribute-delta,
+switch-to-best, deterministic-replay, compose-on-hub-without-interference).
+
+### Phase W.6: task-domain abstraction (2026-04-19)
+
+Closes *"right now we are using math as the only training data."*
+`TaskDomain` trait defines a pluggable problem domain
+(`Input`/`Output`/`Context`/`solve`/`matches`); the rest of the
+system stays domain-agnostic. `MathDomain` is the first
+implementation; `SumDomain` (a toy Vec<i64> → i64 with bias)
+proves the abstraction generalizes far beyond term-rewriting.
+
+| Landmark | Closes |
+|---|---|
+| `TaskDomain` trait | object-safe, 4 associated types/methods |
+| `Task<D>` / `TaskResult<D>` / `TaskReport<D>` | typed labeled-data primitives |
+| `MathDomain` | first impl — wraps existing `eval`/library pipeline |
+| `as_math_tasks` | adapter: legacy `MathProblem` → `Task<MathDomain>` |
+| `SumDomain` (test-only) | proves domain-agnosticism: different Input/Output/Context types |
+
+Test pins: 5 unit tests (math-domain-name, generic-matches-legacy,
+harder-empty-scores-zero, harder-identity-scores-full,
+SumDomain-proves-generality).
+
+### Phase W.8: universal Plastic trait (2026-04-19)
+
+Closes *"everything has an algorithm to phase out and choose what
+to phase out and choose what to reinforce."* Every adaptive
+subsystem implements `Plastic`; an outer `PlasticityController`
+ticks shed + reinforce uniformly across heterogeneous components.
+
+| Landmark | Closes |
+|---|---|
+| `Plastic` trait | `component_name`, `active_count`, `phased_out_count`, `capacity`, `utilization`, `phase_out_stale`, `reinforce_strong` |
+| `PlasticityController` | holds `Vec<Rc<dyn Plastic>>`; tick runs shed+reinforce on every registered component; returns `PlasticityReport` |
+| `impl Plastic for StreamingPolicyTrainer` | phase_out = dead-at-birth prune + dormant-or-corrupted prune; reinforce = phantom-gradient auto-rejuvenate on top quartile |
+| `impl Plastic for BanditProbe<T>` | phase_out = ε decay (sheds curiosity); reinforce = switch to best arm if not current |
+| `ComponentTick` / `PlasticityReport` | per-tick metrics |
+
+Test pins: 4 unit tests (controller-ticks-all-components,
+tick_count-monotonic, report-summary-format,
+utilization-handles-zero-capacity) + 1 integration test
+(plasticity_controller_ticks_trainer_and_probe_uniformly).
+
+### Phase W.9: Sexp bridges for live Lisp morphing (2026-04-19)
+
+Closes *"awesome how the lisp system could use this rust
+infrastructure in memory, which will be super reliable for the
+lisp things morphing at runtime."* The Rust shape was already
+Lisp-ready; W.9 lands the Sexp conversions so Lisp can observe
+and publish events without the Rust surface changing.
+
+| Landmark | Closes |
+|---|---|
+| **W.9.1** `map_event_to_sexp` | every MapEvent variant → Sexp; NaN deltas render as `'nan` symbol |
+| **W.9.1** `trainer_snapshot_to_sexp` | full StreamingPolicyTrainer state (weights, Fisher, phantom, counts, contribs, pruned flags, benchmark history, anchor, ewc_lambda, etc.) as one Sexp |
+| **W.9.1** `plasticity_report_to_sexp` | PlasticityReport including per-component ticks |
+| **W.9.2** `map_event_from_sexp` | reverse conversion; malformed Sexp + unknown kinds + missing fields all rejected cleanly |
+| end-to-end test | `lisp_publisher_injects_events_into_hub` proves Lisp Sexp → parse → hub.publish → trainer.on_event works |
+
+Test pins: 13 unit tests (7 forward + 6 reverse +
+round-trip + malformed-rejection + end-to-end publisher).
+
+### Phase W.10: perpetual-improvement fixed-point demo (2026-04-19)
+
+The closed-loop proof. One integration test composes every Phase
+V + W mechanism and demonstrates monotonic measurable improvement
+on labeled data:
+
+```
+scores:           [0.0, 0.333, 0.5]       ← monotonic ↑
+bias trajectory:  [0.0, 0.235, 1.245]     ← trainer learns
+trained_steps:    4 (monotonic)
+events_seen:      9
+has_anchor:       true                    ← EWC active
+plasticity ticks: 2
+lr picks:         [0.05, 0.2, 0.1, 0.05]  ← bandit tunes live
+```
+
+Asserts 8 fixed-point properties:
+1. Scores monotonically non-decreasing across cycles
+2. Final score strictly > baseline
+3. Trainer `trained_steps > 0` (monotonic)
+4. `benchmark_history.len() == cycle_count`
+5. EWC anchor set on improvement
+6. Plasticity controller ran N ticks
+7. All weights + bias stay finite (no pathology)
+8. Hub fan-out lossless (buffer.len == hub.published_count)
+
+This is the artifact that proves the perpetual-improvement vision
+landed: feed the system labeled data and its benchmark score
+climbs; feed more and it keeps climbing. **The fixed point of
+the design.**
+
+Test pin: `perpetual_improvement_fixed_point_demo` in
+`crates/mathscape-core/tests/perpetual_loop.rs`.
+
 ### Phase U: Self-tuning meta-loop (2026-04-18)
 
 The outer orchestrator lands. The machine now observes its own
