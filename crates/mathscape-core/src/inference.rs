@@ -92,6 +92,36 @@ impl LiveInferenceHandle {
     pub fn library_snapshot(&self) -> Vec<RewriteRule> {
         self.library.borrow().clone()
     }
+
+    /// Full typed trainer snapshot (library policy + all
+    /// neuroplasticity fields). Used by `mathscape_core::snapshot`
+    /// to produce a `ModelSnapshot` that covers the live model
+    /// end-to-end.
+    pub fn trainer_snapshot(&self) -> crate::snapshot::TrainerSnapshot {
+        crate::snapshot::trainer_snapshot(&self.trainer)
+    }
+
+    /// How many events the trainer has observed since it
+    /// started.
+    pub fn trainer_events_seen(&self) -> u64 {
+        self.trainer.events_seen()
+    }
+
+    /// How many training updates have been applied.
+    pub fn trainer_updates_applied(&self) -> u64 {
+        self.trainer.updates_applied()
+    }
+
+    /// Borrow the underlying library Rc so external consumers
+    /// (motor, tests, forge) can append rules directly.
+    pub fn library_rc(&self) -> std::rc::Rc<std::cell::RefCell<Vec<RewriteRule>>> {
+        self.library.clone()
+    }
+
+    /// Borrow the underlying trainer Rc.
+    pub fn trainer_rc(&self) -> std::rc::Rc<StreamingPolicyTrainer> {
+        self.trainer.clone()
+    }
 }
 
 impl std::fmt::Debug for LiveInferenceHandle {

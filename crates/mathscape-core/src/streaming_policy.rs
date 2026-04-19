@@ -438,6 +438,51 @@ impl StreamingPolicyTrainer {
         self.learning_rate.set(new_rate);
     }
 
+    /// Phase Y.3: rehydrate the trainer's full internal state
+    /// from a snapshot. Used by `mathscape_core::snapshot` to
+    /// restore saved models from disk or fork them into
+    /// independent copies.
+    ///
+    /// # Warning
+    ///
+    /// This overwrites EVERY internal field — activation counts,
+    /// phantom gradients, Fisher info, anchor, benchmark history,
+    /// learning-progress window, event counts — back to the
+    /// snapshotted values. The previous state is lost.
+    #[allow(clippy::too_many_arguments)]
+    pub fn restore_internal_state(
+        &self,
+        activation_counts: [u64; LibraryFeatures::WIDTH],
+        cumulative_contributions: [f64; LibraryFeatures::WIDTH],
+        pruned: [bool; LibraryFeatures::WIDTH],
+        last_active_event: [u64; LibraryFeatures::WIDTH],
+        phantom_gradient_accum: [f64; LibraryFeatures::WIDTH],
+        fisher_information: [f64; LibraryFeatures::WIDTH],
+        anchor_weights: [f64; LibraryFeatures::WIDTH],
+        anchor_bias: f64,
+        anchor_set: bool,
+        ewc_lambda: f64,
+        events_seen: u64,
+        updates_applied: u64,
+        benchmark_history: Vec<f64>,
+        learning_progress_window: usize,
+    ) {
+        *self.activation_counts.borrow_mut() = activation_counts;
+        *self.cumulative_contributions.borrow_mut() = cumulative_contributions;
+        *self.pruned.borrow_mut() = pruned;
+        *self.last_active_event.borrow_mut() = last_active_event;
+        *self.phantom_gradient_accum.borrow_mut() = phantom_gradient_accum;
+        *self.fisher_information.borrow_mut() = fisher_information;
+        *self.anchor_weights.borrow_mut() = anchor_weights;
+        self.anchor_bias.set(anchor_bias);
+        self.anchor_set.set(anchor_set);
+        self.ewc_lambda.set(ewc_lambda);
+        self.events_seen.set(events_seen);
+        self.updates_applied.set(updates_applied);
+        *self.benchmark_history.borrow_mut() = benchmark_history;
+        self.learning_progress_window.set(learning_progress_window);
+    }
+
     /// Current learning rate.
     pub fn learning_rate(&self) -> f64 {
         self.learning_rate.get()

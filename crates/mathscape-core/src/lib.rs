@@ -23,6 +23,7 @@ pub mod math_problem;
 pub mod mathscape_map;
 pub mod meta;
 pub mod meta_loop;
+pub mod snapshot;
 pub mod streaming_policy;
 pub mod task;
 
