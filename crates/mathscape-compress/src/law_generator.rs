@@ -443,6 +443,161 @@ pub fn derive_laws_with_subterm_au(
     (laws, stats)
 }
 
+// ── Phase J: empirical validity check ────────────────────────────
+//
+// Phase I surfaces candidate laws by shape. Phase J certifies each
+// candidate by EVALUATING it on K random concrete bindings. If the
+// LHS and RHS disagree on any binding, the candidate is rejected —
+// it's structurally plausible but semantically wrong.
+//
+// Together, Phase I + Phase J unblock Phase H's rank-2 inception:
+// Phase I surfaces shape-orthogonal candidates, Phase J filters the
+// semantically-valid ones, leaving MetaPatternGenerator with a set
+// of DISTINCT + VALID meta-rules to generalize over.
+
+use mathscape_core::value::Value;
+
+/// Phase J: empirical validity check. Generate `k_samples` concrete
+/// bindings for `rule.lhs`'s pattern variables (Var ≥ 100), apply
+/// them to both LHS and RHS, and evaluate against `library`. Return
+/// true iff every binding produces bit-equal LHS and RHS normal forms.
+///
+/// `library` should NOT include the candidate rule itself — we
+/// want to test whether the rule HOLDS, not whether it's
+/// self-consistent after installation. (If the library already
+/// proves the rule via other paths, that's fine; it just means the
+/// candidate is redundant rather than invalid.)
+///
+/// `k_samples` trades speed for confidence. 8 samples catches most
+/// wrong candidates (e.g. `(?op ?x ?id) => ?x` fails on ≥1 of 8
+/// (mul, 0) / (add, 1) / non-identity bindings). 32 samples is
+/// defensive.
+///
+/// `step_limit` caps eval steps per side. 300 is consistent with
+/// the law generator's default.
+///
+/// `seed` is used to derive deterministic bindings. Same seed →
+/// same samples → same validity verdict — determinism is preserved.
+#[must_use]
+pub fn is_empirically_valid(
+    rule: &RewriteRule,
+    library: &[RewriteRule],
+    step_limit: usize,
+    k_samples: usize,
+    seed: u64,
+) -> bool {
+    let pattern_vars = collect_pattern_vars(&rule.lhs);
+    if pattern_vars.is_empty() {
+        // Concrete rule — just eval and compare once.
+        let lhs_nf = eval(&rule.lhs, library, step_limit);
+        let rhs_nf = eval(&rule.rhs, library, step_limit);
+        return matches!((lhs_nf, rhs_nf), (Ok(l), Ok(r)) if l == r);
+    }
+
+    for sample_index in 0..k_samples {
+        let mut lhs = rule.lhs.clone();
+        let mut rhs = rule.rhs.clone();
+        for (var_pos, &var_id) in pattern_vars.iter().enumerate() {
+            let val = pick_concrete_value(seed, sample_index, var_pos);
+            lhs = lhs.substitute(var_id, &val);
+            rhs = rhs.substitute(var_id, &val);
+        }
+        let lhs_nf = eval(&lhs, library, step_limit);
+        let rhs_nf = eval(&rhs, library, step_limit);
+        match (lhs_nf, rhs_nf) {
+            (Ok(l), Ok(r)) if l == r => continue,
+            _ => return false,
+        }
+    }
+    true
+}
+
+/// Pick a concrete `Term` for a given (seed, sample, var-position)
+/// triple. Deterministic — same (seed, sample, var_pos) → same
+/// value. Draws from a small pool covering Nat, Int, and small
+/// Tensor values.
+fn pick_concrete_value(seed: u64, sample_index: usize, var_pos: usize) -> Term {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+    let mut h = DefaultHasher::new();
+    (seed, sample_index as u64, var_pos as u64).hash(&mut h);
+    let x = h.finish();
+    // Nat-only pool. Mixed-domain bindings (Nat + Int, Nat +
+    // Tensor) don't round-trip through the kernel's ADD/MUL
+    // (signatures require same-domain operands), which would
+    // falsely reject domain-homogeneous valid laws. Keeping the
+    // pool Nat means Phase J validates laws over the Nat algebra
+    // — Phase J.2 will add domain-aware sampling for Int/Tensor
+    // rules by reading the rule's operator signature.
+    match x % 7 {
+        0 => Term::Number(Value::Nat(0)),
+        1 => Term::Number(Value::Nat(1)),
+        2 => Term::Number(Value::Nat(2)),
+        3 => Term::Number(Value::Nat(5)),
+        4 => Term::Number(Value::Nat(17)),
+        5 => Term::Number(Value::Nat(3)),
+        _ => Term::Number(Value::Nat(8)),
+    }
+}
+
+/// Local pattern-var collector. Uses the same >= 100 convention as
+/// `antiunify::collect_pattern_vars_vec` but duplicated here to
+/// avoid a cross-module API expansion.
+fn collect_pattern_vars(t: &Term) -> Vec<u32> {
+    let mut out = Vec::new();
+    collect_inner(t, &mut out);
+    out.sort_unstable();
+    out.dedup();
+    out
+}
+
+fn collect_inner(t: &Term, out: &mut Vec<u32>) {
+    match t {
+        Term::Var(v) if *v >= 100 => out.push(*v),
+        Term::Var(_) | Term::Point(_) | Term::Number(_) => {}
+        Term::Apply(head, args) => {
+            collect_inner(head, out);
+            for a in args {
+                collect_inner(a, out);
+            }
+        }
+        Term::Fn(_, body) => collect_inner(body, out),
+        Term::Symbol(_, args) => {
+            for a in args {
+                collect_inner(a, out);
+            }
+        }
+    }
+}
+
+/// Phase J convenience: filter an iterator of candidate rules to
+/// only those that pass empirical validity. Uses `seed` = 0 and
+/// `k_samples` = 8 by default — bump via `validate_candidates_ext`
+/// when you want tighter certification.
+#[must_use]
+pub fn validate_candidates(
+    candidates: Vec<RewriteRule>,
+    library: &[RewriteRule],
+    step_limit: usize,
+) -> Vec<RewriteRule> {
+    validate_candidates_ext(candidates, library, step_limit, 8, 0)
+}
+
+/// Phase J with full knobs exposed.
+#[must_use]
+pub fn validate_candidates_ext(
+    candidates: Vec<RewriteRule>,
+    library: &[RewriteRule],
+    step_limit: usize,
+    k_samples: usize,
+    seed: u64,
+) -> Vec<RewriteRule> {
+    candidates
+        .into_iter()
+        .filter(|r| is_empirically_valid(r, library, step_limit, k_samples, seed))
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -542,6 +697,107 @@ mod tests {
     }
 
     // ── Phase I: subterm-paired AU tests ─────────────────────────
+
+    // ── Phase J: empirical validity tests ─────────────────────────
+
+    #[test]
+    fn valid_add_identity_passes_validation() {
+        // add(0, ?x) = ?x — classical identity, holds for every
+        // Nat/Int value.
+        let rule = RewriteRule {
+            name: "add-identity".into(),
+            lhs: apply(var(ADD), vec![nat(0), var(100)]),
+            rhs: var(100),
+        };
+        assert!(is_empirically_valid(&rule, &[], 200, 8, 0));
+    }
+
+    #[test]
+    fn bogus_symmetric_rule_fails_validation() {
+        // add(?x, ?y) = ?y — obviously wrong semantically; on
+        // most bindings, lhs evals to x+y ≠ y.
+        let rule = RewriteRule {
+            name: "bogus-ignores-x".into(),
+            lhs: apply(var(ADD), vec![var(100), var(101)]),
+            rhs: var(101),
+        };
+        assert!(!is_empirically_valid(&rule, &[], 200, 8, 0));
+    }
+
+    #[test]
+    fn over_general_op_id_fails_validation() {
+        // (?op ?x ?id) => ?x — structurally general, semantically
+        // wrong because it doesn't constrain ?op / ?id.
+        // With var(200) standing for the operator position and
+        // concrete bindings substituting numbers for it, eval
+        // rejects (no such op) or produces wrong values.
+        let rule = RewriteRule {
+            name: "over-general".into(),
+            lhs: apply(var(200), vec![var(100), var(201)]),
+            rhs: var(100),
+        };
+        // Most bindings can't eval (var(200) substituted to a
+        // Number that's not a head op). is_empirically_valid
+        // treats eval errors as rejection, which is the right
+        // call — a law that doesn't evaluate isn't a valid law.
+        assert!(!is_empirically_valid(&rule, &[], 200, 8, 0));
+    }
+
+    #[test]
+    fn concrete_rule_validates_on_single_eval() {
+        // add(2, 3) => 5 — no pattern vars; validity is a
+        // single-shot eval comparison.
+        let rule = RewriteRule {
+            name: "concrete-add".into(),
+            lhs: apply(var(ADD), vec![nat(2), nat(3)]),
+            rhs: nat(5),
+        };
+        assert!(is_empirically_valid(&rule, &[], 200, 0, 0));
+    }
+
+    #[test]
+    fn validate_candidates_filters_correctly() {
+        let good = RewriteRule {
+            name: "add-id".into(),
+            lhs: apply(var(ADD), vec![nat(0), var(100)]),
+            rhs: var(100),
+        };
+        let bad = RewriteRule {
+            name: "bogus".into(),
+            lhs: apply(var(ADD), vec![var(100), var(101)]),
+            rhs: var(101),
+        };
+        let filtered = validate_candidates(vec![good.clone(), bad], &[], 200);
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].lhs, good.lhs);
+    }
+
+    #[test]
+    fn validation_is_deterministic() {
+        // Same (rule, library, k, seed) → same verdict.
+        let rule = RewriteRule {
+            name: "add-id".into(),
+            lhs: apply(var(ADD), vec![nat(0), var(100)]),
+            rhs: var(100),
+        };
+        let v1 = is_empirically_valid(&rule, &[], 200, 16, 42);
+        let v2 = is_empirically_valid(&rule, &[], 200, 16, 42);
+        assert_eq!(v1, v2);
+    }
+
+    #[test]
+    fn validation_seed_affects_sample_choice() {
+        // Different seeds → potentially different samples. For a
+        // TRULY VALID rule, both should accept; this pins that.
+        let rule = RewriteRule {
+            name: "mul-id".into(),
+            lhs: apply(var(MUL), vec![nat(1), var(100)]),
+            rhs: var(100),
+        };
+        assert!(is_empirically_valid(&rule, &[], 200, 8, 0));
+        assert!(is_empirically_valid(&rule, &[], 200, 8, 1));
+        assert!(is_empirically_valid(&rule, &[], 200, 8, 999));
+    }
 
     #[test]
     fn subterm_au_finds_at_least_as_much_as_root_only() {

@@ -26,7 +26,8 @@ pub use mechanism::{
     MechanismPool, TrialResult,
 };
 pub use bootstrap_lisp::{
-    scenario_from_sexp, scenario_to_sexp, spec_from_sexp, spec_to_sexp,
+    observation_from_sexp, observation_to_sexp, scenario_from_sexp,
+    scenario_to_sexp, spec_from_sexp, spec_to_sexp,
 };
 pub use policy_lisp::{policy_from_sexp, policy_to_sexp};
 pub use primitives_lisp::{census_to_sexp, primitive_from_sexp, primitive_to_sexp};

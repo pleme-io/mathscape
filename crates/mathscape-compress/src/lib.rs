@@ -14,8 +14,9 @@ pub mod meta_gen;
 pub use adapter::CompressionGenerator;
 pub use law_generator::{
     derive_laws_from_corpus, derive_laws_from_corpus_instrumented,
-    derive_laws_with_cache, derive_laws_with_subterm_au, LawGenStats,
-    MemoizingAntiUnifier,
+    derive_laws_with_cache, derive_laws_with_subterm_au,
+    is_empirically_valid, validate_candidates, validate_candidates_ext,
+    LawGenStats, MemoizingAntiUnifier,
 };
 pub use antiunify::paired_subterm_anti_unify;
 pub use meta_gen::{CompositeGenerator, MetaPatternGenerator};

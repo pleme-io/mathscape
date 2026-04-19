@@ -353,6 +353,167 @@ pub fn scenario_from_sexp(
     })
 }
 
+// ── Phase U.4: LearningObservation <-> Sexp ─────────────────────
+//
+// Closes the "everything in the meta-loop is a Lisp value" claim.
+// With R10 policy, R32 spec, R33 scenario, and now U.1 observation
+// all round-tripping through Sexp, the outer loop
+//   (Sexp scenario, Sexp observation_history) → Sexp next_scenario
+// is a pure function. Its signature is the WASM module signature
+// the Phase U.5 virtualization target will export.
+
+/// Convert a `LearningObservation` to Sexp form:
+/// ```text
+///   (observation
+///     :total-library-size  7
+///     :seed-library-size   2
+///     :net-growth-per-phase (3 2 1 0)
+///     :saturation-phase-index 3        ; or nil
+///     :extract-ns-per-iteration (100 200 300)
+///     :trained-policy-delta-norm 0.42
+///     :scenario-total-ns   123456
+///     :chain-attestation   "hex...")
+/// ```
+#[must_use]
+pub fn observation_to_sexp(
+    obs: &mathscape_core::bootstrap::LearningObservation,
+) -> Sexp {
+    let mut items: Vec<Sexp> = vec![
+        Sexp::symbol("observation"),
+        Sexp::keyword("total-library-size"),
+        Sexp::int(obs.total_library_size as i64),
+        Sexp::keyword("seed-library-size"),
+        Sexp::int(obs.seed_library_size as i64),
+        Sexp::keyword("net-growth-per-phase"),
+        Sexp::List(
+            obs.net_growth_per_phase
+                .iter()
+                .map(|n| Sexp::int(*n as i64))
+                .collect(),
+        ),
+        Sexp::keyword("saturation-phase-index"),
+    ];
+    match obs.saturation_phase_index {
+        Some(i) => items.push(Sexp::int(i as i64)),
+        None => items.push(Sexp::symbol("nil")),
+    }
+    items.push(Sexp::keyword("extract-ns-per-iteration"));
+    items.push(Sexp::List(
+        obs.extract_ns_per_iteration
+            .iter()
+            .map(|n| Sexp::int(*n as i64))
+            .collect(),
+    ));
+    items.push(Sexp::keyword("trained-policy-delta-norm"));
+    items.push(Sexp::float(obs.trained_policy_delta_norm));
+    items.push(Sexp::keyword("scenario-total-ns"));
+    items.push(Sexp::int(obs.scenario_total_ns as i64));
+    items.push(Sexp::keyword("chain-attestation"));
+    items.push(Sexp::string(hex_encode(obs.chain_attestation.as_bytes())));
+    Sexp::List(items)
+}
+
+/// Parse a `LearningObservation` from Sexp. `None` on malformed.
+#[must_use]
+pub fn observation_from_sexp(
+    sexp: &Sexp,
+) -> Option<mathscape_core::bootstrap::LearningObservation> {
+    let items = match sexp {
+        Sexp::List(xs) if xs.len() >= 17 => xs,
+        _ => return None,
+    };
+    match &items[0] {
+        Sexp::Atom(Atom::Symbol(s)) if s == "observation" => {}
+        _ => return None,
+    }
+    let fields = parse_kv_pairs(&items[1..])?;
+
+    let total_library_size = fields.get_int("total-library-size")? as usize;
+    let seed_library_size = fields.get_int("seed-library-size")? as usize;
+    let net_growth_per_phase: Vec<usize> = match fields.get("net-growth-per-phase")? {
+        Sexp::List(xs) => xs
+            .iter()
+            .filter_map(|x| match x {
+                Sexp::Atom(Atom::Int(n)) => Some(*n as usize),
+                _ => None,
+            })
+            .collect(),
+        _ => return None,
+    };
+    let saturation_phase_index = match fields.get("saturation-phase-index")? {
+        Sexp::Atom(Atom::Int(n)) => Some(*n as usize),
+        Sexp::Atom(Atom::Symbol(s)) if s == "nil" => None,
+        _ => return None,
+    };
+    let extract_ns_per_iteration: Vec<u64> =
+        match fields.get("extract-ns-per-iteration")? {
+            Sexp::List(xs) => xs
+                .iter()
+                .filter_map(|x| match x {
+                    Sexp::Atom(Atom::Int(n)) => Some(*n as u64),
+                    _ => None,
+                })
+                .collect(),
+            _ => return None,
+        };
+    let trained_policy_delta_norm = match fields.get("trained-policy-delta-norm")?
+    {
+        Sexp::Atom(Atom::Float(f)) => *f,
+        Sexp::Atom(Atom::Int(n)) => *n as f64,
+        _ => return None,
+    };
+    let scenario_total_ns = fields.get_int("scenario-total-ns")? as u64;
+    let hex = fields.get_string("chain-attestation")?;
+    let bytes = hex_decode(&hex)?;
+    // TermRef holds the 32-byte hash directly; `from_bytes` would
+    // re-hash the input instead of using it as the hash. Construct
+    // the pub-field tuple-struct directly.
+    let arr: [u8; 32] = bytes.as_slice().try_into().ok()?;
+    let chain_attestation = mathscape_core::hash::TermRef(arr);
+
+    Some(mathscape_core::bootstrap::LearningObservation {
+        total_library_size,
+        seed_library_size,
+        net_growth_per_phase,
+        saturation_phase_index,
+        extract_ns_per_iteration,
+        trained_policy_delta_norm,
+        scenario_total_ns,
+        chain_attestation,
+    })
+}
+
+fn hex_encode(bytes: &[u8]) -> String {
+    let mut s = String::with_capacity(bytes.len() * 2);
+    for b in bytes {
+        use std::fmt::Write;
+        let _ = write!(&mut s, "{:02x}", b);
+    }
+    s
+}
+
+fn hex_decode(s: &str) -> Option<Vec<u8>> {
+    if s.len() % 2 != 0 {
+        return None;
+    }
+    let mut out = Vec::with_capacity(s.len() / 2);
+    for chunk in s.as_bytes().chunks(2) {
+        let hi = hex_nibble(chunk[0])?;
+        let lo = hex_nibble(chunk[1])?;
+        out.push((hi << 4) | lo);
+    }
+    Some(out)
+}
+
+fn hex_nibble(b: u8) -> Option<u8> {
+    match b {
+        b'0'..=b'9' => Some(b - b'0'),
+        b'a'..=b'f' => Some(b - b'a' + 10),
+        b'A'..=b'F' => Some(b - b'A' + 10),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -441,5 +602,96 @@ mod tests {
             scenario_from_sexp(&Sexp::List(vec![Sexp::symbol("not-experiment")]))
                 .is_none()
         );
+    }
+
+    // ── Phase U.4: observation Sexp tests ────────────────────────
+
+    #[test]
+    fn observation_roundtrips_via_sexp() {
+        use mathscape_core::bootstrap::LearningObservation;
+        let obs = LearningObservation {
+            total_library_size: 7,
+            seed_library_size: 2,
+            net_growth_per_phase: vec![3, 2, 1, 0],
+            saturation_phase_index: Some(3),
+            extract_ns_per_iteration: vec![100, 200, 300, 400],
+            trained_policy_delta_norm: 0.4242,
+            scenario_total_ns: 1_234_567,
+            chain_attestation: mathscape_core::hash::TermRef::from_bytes(
+                b"phase-u-observation-rt",
+            ),
+        };
+        let sexp = observation_to_sexp(&obs);
+        let back = observation_from_sexp(&sexp).expect("valid observation sexp");
+        assert_eq!(obs, back);
+    }
+
+    #[test]
+    fn observation_with_no_saturation_roundtrips() {
+        use mathscape_core::bootstrap::LearningObservation;
+        let obs = LearningObservation {
+            total_library_size: 5,
+            seed_library_size: 0,
+            net_growth_per_phase: vec![5],
+            saturation_phase_index: None,
+            extract_ns_per_iteration: vec![],
+            trained_policy_delta_norm: 0.0,
+            scenario_total_ns: 0,
+            chain_attestation: mathscape_core::hash::TermRef::from_bytes(b""),
+        };
+        let sexp = observation_to_sexp(&obs);
+        let back = observation_from_sexp(&sexp).unwrap();
+        assert_eq!(obs, back);
+        assert!(back.saturation_phase_index.is_none());
+    }
+
+    #[test]
+    fn malformed_observation_sexp_returns_none() {
+        assert!(observation_from_sexp(&Sexp::int(42)).is_none());
+        assert!(
+            observation_from_sexp(&Sexp::List(vec![Sexp::symbol("not-observation")]))
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn observation_from_sexp_handles_policy_delta_as_int() {
+        // If the delta norm happens to be an integer (e.g. 0), the
+        // parser should accept it as a float.
+        use mathscape_core::bootstrap::LearningObservation;
+        let obs = LearningObservation {
+            total_library_size: 1,
+            seed_library_size: 0,
+            net_growth_per_phase: vec![1],
+            saturation_phase_index: None,
+            extract_ns_per_iteration: vec![],
+            trained_policy_delta_norm: 0.0,
+            scenario_total_ns: 100,
+            chain_attestation: mathscape_core::hash::TermRef::from_bytes(b"x"),
+        };
+        // Emit-then-parse works.
+        let sexp = observation_to_sexp(&obs);
+        let back = observation_from_sexp(&sexp).unwrap();
+        assert_eq!(obs, back);
+    }
+
+    #[test]
+    fn hex_encode_decode_roundtrip() {
+        for bytes in [
+            b"".to_vec(),
+            b"hello".to_vec(),
+            vec![0u8, 1, 2, 255, 16, 128],
+            {
+                let mut v = Vec::new();
+                for i in 0..32u8 {
+                    v.push(i);
+                }
+                v
+            },
+        ] {
+            let enc = hex_encode(&bytes);
+            let dec = hex_decode(&enc).expect("valid hex round-trip");
+            assert_eq!(bytes, dec);
+        }
     }
 }
