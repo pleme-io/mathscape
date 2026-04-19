@@ -299,6 +299,329 @@ pub fn fork_from_snapshot(
     LiveInferenceHandle::new(library, trainer)
 }
 
+/// Phase Y.3.1 (2026-04-19): deep measurement pass.
+///
+/// A rigorous analysis of a live model BEFORE snapshotting —
+/// so the artifact we persist carries evidence of what it
+/// does, not just a weight dump. The report is embedded in
+/// the snapshot's `metadata` map (as "analysis.*" keys) and
+/// printed to stdout.
+#[derive(Debug, Clone)]
+pub struct ModelAnalysis {
+    pub curriculum_total: (usize, usize, f64),
+    pub per_subdomain: std::collections::BTreeMap<String, (usize, usize, f64)>,
+    pub mastered: Vec<String>,
+    pub frontier: Vec<String>,
+    /// Top weights by |value|, paired with their Fisher info.
+    pub top_weights: Vec<(usize, f64, f64)>,
+    /// Sum of Fisher information across all weights (total
+    /// accumulated "importance" signal).
+    pub fisher_total: f64,
+    /// Count of pruned weights (dead dimensions).
+    pub pruned_count: usize,
+    /// Count of weights with non-zero activations (active
+    /// dimensions).
+    pub active_count: usize,
+    /// Per-rule size info (lhs + rhs node counts).
+    pub rule_sizes: Vec<(String, usize, usize)>,
+    /// Human-readable bullet list of findings.
+    pub highlights: Vec<String>,
+}
+
+/// Run the deep analysis pass.
+pub fn deep_analyze(handle: &LiveInferenceHandle) -> ModelAnalysis {
+    let library = handle.library_snapshot();
+    let trainer_snap = handle.trainer_snapshot();
+    let competency = handle.current_competency();
+
+    let curriculum_total = (
+        competency.total.solved_count,
+        competency.total.problem_set_size,
+        competency.total.solved_fraction(),
+    );
+    let per_subdomain = competency
+        .per_subdomain
+        .iter()
+        .map(|(k, v)| {
+            (
+                (*k).to_string(),
+                (v.solved_count, v.problem_set_size, v.solved_fraction()),
+            )
+        })
+        .collect();
+    let mastered: Vec<String> = competency
+        .mastered()
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+    let frontier: Vec<String> = competency
+        .frontier()
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+
+    // Top-5 weights by absolute magnitude.
+    let mut weight_idx: Vec<(usize, f64, f64)> = trainer_snap
+        .policy
+        .weights
+        .iter()
+        .enumerate()
+        .map(|(i, w)| (i, *w, trainer_snap.fisher_information[i]))
+        .collect();
+    weight_idx.sort_by(|a, b| b.1.abs().partial_cmp(&a.1.abs()).unwrap());
+    let top_weights = weight_idx.into_iter().take(5).collect();
+
+    let fisher_total: f64 = trainer_snap.fisher_information.iter().sum();
+    let pruned_count = trainer_snap.pruned.iter().filter(|b| **b).count();
+    let active_count = trainer_snap
+        .activation_counts
+        .iter()
+        .filter(|c| **c > 0)
+        .count();
+
+    let rule_sizes: Vec<(String, usize, usize)> = library
+        .iter()
+        .map(|r| (r.name.clone(), term_size(&r.lhs), term_size(&r.rhs)))
+        .collect();
+
+    let mut highlights = Vec::new();
+    highlights.push(format!(
+        "Curriculum score: {}/{} ({:.1}%)",
+        curriculum_total.0,
+        curriculum_total.1,
+        curriculum_total.2 * 100.0
+    ));
+    highlights.push(format!(
+        "Mastered subdomains: {} ({})",
+        mastered.len(),
+        if mastered.is_empty() {
+            "none".to_string()
+        } else {
+            mastered.join(", ")
+        }
+    ));
+    if !frontier.is_empty() {
+        highlights.push(format!(
+            "Frontier (0%): {}",
+            frontier.join(", ")
+        ));
+    }
+    highlights.push(format!(
+        "Library: {} rules discovered",
+        library.len()
+    ));
+    highlights.push(format!(
+        "Trainer: {} trained steps, {} events seen, {} updates",
+        trainer_snap.policy.trained_steps,
+        trainer_snap.events_seen,
+        trainer_snap.updates_applied
+    ));
+    highlights.push(format!(
+        "Weights: {} active, {} pruned",
+        active_count, pruned_count
+    ));
+    highlights.push(format!(
+        "Fisher total: {:.4} (accumulated importance signal)",
+        fisher_total
+    ));
+    if trainer_snap.anchor_set {
+        highlights.push("EWC anchor SET (protecting known-good state)".to_string());
+    }
+    if !trainer_snap.benchmark_history.is_empty() {
+        let first = trainer_snap.benchmark_history.first().unwrap();
+        let last = trainer_snap.benchmark_history.last().unwrap();
+        highlights.push(format!(
+            "Benchmark trajectory: {:.3} → {:.3} (Δ {:+.3})",
+            first,
+            last,
+            last - first
+        ));
+    }
+
+    ModelAnalysis {
+        curriculum_total,
+        per_subdomain,
+        mastered,
+        frontier,
+        top_weights,
+        fisher_total,
+        pruned_count,
+        active_count,
+        rule_sizes,
+        highlights,
+    }
+}
+
+/// Embed the analysis into the snapshot's metadata so it
+/// persists on disk.
+pub fn attach_analysis(snap: &mut ModelSnapshot, analysis: &ModelAnalysis) {
+    snap.metadata.insert(
+        "analysis.curriculum_score".into(),
+        format!(
+            "{}/{} ({:.3})",
+            analysis.curriculum_total.0,
+            analysis.curriculum_total.1,
+            analysis.curriculum_total.2
+        ),
+    );
+    snap.metadata.insert(
+        "analysis.mastered".into(),
+        analysis.mastered.join(","),
+    );
+    snap.metadata.insert(
+        "analysis.frontier".into(),
+        analysis.frontier.join(","),
+    );
+    snap.metadata.insert(
+        "analysis.library_size".into(),
+        analysis.rule_sizes.len().to_string(),
+    );
+    snap.metadata.insert(
+        "analysis.active_weights".into(),
+        analysis.active_count.to_string(),
+    );
+    snap.metadata.insert(
+        "analysis.pruned_weights".into(),
+        analysis.pruned_count.to_string(),
+    );
+    snap.metadata.insert(
+        "analysis.fisher_total".into(),
+        format!("{:.4}", analysis.fisher_total),
+    );
+    for (i, (name, ls, rs)) in analysis.rule_sizes.iter().enumerate() {
+        snap.metadata.insert(
+            format!("analysis.rule_{i}"),
+            format!("{name} lhs={ls} rhs={rs}"),
+        );
+    }
+}
+
+/// Pretty-print an analysis to stdout-style string.
+pub fn format_analysis(analysis: &ModelAnalysis) -> String {
+    let mut out = String::new();
+    out.push_str("\n╔════════════════════════════════════════════════════════╗\n");
+    out.push_str("║  DEEP MEASUREMENT PASS                                  ║\n");
+    out.push_str("╚════════════════════════════════════════════════════════╝\n\n");
+    for h in &analysis.highlights {
+        out.push_str(&format!("  • {h}\n"));
+    }
+    out.push_str("\n  Per-subdomain breakdown:\n");
+    for (k, (s, t, f)) in &analysis.per_subdomain {
+        let bar_len = (f * 20.0) as usize;
+        let bar: String = "█".repeat(bar_len) + &" ".repeat(20 - bar_len);
+        out.push_str(&format!("    {k:<18} [{bar}] {s}/{t} ({:.0}%)\n", f * 100.0));
+    }
+    out.push_str("\n  Top-5 weights by magnitude:\n");
+    for (i, w, f) in &analysis.top_weights {
+        out.push_str(&format!(
+            "    weight[{i}] = {:>9.4}  fisher = {:>9.6}\n",
+            w, f
+        ));
+    }
+    out.push_str("\n  Rules discovered (size = node count):\n");
+    for (name, ls, rs) in &analysis.rule_sizes {
+        out.push_str(&format!(
+            "    {name:<28}  lhs={ls:>3}  rhs={rs:>3}\n"
+        ));
+    }
+    out
+}
+
+/// Human-readable analysis of a snapshot — content hash,
+/// library summary, per-rule descriptors, trainer state
+/// histogram. Call this after `load_from_path` to inspect what
+/// got persisted.
+pub fn analyze_snapshot(snap: &ModelSnapshot) -> String {
+    let mut out = String::new();
+    out.push_str(&format!(
+        "╔════════════════════════════════════════════════════════╗\n"
+    ));
+    out.push_str(&format!(
+        "║  MATHSCAPE MODEL SNAPSHOT — analysis                    ║\n"
+    ));
+    out.push_str(&format!(
+        "╚════════════════════════════════════════════════════════╝\n"
+    ));
+    out.push_str(&format!(
+        "  version:         {}\n",
+        snap.version,
+    ));
+    out.push_str(&format!(
+        "  created_at:      epoch {}s\n",
+        snap.created_at_epoch_secs,
+    ));
+    out.push_str(&format!(
+        "  content_hash:    {}\n",
+        hex16(&snap.content_hash),
+    ));
+    out.push_str(&format!(
+        "  metadata keys:   {}\n",
+        snap.metadata.len(),
+    ));
+    for (k, v) in &snap.metadata {
+        out.push_str(&format!("    - {k}: {v}\n"));
+    }
+    out.push_str(&format!("\n  LIBRARY ({} rules):\n", snap.library.len()));
+    for (i, rule) in snap.library.iter().enumerate() {
+        out.push_str(&format!(
+            "    [{i:2}] {:<24}  lhs_size ~{}  rhs_size ~{}\n",
+            rule.name,
+            term_size(&rule.lhs),
+            term_size(&rule.rhs),
+        ));
+    }
+    out.push_str(&format!(
+        "\n  TRAINER:\n    trained_steps:  {}\n    events_seen:    {}\n    updates_applied: {}\n    bias:           {:.6}\n    learning_rate:  {:.4}\n    ewc_lambda:     {:.4}\n    anchor_set:     {}\n    lp_window:      {}\n    pruned_count:   {}\n",
+        snap.trainer.policy.trained_steps,
+        snap.trainer.events_seen,
+        snap.trainer.updates_applied,
+        snap.trainer.policy.bias,
+        snap.trainer.learning_rate,
+        snap.trainer.ewc_lambda,
+        snap.trainer.anchor_set,
+        snap.trainer.learning_progress_window,
+        snap.trainer.pruned.iter().filter(|b| **b).count(),
+    ));
+    out.push_str("\n  WEIGHT STATS (per-dimension):\n");
+    out.push_str("    idx  weight     fisher     phantom    counts\n");
+    for i in 0..snap.trainer.policy.weights.len() {
+        out.push_str(&format!(
+            "    [{i}] {:>9.4}  {:>9.6}  {:>9.6}  {}\n",
+            snap.trainer.policy.weights[i],
+            snap.trainer.fisher_information[i],
+            snap.trainer.phantom_gradient_accum[i],
+            snap.trainer.activation_counts[i],
+        ));
+    }
+    out.push_str(&format!(
+        "\n  BENCHMARK HISTORY ({} runs):\n    {:?}\n",
+        snap.trainer.benchmark_history.len(),
+        snap.trainer.benchmark_history,
+    ));
+    out
+}
+
+fn hex16(bytes: &[u8; 32]) -> String {
+    let mut s = String::with_capacity(33);
+    for b in bytes.iter().take(16) {
+        s.push_str(&format!("{b:02x}"));
+    }
+    s.push('…');
+    s
+}
+
+fn term_size(t: &crate::term::Term) -> usize {
+    use crate::term::Term;
+    match t {
+        Term::Var(_) | Term::Point(_) | Term::Number(_) => 1,
+        Term::Apply(head, args) => {
+            1 + term_size(head) + args.iter().map(term_size).sum::<usize>()
+        }
+        Term::Fn(_, body) => 1 + term_size(body),
+        Term::Symbol(_, args) => 1 + args.iter().map(term_size).sum::<usize>(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

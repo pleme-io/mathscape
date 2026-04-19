@@ -112,7 +112,10 @@
           inherit pname;
           version = "0.1.0";
           src = self;
-          cargoLock.lockFile = ./Cargo.lock;
+          cargoLock = {
+            lockFile = ./Cargo.lock;
+            allowBuiltinFetchGit = true;
+          };
           cargoBuildFlags = ["--package" pname];
           nativeBuildInputs = [t.targetPkgs.pkg-config t.targetPkgs.protobuf];
           buildInputs = [t.targetPkgs.openssl t.targetPkgs.pkg-config t.targetPkgs.postgresql]
@@ -128,7 +131,10 @@
           inherit pname cargoBuildFlags;
           version = "0.1.0";
           src = self;
-          cargoLock.lockFile = ./Cargo.lock;
+          cargoLock = {
+            lockFile = ./Cargo.lock;
+            allowBuiltinFetchGit = true;
+          };
           nativeBuildInputs = [pkgs.pkg-config pkgs.protobuf];
           buildInputs = commonBuildInputs;
         };

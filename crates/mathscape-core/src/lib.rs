@@ -118,6 +118,12 @@ pub use form_tree::{
 };
 pub use hash::TermRef;
 pub use inference::LiveInferenceHandle;
+pub use snapshot::{
+    analyze_snapshot, attach_analysis, deep_analyze, fork_from_snapshot,
+    format_analysis, snapshot_handle, trainer_from_snapshot, trainer_snapshot,
+    ModelAnalysis, ModelSnapshot, SnapshotError, TrainerSnapshot,
+    SNAPSHOT_VERSION,
+};
 pub use lifecycle::{AxiomIdentity, DemotionReason, ProofStatus, TypescapeCoord};
 pub use trap::{Trap, TrapDetector, TrapExitReason};
 pub use migration::migrate_library;
