@@ -279,17 +279,28 @@ fn max_var_id(t: &Term) -> u32 {
     }
 }
 
-/// Simplified term key for memoizing variable assignments.
+/// Simplified term key for memoizing variable assignments inside
+/// `au_inner`'s divergence-to-var map.
+///
+/// R38: leaves hold `Term` directly rather than a `Vec<u8>` produced
+/// by `format!("{t:?}").into_bytes()`. The old path round-tripped
+/// every leaf divergence through the Debug formatter + a heap
+/// allocation; `Term` already derives `Hash + Eq`, so using it as
+/// the key is both faster and more direct. Complex (non-leaf)
+/// divergences still collapse to a single bucket — not changed here
+/// because doing so would alter AU semantics (siblings that were
+/// previously treated as the same divergence would now be
+/// distinguished, altering which patterns get generated).
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 enum TermKey {
-    Leaf(Vec<u8>), // serialized leaf
-    Complex,       // non-leaf, don't memoize
+    Leaf(Term),
+    Complex,
 }
 
 fn term_key(t: &Term) -> TermKey {
     match t {
         Term::Point(_) | Term::Number(_) | Term::Var(_) => {
-            TermKey::Leaf(format!("{t:?}").into_bytes())
+            TermKey::Leaf(t.clone())
         }
         _ => TermKey::Complex,
     }
