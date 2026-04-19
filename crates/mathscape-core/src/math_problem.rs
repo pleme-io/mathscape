@@ -504,7 +504,6 @@ pub fn mathematician_curriculum() -> Vec<CurriculumProblem> {
     const INT_ADD: u32 = 12;
     const INT_MUL: u32 = 13;
     const INT_NEG: u32 = 14;
-    const INT_SUB: u32 = 15;
 
     let apply = |h: u32, args: Vec<Term>| -> Term {
         Term::Apply(Box::new(Term::Var(h)), args)
@@ -515,6 +514,13 @@ pub fn mathematician_curriculum() -> Vec<CurriculumProblem> {
         Term::Number(Value::tensor(shape, data).unwrap())
     };
     let pv = |id: u32| Term::Var(id);
+
+    // NOTE: there is no INT_SUB builtin — the substrate only exposes
+    // FLOAT_SUB/FT_SUB. We synthesize subtraction as
+    //   sub(a, b) := int_add(a, int_neg(b))
+    // This helper captures that.
+    let int_sub_term =
+        |a: Term, b: Term| apply(INT_ADD, vec![a, apply(INT_NEG, vec![b])]);
 
     let mut curriculum = Vec::new();
 
@@ -559,7 +565,7 @@ pub fn mathematician_curriculum() -> Vec<CurriculumProblem> {
         ("int-add-neg", apply(INT_ADD, vec![int(-5), int(3)]), int(-2)),
         ("int-mul-neg-neg", apply(INT_MUL, vec![int(-2), int(-4)]), int(8)),
         ("int-neg-neg", apply(INT_NEG, vec![int(-7)]), int(7)),
-        ("int-sub", apply(INT_SUB, vec![int(10), int(3)]), int(7)),
+        ("int-sub", int_sub_term(int(10), int(3)), int(7)),
         (
             "int-deep",
             apply(
@@ -918,6 +924,239 @@ pub fn mathematician_curriculum() -> Vec<CurriculumProblem> {
     for (id, input, expected) in deep_cases {
         curriculum.push(CurriculumProblem {
             subdomain: sd_deep,
+            problem: MathProblem {
+                id: id.into(),
+                description: id.into(),
+                input,
+                expected,
+                step_limit: 50,
+            },
+        });
+    }
+
+    // ── Subdomain 9: commutativity-concrete (5 probes) ──────────
+    //
+    // Two orderings of the same addition / multiplication should
+    // produce identical concrete values. Tests whether the
+    // kernel's constant folding is symmetric (it should be; this
+    // is a regression guard).
+    let sd_comm = "commutativity-concrete";
+    let comm_cases: Vec<(&str, Term, Term)> = vec![
+        ("comm-add-2-3", apply(ADD, vec![nat(2), nat(3)]), nat(5)),
+        ("comm-add-3-2", apply(ADD, vec![nat(3), nat(2)]), nat(5)),
+        ("comm-mul-4-5", apply(MUL, vec![nat(4), nat(5)]), nat(20)),
+        ("comm-mul-5-4", apply(MUL, vec![nat(5), nat(4)]), nat(20)),
+        (
+            "comm-chain",
+            apply(
+                ADD,
+                vec![apply(MUL, vec![nat(2), nat(3)]), apply(MUL, vec![nat(3), nat(2)])],
+            ),
+            nat(12),
+        ),
+    ];
+    for (id, input, expected) in comm_cases {
+        curriculum.push(CurriculumProblem {
+            subdomain: sd_comm,
+            problem: MathProblem {
+                id: id.into(),
+                description: id.into(),
+                input,
+                expected,
+                step_limit: 40,
+            },
+        });
+    }
+
+    // ── Subdomain 10: successor-chains (5 probes) ───────────────
+    //
+    // Nested succ(…(succ(zero))). The kernel's Peano arithmetic
+    // should count correctly through chains of arbitrary length.
+    let sd_succ = "successor-chains";
+    const SUCC: u32 = 1; // mathscape_core::builtin::SUCC (Peano successor on Nat)
+    for (id, depth) in [
+        ("succ-0", 0u64),
+        ("succ-3", 3),
+        ("succ-5", 5),
+        ("succ-7", 7),
+        ("succ-12", 12),
+    ] {
+        let mut t = nat(0);
+        for _ in 0..depth {
+            t = apply(SUCC, vec![t]);
+        }
+        curriculum.push(CurriculumProblem {
+            subdomain: sd_succ,
+            problem: MathProblem {
+                id: id.into(),
+                description: format!("succ-chain of {depth}"),
+                input: t,
+                expected: nat(depth),
+                step_limit: 50,
+            },
+        });
+    }
+
+    // ── Subdomain 11: int-chains-deep (5 probes) ────────────────
+    //
+    // Four-operator integer chains exercising mixed
+    // neg/sub/add/mul. Pure concrete arithmetic — any failure
+    // is a kernel-int regression.
+    let sd_int_deep = "int-chains-deep";
+    let int_cases: Vec<(&str, Term, Term)> = vec![
+        (
+            "int-add-chain",
+            apply(
+                INT_ADD,
+                vec![apply(INT_ADD, vec![int(1), int(2)]), apply(INT_ADD, vec![int(3), int(4)])],
+            ),
+            int(10),
+        ),
+        (
+            "int-neg-of-sum",
+            apply(
+                INT_NEG,
+                vec![apply(INT_ADD, vec![int(7), int(3)])],
+            ),
+            int(-10),
+        ),
+        (
+            "int-sub-deep",
+            int_sub_term(int_sub_term(int(10), int(3)), int(2)),
+            int(5),
+        ),
+        (
+            "int-mul-of-neg",
+            apply(
+                INT_MUL,
+                vec![int(-4), apply(INT_MUL, vec![int(2), int(3)])],
+            ),
+            int(-24),
+        ),
+        (
+            "int-mixed",
+            apply(
+                INT_ADD,
+                vec![
+                    apply(INT_NEG, vec![int(5)]),
+                    apply(INT_MUL, vec![int(-2), int(-3)]),
+                ],
+            ),
+            int(1),
+        ),
+    ];
+    for (id, input, expected) in int_cases {
+        curriculum.push(CurriculumProblem {
+            subdomain: sd_int_deep,
+            problem: MathProblem {
+                id: id.into(),
+                description: id.into(),
+                input,
+                expected,
+                step_limit: 50,
+            },
+        });
+    }
+
+    // ── Subdomain 12: int-sign-combinations (5 probes) ──────────
+    //
+    // Sign-specific edge cases: double-negation, zero-handling,
+    // cancellation. Guards against overflow/sign bugs when
+    // motor-discovered rules interfere with Int kernel.
+    let sd_int_sign = "int-sign-combinations";
+    let sign_cases: Vec<(&str, Term, Term)> = vec![
+        (
+            "sign-double-neg",
+            apply(INT_NEG, vec![apply(INT_NEG, vec![int(42)])]),
+            int(42),
+        ),
+        ("sign-zero-neg", apply(INT_NEG, vec![int(0)]), int(0)),
+        (
+            "sign-cancel",
+            apply(INT_ADD, vec![int(5), int(-5)]),
+            int(0),
+        ),
+        (
+            "sign-mul-by-zero",
+            apply(INT_MUL, vec![int(0), int(-999)]),
+            int(0),
+        ),
+        (
+            "sign-sub-same",
+            int_sub_term(int(-7), int(-7)),
+            int(0),
+        ),
+    ];
+    for (id, input, expected) in sign_cases {
+        curriculum.push(CurriculumProblem {
+            subdomain: sd_int_sign,
+            problem: MathProblem {
+                id: id.into(),
+                description: id.into(),
+                input,
+                expected,
+                step_limit: 30,
+            },
+        });
+    }
+
+    // ── Subdomain 13: tensor-element-wise (5 probes) ────────────
+    //
+    // Concrete tensor ops where the kernel must compute element
+    // by element. Tests the Tensor kernel under the expanded
+    // shape diversity.
+    let sd_tens_ew = "tensor-element-wise";
+    let tens_cases: Vec<(&str, Term, Term)> = vec![
+        (
+            "tens-add-concrete",
+            apply(
+                TENSOR_ADD,
+                vec![tensor(vec![3], vec![1, 2, 3]), tensor(vec![3], vec![10, 20, 30])],
+            ),
+            tensor(vec![3], vec![11, 22, 33]),
+        ),
+        (
+            "tens-mul-concrete",
+            apply(
+                TENSOR_MUL,
+                vec![tensor(vec![2], vec![2, 3]), tensor(vec![2], vec![4, 5])],
+            ),
+            tensor(vec![2], vec![8, 15]),
+        ),
+        (
+            "tens-add-with-zeros",
+            apply(
+                TENSOR_ADD,
+                vec![tensor(vec![4], vec![0, 0, 0, 0]), tensor(vec![4], vec![1, 2, 3, 4])],
+            ),
+            tensor(vec![4], vec![1, 2, 3, 4]),
+        ),
+        (
+            "tens-mul-with-ones",
+            apply(
+                TENSOR_MUL,
+                vec![tensor(vec![3], vec![1, 1, 1]), tensor(vec![3], vec![7, 8, 9])],
+            ),
+            tensor(vec![3], vec![7, 8, 9]),
+        ),
+        (
+            "tens-add-chain",
+            apply(
+                TENSOR_ADD,
+                vec![
+                    apply(
+                        TENSOR_ADD,
+                        vec![tensor(vec![2], vec![1, 2]), tensor(vec![2], vec![3, 4])],
+                    ),
+                    tensor(vec![2], vec![5, 6]),
+                ],
+            ),
+            tensor(vec![2], vec![9, 12]),
+        ),
+    ];
+    for (id, input, expected) in tens_cases {
+        curriculum.push(CurriculumProblem {
+            subdomain: sd_tens_ew,
             problem: MathProblem {
                 id: id.into(),
                 description: id.into(),
