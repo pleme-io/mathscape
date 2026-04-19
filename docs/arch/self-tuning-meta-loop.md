@@ -286,3 +286,182 @@ Phase U is the **orchestrator over what already exists**. The model
 already tunes (trajectory → LinearPolicy). The system already
 encapsulates (trait seams + Sexp I/O). The sail-out is the loop
 that ties them together.
+
+## Phase V extensions (2026-04-18): map, events, certify, stream, benchmark, shed
+
+The V.1–V.5 landmarks above (staleness signal, adaptive corpus,
+adaptive-diet archetype, proposer branch, motor) closed the
+fix-point loop *at the scenario level*. The Phase V extensions
+that followed close a second, faster loop: the **proprioceptive
+loop** the streaming policy runs at the granularity of single
+events instead of whole phases.
+
+### §V.map — the machine has a map of itself
+
+`MathscapeMap` is the first typed view of the library as a whole.
+It partitions rules into `core_rules` (apex, highest-certification)
+and `union_rules` (remaining support). It tracks `mutation_edges`
+between rules, `seed_info` metadata, per-rule cross-corpus support
+counts, and a BLAKE3 Merkle root over canonical rule serialization.
+The map is *attestable* (Merkle root changes iff rule set changes),
+*persistable* (`save_to_path` / `load_from_path`), and *observable*
+via `MapSnapshot` + `MapSummary`.
+
+### §V.events — the machine narrates itself
+
+`MapEvent` is a typed event bus with 7 variants:
+
+- `NovelRoot` — a new primitive term encountered at a corpus root
+- `RootMutated` — an existing root re-entered a new reduction path
+- `CoreGrew` — a rule crossed the apex threshold
+- `StalenessCrossed` — the staleness signal passed a configured bound
+- `RuleCertified` — a rule advanced on the certification lattice
+- `RuleRejectedAtCertification` — evidence insufficient; demoted or dropped
+- `BenchmarkScored` — the machine ran its report card
+
+`MapEventConsumer` is a trait with a single `consume(&MapEvent)`.
+Every downstream component (buffered history, certifier, streaming
+trainer, benchmark runner) implements it — the consumers compose
+into a chain.
+
+### §V.certify — reactive rule promotion
+
+`CertificationLevel` is a 5-state ladder:
+
+```
+Candidate → Validated → ProvisionalCore → Certified → Canonical
+```
+
+`CertifyingConsumer` watches the event bus, routes every rule-
+relevant event through a `Certifier` trait (`DefaultCertifier`
+implements the default cross-corpus-support policy), and emits
+`RuleCertified` / `RuleRejectedAtCertification` downstream. Unlike
+the batch-style lifecycle advancement of autonomous-traversal,
+certification here is *reactive*: each new empirical observation
+is immediately weighed.
+
+### §V.stream — never-destroy streaming trainer
+
+`StreamingPolicyTrainer` wraps a `LinearPolicy` in `RefCell` and
+implements `MapEventConsumer`. Every event flows through:
+
+1. `reward_for(&MapEvent)` — typed scalar reward
+2. `features_for(&MapEvent, &MapSnapshot)` — feature vector
+3. online SGD step via existing `sgd_step_*` primitives
+
+The trainer never resets between scenarios or phases. It is the
+session-long persistent policy head that carries learning across
+motor iterations, benchmark cycles, and environment mutations.
+
+### §V.benchmark — labeled-data ingress / the report card
+
+The only signal the machine fundamentally cannot produce by
+itself is **whether its math matches the world's**. The
+benchmark is the external ground truth pipe.
+
+Two problem sets live in `math_problem.rs`:
+
+- **`canonical_problem_set()`** — 12 problems (nat add/mul, int,
+  tensor, float-tensor) evaluable by the kernel alone. The floor:
+  every cycle should score 12/12. Regression means the kernel
+  broke, not that learning failed.
+- **`harder_problem_set()`** — 6 symbolic-identity problems built
+  around `Term::Var(100)` as a pattern variable. The kernel
+  cannot fold these; they require discovered rules. 0/6 with an
+  empty library, 6/6 with the identity rules. This is the
+  *delta* the machine can score against itself.
+
+`BenchmarkConsumer::benchmark_now(library, downstream)` runs both
+sets against the current library and emits:
+
+```rust
+MapEvent::BenchmarkScored {
+    solved_count,
+    total,
+    solved_fraction,
+    delta_from_prior,
+}
+```
+
+The streaming trainer's reward for this event is **asymmetric**:
+
+- `absolute` term: `2.0 × solved_fraction`
+- `delta` term: `+3.0 × Δ` when Δ is positive
+- `delta` term: `-5.0 × |Δ|` when Δ is negative
+
+The −5× penalty is the rule *"don't break what worked."* A
+regression on the report card is five-thirds more costly to the
+trainer than an improvement is valuable. Over the stream this
+produces a ratchet: gains accumulate, regressions get unwound.
+
+### §V.shed — neuroplasticity on the streaming trainer
+
+Biological networks prune underused synapses while forming new
+ones. The streaming trainer does the same. Three new fields on
+`StreamingPolicyTrainer`:
+
+- `activation_counts: RefCell<[u64; WIDTH]>` — per-dimension fire count
+- `cumulative_contributions: RefCell<[f64; WIDTH]>` — integrated `|w_i × v_i|`
+- `pruned: RefCell<[bool; WIDTH]>` — which dimensions are currently shed
+
+Two new operations:
+
+- `prune(magnitude_threshold, min_activations) -> Vec<usize>`
+  zeros weights that are both small (below the magnitude
+  threshold) and rarely activated (at or below the activation
+  threshold). Marks them pruned so future updates skip them.
+- `rejuvenate(index, initial_value) -> bool` — un-prunes a
+  specific dimension and re-seeds it, so a later rejuvenation
+  event (e.g. a novelty signal after staleness) can re-open a
+  pathway the trainer previously closed.
+
+**Why both directions matter.** Pure pruning is amnesia; pure
+expansion is bloat. Neuroplasticity is the interaction: the
+network sheds dimensions whose contribution stayed below the
+threshold over a long window, *but* it can rejuvenate a
+dimension whose reward signal reappears. The policy head's
+effective capacity tracks the learnable signal, not the
+allocated feature width.
+
+The shed is invoked externally — the trainer exposes the
+operations but does not auto-prune. This is deliberate: the
+pruning policy is itself a hyperparameter the outer orchestrator
+(MetaLoop, or a future Phase W autopruner) decides. For now the
+tests exercise prune + rejuvenate directly, proving the
+mechanism is sound.
+
+### What the Phase V extensions collectively produce
+
+A **proprioceptive loop** running at event granularity:
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│   MathscapeMap (typed self-view)                              │
+│        │                                                      │
+│        ▼                                                      │
+│   MapEvent stream (7 typed variants)                          │
+│        │                                                      │
+│        ▼                                                      │
+│   CertifyingConsumer ──(RuleCertified / Rejected)────┐        │
+│        │                                              │        │
+│        ▼                                              ▼        │
+│   BenchmarkConsumer ──(BenchmarkScored)─► StreamingPolicyTrainer│
+│                                              │                 │
+│                                              ▼                 │
+│                                     online SGD + prune/rejuvenate│
+│                                              │                 │
+│                                              ▼                 │
+│                                     updated LinearPolicy       │
+│                                              │                 │
+│                                              └── feeds back ──┘│
+└──────────────────────────────────────────────────────────────┘
+```
+
+The scenario-level loop (V.1–V.5) handles *what environment to
+run next*. The event-level loop (V.map–V.shed) handles *how the
+policy head adapts to each architectural transition as it
+happens*. Together they form a two-timescale adaptive control
+system: slow mutations at the corpus/archetype level, fast
+gradient updates at the policy level, labeled-data ingress
+keeping the fast loop honest, and a pruning mechanism keeping
+the representation compact.

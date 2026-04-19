@@ -105,18 +105,55 @@ machine produces the trajectory.
     its own bottleneck, proposes mutations, keeps winners,
     resumes. Zero human intervention for parameter-bump
     saturations. Design only — implementation starts at ML4.1.
-24. `docs/arch/self-tuning-meta-loop.md` — **PHASE U DESIGN + LANDED U.1-U.3+U.6**
+24. `docs/arch/self-tuning-meta-loop.md` — **PHASE U + V LANDED**
     (2026-04-18). The outer orchestrator: observe → propose →
-    execute → observe, ... Each component is a pure-Lisp value once
-    U.4 Sexp bridge for LearningObservation lands. `LearningObservation`
-    is the typed digest the proposer consumes. `HeuristicProposer`
-    encodes Phase T's findings as a fixed decision tree;
-    `AdaptiveProposer` LEARNS per-archetype performance at runtime
-    and biases its picks (ε-greedy). `MetaLoop<E, P>` terminates on
-    sail-out (no progress + tiny policy delta for K consecutive
-    phases) or max-phase ceiling. Meta-attestation = BLAKE3 over
-    chain of chain-attestations. See also landmarks.md Phase U
-    section for the canonical map.
+    execute → observe, ... Each component is a pure-Lisp value.
+    `LearningObservation` is the typed digest the proposer
+    consumes. `HeuristicProposer` encodes Phase T's findings as a
+    fixed decision tree; `AdaptiveProposer` LEARNS per-archetype
+    performance at runtime and biases its picks (ε-greedy).
+    `MetaLoop<E, P>` terminates on sail-out (no progress + tiny
+    policy delta for K consecutive phases) or max-phase ceiling.
+    Meta-attestation = BLAKE3 over chain of chain-attestations.
+    **Phase V extensions** (2026-04-18): `MathscapeMap` typed view
+    of the library (core_rules, union_rules, mutation_edges,
+    BLAKE3 Merkle root, save/load); `MapEvent` typed event bus
+    (`NovelRoot`, `RootMutated`, `CoreGrew`, `StalenessCrossed`,
+    `RuleCertified`, `RuleRejectedAtCertification`,
+    `BenchmarkScored`); `CertificationLevel` reactive state
+    machine (`Candidate → Validated → ProvisionalCore → Certified
+    → Canonical`) with `Certifier` trait + `CertifyingConsumer`;
+    `StreamingPolicyTrainer` never-destroy online SGD over the
+    event bus; `BenchmarkReport` labeled-data ingress (canonical
+    + harder problem sets with pattern-variable identity probes)
+    emitting `BenchmarkScored` with asymmetric reward (+3× gains,
+    −5× regressions); `prune()` + `rejuvenate()` neuroplasticity
+    on the streaming trainer — the policy sheds dead dimensions
+    while forming new ones, integrated over the stream.
+25. `docs/arch/benchmark-as-report-card.md` (embedded in
+    self-tuning-meta-loop.md §V.benchmark) — **REPORT CARD**
+    (2026-04-18). Labeled math problems are the only way the
+    machine knows if it is improving. `canonical_problem_set()`
+    (12 problems evaluable by kernel alone) gives a floor.
+    `harder_problem_set()` (6 symbolic-identity probes) needs
+    discovered rules to score, so the delta between runs is the
+    signal. `BenchmarkConsumer::benchmark_now(library, downstream)`
+    scores the library and emits `MapEvent::BenchmarkScored` with
+    `solved_fraction` + `delta_from_prior`. The streaming
+    trainer's reward is asymmetric: improvements weighted +3×,
+    regressions −5×. **Don't break what worked.**
+26. `docs/arch/streaming-neuroplasticity.md` (embedded in
+    self-tuning-meta-loop.md §V.shed) — **NEUROPLASTICITY**
+    (2026-04-18). The streaming trainer tracks per-weight
+    activation counts and cumulative contributions over the
+    entire stream. `prune(magnitude_threshold, min_activations)`
+    zeros weights below both thresholds and marks them pruned;
+    pruned weights are skipped on subsequent updates.
+    `rejuvenate(index, initial_value)` un-prunes and re-seeds a
+    dimension. Over time the policy sheds dead neurons as it
+    forms new ones — the same plastic dynamics biological
+    networks use to compress learned representations while
+    remaining open to novelty.
 22. `docs/arch/edge-riding.md` — **PERPETUAL DISCOVERY** (2026-04-18).
     The L5 architectural frame. By Gödel's incompleteness, any
     sufficiently-rich substrate has unprovable-from-inside

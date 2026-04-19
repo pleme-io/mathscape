@@ -409,6 +409,139 @@ All Phase R + S + T + U + I + J + H invariants preserved. Phase V adds:
   into a WASI module is still the signature the arc has been
   preparing.
 
+### Phase V.map: the machine has a map of itself (2026-04-18)
+
+`MathscapeMap` is the first *typed view* of the library that the
+machine can reason about as a whole — not as a flat list of rules
+but as a structured object with apex rules, union rules,
+mutation edges, seed metadata, and a BLAKE3 Merkle root over
+canonical rule serialization. The map is attestable (the Merkle
+root changes iff the rule set changes), persistable
+(`save_to_path`/`load_from_path`), and queryable (per-rule
+cross-corpus support, core/union partitioning).
+
+| Landmark | Closes |
+|---|---|
+| `MathscapeMap` struct + `MapSnapshot` | typed view of the library as map-of-itself; core_rules / union_rules / mutation_edges / seed_info |
+| `library_merkle_root` | deterministic BLAKE3 over canonical rule serialization — any rule change produces a new root |
+| `save_to_path` / `load_from_path` | the map is a first-class serializable artifact; sessions can pick up from a prior map |
+| `MapSummary` | compressed one-shot observation suitable for the streaming trainer |
+
+### Phase V.events: the machine narrates itself (2026-04-18)
+
+Every structural transition is an event on a typed bus. The
+consumer trait is pluggable (BufferedConsumer, CertifyingConsumer,
+StreamingPolicyTrainer, BenchmarkConsumer all implement it).
+Architectural transitions (novel roots, mutations, core growth,
+staleness crossings, rule certifications/rejections, benchmark
+scorings) all pass through the same channel.
+
+| Landmark | Closes |
+|---|---|
+| `MapEvent` enum with 7 variants | `NovelRoot`, `RootMutated`, `CoreGrew`, `StalenessCrossed`, `RuleCertified`, `RuleRejectedAtCertification`, `BenchmarkScored` — the machine's own narrative stream |
+| `MapEventConsumer` trait | single `consume(&MapEvent)` method; pluggable downstreams |
+| `BufferedConsumer` | default accumulating consumer; used for testing + history |
+| `EventCategory` classification | category() arm for each event; enables filtered consumers |
+
+### Phase V.certify: reactive rule promotion (2026-04-18)
+
+Certification is now a *reactive* state machine watching the
+event bus, not a batch operation. Rules climb the lattice as
+cross-corpus evidence accrues; failed rules get rejected and the
+downstream consumers see both outcomes.
+
+| Landmark | Closes |
+|---|---|
+| `CertificationLevel` state machine | `Candidate → Validated → ProvisionalCore → Certified → Canonical` |
+| `Certifier` trait + `DefaultCertifier` | pluggable certification policy; default fires on support thresholds |
+| `CertifyingConsumer` | chainable MapEventConsumer that promotes/rejects rules and emits downstream events |
+| `run_certification_step` | one-step driver used by tests and external integrations |
+
+### Phase V.stream: never-destroy streaming trainer (2026-04-18)
+
+The policy head is now an always-on online learner. Every
+MapEvent produces a reward; reward × feature vector applies an
+online SGD step via the existing `sgd_step_*` primitives. The
+trainer never resets — it is the session-long persistent model.
+
+| Landmark | Closes |
+|---|---|
+| `StreamingPolicyTrainer` | wraps `LinearPolicy` in `RefCell`; implements `MapEventConsumer` |
+| `reward_for(&MapEvent)` | typed mapping from event category to scalar reward |
+| `features_for(&MapEvent, &MapSnapshot)` | feature vector extraction per event |
+| `inject(policy)` / `adjust_learning_rate(lr)` | non-destructive policy replacement and rate tuning |
+| `snapshot()` | read-only view that does not freeze the stream |
+
+### Phase V.benchmark: labeled-data ingress / report card (2026-04-18)
+
+The machine knows whether it's improving because it has a report
+card. Two problem sets — `canonical_problem_set()` (12 kernel-
+solvable problems as a floor) and `harder_problem_set()` (6
+symbolic-identity probes that NEED discovered rules to score).
+Running the benchmark emits `BenchmarkScored` with `solved_fraction`
++ `delta_from_prior`; the streaming trainer rewards improvement
+asymmetrically (+3× gains, −5× regressions — *don't break what
+worked*).
+
+| Landmark | Closes |
+|---|---|
+| `MathProblem`, `ProblemResult`, `BenchmarkReport` | typed labeled-data primitives |
+| `canonical_problem_set()` (12 problems) | baseline kernel-solvable floor over nat add/mul, int, tensor, float-tensor |
+| `harder_problem_set()` (6 problems) | symbolic-identity probes using `Term::Var(100)` as pattern var; 0/6 empty library, 6/6 with identity rules |
+| `solve_problem` / `run_benchmark` | deterministic scoring over a given library |
+| `BenchmarkConsumer::benchmark_now(library, downstream)` | scores + emits `MapEvent::BenchmarkScored` into the event bus |
+| Asymmetric reward in the streaming trainer | `+3.0 × Δ` for improvement, `−5.0 × |Δ|` for regression |
+
+### Phase V.shed: neuroplasticity on the streaming trainer (2026-04-18)
+
+The policy sheds dead dimensions while it forms new ones. Per-
+weight activation counts and cumulative contributions are tracked
+for the entire stream. `prune(magnitude_threshold, min_activations)`
+zeros weights below both thresholds and marks them pruned; future
+updates skip pruned weights entirely. `rejuvenate(index,
+initial_value)` reverses the prune — un-pruning a dimension and
+re-seeding it so subsequent gradient signal can move it.
+
+This is neuroplasticity: the policy head remains open to novelty
+(new dimensions can emerge when rejuvenated) while compressing
+away the dimensions that never carried load. Biological neural
+networks exhibit the same plastic dynamics; the mathematical
+justification is the same — a finite-capacity learner must either
+grow or shed to keep pace with a non-stationary reward stream.
+
+| Landmark | Closes |
+|---|---|
+| `activation_counts` per weight | `RefCell<[u64; LibraryFeatures::WIDTH]>`; incremented whenever `\|v_i\| > 1e-9` contributes to an update |
+| `cumulative_contributions` per weight | `RefCell<[f64; LibraryFeatures::WIDTH]>`; integrates `\|w_i × v_i\|` across the stream |
+| `pruned` flags per weight | `RefCell<[bool; LibraryFeatures::WIDTH]>` — pruned weights held at 0.0 and skipped on update |
+| `weight_stats()` | snapshot of all three arrays for external optimizers / analyzers |
+| `prune(magnitude_threshold, min_activations) -> Vec<usize>` | zeros weights below both thresholds; returns newly-pruned indices |
+| `rejuvenate(index, initial_value) -> bool` | un-prunes a specific dimension and re-seeds it |
+| 5 new tests | prune zeros + marks, pruned skip updates, rejuvenate un-prunes + does-nothing, weight_stats exposes |
+
+**Phase V extension headline findings:**
+
+- **The machine now has a proprioceptive loop**. Map + events +
+  certifier + streaming trainer + benchmark + shed together form
+  a self-observing, self-rewarding, self-pruning system. Every
+  architectural transition is an event; every event carries a
+  reward; every reward signal moves weights; dead weights get
+  shed while novelty continues to expand the represented space.
+  The only external signal is the labeled benchmark — the one
+  thing the machine fundamentally cannot know by itself is
+  whether its mathematical output matches the world's.
+- **Asymmetric reward prevents catastrophic regression**. The
+  +3×/−5× weighting means the trainer is slow to accept changes
+  that degrade the report card and fast to accept changes that
+  improve it. Over the stream, this produces a ratchet: gains
+  accumulate, regressions get unwound.
+- **Shed + grow over the stream is the plastic regime**. Pruning
+  doesn't halt learning — it concentrates capacity. Rejuvenation
+  doesn't destroy history — it re-opens a dimension whose
+  staleness signal says the environment has changed. Together
+  they keep the policy head's representation size tracking the
+  learnable signal instead of the feature vector's allocated size.
+
 ### Phase U: Self-tuning meta-loop (2026-04-18)
 
 The outer orchestrator lands. The machine now observes its own

@@ -52,6 +52,48 @@ reachable territory for a seed is exhausted:
   saturation by expanding its environment. Trained on bare math:
   staleness, intervention, and reward are all pure functions of
   the observation stream.
+- **Phase V.map** (the machine has a map of itself): `MathscapeMap`
+  is a typed, attestable view of the library — `core_rules`,
+  `union_rules`, `mutation_edges`, seed metadata, per-rule
+  cross-corpus support, and a BLAKE3 Merkle root over canonical
+  rule serialization. `save_to_path` / `load_from_path` persist
+  it; `library_merkle_root` produces deterministic attestation.
+- **Phase V.events** (the machine narrates itself): `MapEvent`
+  enum with typed variants — `NovelRoot`, `RootMutated`, `CoreGrew`,
+  `StalenessCrossed`, `RuleCertified`, `RuleRejectedAtCertification`,
+  `BenchmarkScored`. `MapEventConsumer` trait + `BufferedConsumer`
+  implementation form the default event bus. Every architectural
+  transition is an event the downstream consumers see in order.
+- **Phase V.certify** (reactive promotion): `CertificationLevel`
+  state machine (`Candidate → Validated → ProvisionalCore →
+  Certified → Canonical`) with `Certifier` trait, `DefaultCertifier`,
+  and `CertifyingConsumer` — a chainable consumer that watches the
+  event stream, promotes rules through the lattice on confirmed
+  empirical support, and emits `RuleCertified` /
+  `RuleRejectedAtCertification` downstream.
+- **Phase V.stream** (never-destroy streaming trainer):
+  `StreamingPolicyTrainer` wraps `LinearPolicy` in `RefCell` and
+  implements `MapEventConsumer`. Every event produces a reward
+  signal; reward × feature vector applies an online SGD step.
+  The trainer never resets between phases — it is the persistent
+  policy head across the whole session.
+- **Phase V.benchmark** (labeled-data ingress / report card):
+  `MathProblem`, `ProblemResult`, `BenchmarkReport`,
+  `canonical_problem_set()` (12 problems), `harder_problem_set()`
+  (6 symbolic-identity problems needing discovered rules),
+  `run_benchmark()`, and `BenchmarkConsumer::benchmark_now(library,
+  downstream)` that scores the library and emits
+  `MapEvent::BenchmarkScored { solved_fraction, delta_from_prior }`.
+  The streaming trainer rewards improvement asymmetrically: +3×
+  for gains, −5× for regressions — *don't break what worked*.
+- **Phase V.shed** (neuroplasticity): per-weight activation counts
+  and cumulative contributions tracked inside the streaming
+  trainer. `prune(magnitude_threshold, min_activations)` zeros
+  weights that are both small and rarely-activated and marks
+  them pruned; `rejuvenate(index, initial_value)` un-prunes and
+  re-seeds. Pruned weights are skipped on future updates. The
+  policy sheds dead dimensions while the stream continues to form
+  new ones — neuroplasticity applied to the policy head.
 
 See `docs/arch/autonomous-traversal.md` for the milestone doc,
 `docs/arch/self-tuning-meta-loop.md` for the Phase U+V frame, and
