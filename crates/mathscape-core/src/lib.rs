@@ -17,6 +17,7 @@ pub mod eval;
 pub mod event;
 pub mod form_tree;
 pub mod hash;
+pub mod inference;
 pub mod lifecycle;
 pub mod math_problem;
 pub mod mathscape_map;
@@ -110,6 +111,7 @@ pub use form_tree::{
     CheckPeriod, DiscoveryForest, FormNode, HitCount, IrreducibilityRate, Morphism,
 };
 pub use hash::TermRef;
+pub use inference::LiveInferenceHandle;
 pub use lifecycle::{AxiomIdentity, DemotionReason, ProofStatus, TypescapeCoord};
 pub use trap::{Trap, TrapDetector, TrapExitReason};
 pub use migration::migrate_library;
