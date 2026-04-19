@@ -432,6 +432,136 @@ pub fn run_certification_step<C: Certifier>(
     }
 }
 
+/// Reactive certification consumer. Subscribes to `CoreGrew`
+/// events in the map stream; when a new rule becomes invariant
+/// across seeds, try to certify it at the stricter level and
+/// emit a downstream event.
+///
+/// Chainable: each consumer has a `downstream` that receives
+/// every event, plus the new `RuleCertified` /
+/// `RuleRejectedAtCertification` events the certifier emits.
+/// Pipelines are composed by nesting consumers.
+///
+/// This is the event-driven version of the state machine — the
+/// certification step runs REACTIVELY as the map mutates, not
+/// as a separate batch phase. Stream-shape semantics even though
+/// implementation is synchronous.
+#[derive(Debug)]
+pub struct CertifyingConsumer<D, C>
+where
+    D: Certifier,
+    C: crate::mathscape_map::MapEventConsumer,
+{
+    pub certifier: D,
+    pub downstream: C,
+    /// Rules that have reached Certified. Caller can read this
+    /// at any point to get the current certified library.
+    pub certified: std::cell::RefCell<Vec<CertifiedRule>>,
+    /// Per-run context passed to the certifier (e.g. a snapshot
+    /// of the stable library). Empty is fine; domain detection
+    /// handles the rest.
+    pub context: Vec<RewriteRule>,
+}
+
+impl<D, C> CertifyingConsumer<D, C>
+where
+    D: Certifier,
+    C: crate::mathscape_map::MapEventConsumer,
+{
+    #[must_use]
+    pub fn new(certifier: D, downstream: C) -> Self {
+        Self {
+            certifier,
+            downstream,
+            certified: std::cell::RefCell::new(Vec::new()),
+            context: Vec::new(),
+        }
+    }
+
+    #[must_use]
+    pub fn with_context(mut self, context: Vec<RewriteRule>) -> Self {
+        self.context = context;
+        self
+    }
+
+    /// Current count of certified rules.
+    pub fn certified_count(&self) -> usize {
+        self.certified.borrow().len()
+    }
+
+    /// Snapshot the certified rules (clone).
+    pub fn certified_rules(&self) -> Vec<RewriteRule> {
+        self.certified
+            .borrow()
+            .iter()
+            .map(|cr| cr.rule.clone())
+            .collect()
+    }
+}
+
+impl<D, C> crate::mathscape_map::MapEventConsumer for CertifyingConsumer<D, C>
+where
+    D: Certifier,
+    C: crate::mathscape_map::MapEventConsumer,
+{
+    fn on_event(&self, event: &crate::mathscape_map::MapEvent) {
+        // Forward every event downstream first — consumers below
+        // see the original map events.
+        self.downstream.on_event(event);
+
+        // React to CoreGrew: try to certify the newly-invariant rule.
+        if let crate::mathscape_map::MapEvent::CoreGrew {
+            added_rule, ..
+        } = event
+        {
+            // Skip if we've already certified this rule (content-
+            // hash dedup).
+            let already_certified = {
+                let hash = rule_content_hash(added_rule);
+                self.certified
+                    .borrow()
+                    .iter()
+                    .any(|cr| cr.content_hash == hash)
+            };
+            if already_certified {
+                return;
+            }
+            let verdict = self.certifier.try_certify(added_rule, &self.context);
+            match verdict {
+                CertificationVerdict::Certified { samples_passed } => {
+                    let mut cr = CertifiedRule::new(
+                        added_rule.clone(),
+                        CertificationLevel::Certified,
+                    );
+                    cr.evidence_samples = samples_passed;
+                    self.certified.borrow_mut().push(cr);
+                    self.downstream.on_event(
+                        &crate::mathscape_map::MapEvent::RuleCertified {
+                            rule: added_rule.clone(),
+                            evidence_samples: samples_passed,
+                        },
+                    );
+                }
+                CertificationVerdict::Rejected { reason } => {
+                    self.downstream.on_event(
+                        &crate::mathscape_map::MapEvent::RuleRejectedAtCertification {
+                            rule: added_rule.clone(),
+                            reason,
+                        },
+                    );
+                }
+                CertificationVerdict::Inconclusive => {
+                    // No event emitted; rule stays at its current
+                    // level. The next CoreGrew observation for the
+                    // same rule won't retry (already_certified
+                    // check above is content-hash dedup; we could
+                    // track inconclusive separately if needed).
+                }
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -532,6 +662,140 @@ mod tests {
         let bytes = bincode::serialize(&cr).unwrap();
         let back: CertifiedRule = bincode::deserialize(&bytes).unwrap();
         assert_eq!(cr, back);
+    }
+
+    // ── Reactive CertifyingConsumer tests ────────────────────────
+
+    #[test]
+    fn certifying_consumer_elevates_on_core_grew() {
+        use crate::mathscape_map::{
+            BufferedConsumer, MapEvent, MapEventConsumer, MathscapeMap,
+            MapSnapshot,
+        };
+        // Stack: CertifyingConsumer → BufferedConsumer.
+        // Certifier = default (K=32 × 3 = 96 samples).
+        let buffered = BufferedConsumer::new();
+        let consumer = CertifyingConsumer::new(
+            DefaultCertifier::default(),
+            buffered,
+        );
+        let mut map = MathscapeMap::new();
+        // Seed 1 has both rules as final. Seed 2 has both too →
+        // both become core → CoreGrew fires for each → reactive
+        // certification tries each.
+        map.push_with_events(
+            MapSnapshot::new(1, 0, vec![add_id()], None),
+            &consumer,
+            0.6,
+        );
+        map.push_with_events(
+            MapSnapshot::new(2, 0, vec![add_id()], None),
+            &consumer,
+            0.6,
+        );
+        // After these pushes, add_id should be in core → CoreGrew
+        // emitted → CertifyingConsumer tried to certify → add_id
+        // passes (it's a valid identity law) → RuleCertified fired.
+        let downstream_events = consumer.downstream.drain();
+        let certified_events: Vec<_> = downstream_events
+            .iter()
+            .filter(|e| matches!(e, MapEvent::RuleCertified { .. }))
+            .collect();
+        assert_eq!(
+            certified_events.len(),
+            1,
+            "add-identity should reactively certify after CoreGrew"
+        );
+        assert_eq!(consumer.certified_count(), 1);
+    }
+
+    #[test]
+    fn certifying_consumer_emits_rejection_for_bogus_rule() {
+        use crate::mathscape_map::{
+            BufferedConsumer, MapEvent, MapEventConsumer, MathscapeMap,
+            MapSnapshot,
+        };
+        let buffered = BufferedConsumer::new();
+        let consumer = CertifyingConsumer::new(
+            DefaultCertifier::default(),
+            buffered,
+        );
+        let mut map = MathscapeMap::new();
+        // Push bogus rule into 2 seeds' finals → becomes core →
+        // certification rejects.
+        map.push_with_events(
+            MapSnapshot::new(1, 0, vec![bogus()], None),
+            &consumer,
+            0.6,
+        );
+        map.push_with_events(
+            MapSnapshot::new(2, 0, vec![bogus()], None),
+            &consumer,
+            0.6,
+        );
+        let events = consumer.downstream.drain();
+        let rejected_events: Vec<_> = events
+            .iter()
+            .filter(|e| {
+                matches!(e, MapEvent::RuleRejectedAtCertification { .. })
+            })
+            .collect();
+        assert_eq!(
+            rejected_events.len(),
+            1,
+            "bogus rule must reactively emit rejection"
+        );
+        assert_eq!(consumer.certified_count(), 0);
+    }
+
+    #[test]
+    fn certifying_consumer_does_not_re_certify_same_rule() {
+        use crate::mathscape_map::{
+            BufferedConsumer, MathscapeMap, MapSnapshot,
+        };
+        let buffered = BufferedConsumer::new();
+        let consumer = CertifyingConsumer::new(
+            DefaultCertifier::default(),
+            buffered,
+        );
+        let mut map = MathscapeMap::new();
+        // Certify once.
+        map.push_with_events(
+            MapSnapshot::new(1, 0, vec![add_id()], None),
+            &consumer,
+            0.6,
+        );
+        map.push_with_events(
+            MapSnapshot::new(2, 0, vec![add_id()], None),
+            &consumer,
+            0.6,
+        );
+        let first_count = consumer.certified_count();
+        // Push a third snapshot. The rule is already certified;
+        // we should not re-certify it.
+        map.push_with_events(
+            MapSnapshot::new(3, 0, vec![add_id()], None),
+            &consumer,
+            0.6,
+        );
+        assert_eq!(consumer.certified_count(), first_count);
+    }
+
+    // ── MathscapeMap persistence tests ────────────────────────────
+
+    #[test]
+    fn map_save_and_load_roundtrip() {
+        use crate::mathscape_map::{MapSnapshot, MathscapeMap};
+        let mut m = MathscapeMap::new();
+        m.push(MapSnapshot::new(1, 0, vec![add_id()], None));
+        m.push(MapSnapshot::new(2, 0, vec![bogus()], None));
+        // Write to a temp file, read back.
+        let dir = std::env::temp_dir();
+        let path = dir.join("phase_v_pipeline_roundtrip.bin");
+        m.save_to_path(&path).expect("save succeeds");
+        let loaded = MathscapeMap::load_from_path(&path).expect("load succeeds");
+        assert_eq!(m, loaded);
+        let _ = std::fs::remove_file(&path);
     }
 
     #[test]

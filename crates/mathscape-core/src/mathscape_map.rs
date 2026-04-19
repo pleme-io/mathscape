@@ -91,6 +91,22 @@ pub enum MapEvent {
         threshold: f64,
         observed: f64,
     },
+    /// A rule just reached `Certified` level — passed stricter
+    /// evidence (e.g. K=32 × 3-seed Phase J). Emitted by a
+    /// certification worker subscribing to `CoreGrew`.
+    /// Downstream consumers (optimizer, audit log, persistence
+    /// layer) can react to this as "new certified mathematics."
+    RuleCertified {
+        rule: RewriteRule,
+        evidence_samples: usize,
+    },
+    /// A rule failed certification at the stricter evidence
+    /// level. Tracks the rule that didn't make it past the
+    /// Provisional → Certified transition, for observability.
+    RuleRejectedAtCertification {
+        rule: RewriteRule,
+        reason: String,
+    },
 }
 
 impl MapEvent {
@@ -104,6 +120,10 @@ impl MapEvent {
             MapEvent::RootMutated { .. } => "root-mutated",
             MapEvent::CoreGrew { .. } => "core-grew",
             MapEvent::StalenessCrossed { .. } => "staleness-crossed",
+            MapEvent::RuleCertified { .. } => "rule-certified",
+            MapEvent::RuleRejectedAtCertification { .. } => {
+                "rule-rejected-at-certification"
+            }
         }
     }
 }
@@ -423,6 +443,31 @@ impl MathscapeMap {
             }
         }
         edges
+    }
+
+    /// Persist to disk as bincode. Cross-session accumulation:
+    /// load the map at session start, add new snapshots, save
+    /// at session end. The canonical mathematics the machine has
+    /// discovered is now a file.
+    pub fn save_to_path<P: AsRef<std::path::Path>>(
+        &self,
+        path: P,
+    ) -> Result<(), String> {
+        let bytes = bincode::serialize(self)
+            .map_err(|e| format!("serialize error: {e}"))?;
+        std::fs::write(path, bytes)
+            .map_err(|e| format!("write error: {e}"))?;
+        Ok(())
+    }
+
+    /// Load a persisted map from disk.
+    pub fn load_from_path<P: AsRef<std::path::Path>>(
+        path: P,
+    ) -> Result<Self, String> {
+        let bytes = std::fs::read(path)
+            .map_err(|e| format!("read error: {e}"))?;
+        bincode::deserialize(&bytes)
+            .map_err(|e| format!("deserialize error: {e}"))
     }
 
     /// Summary report — counts of snapshots / unique roots /

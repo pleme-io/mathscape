@@ -69,7 +69,8 @@ pub use bootstrap::{
 };
 pub use certification::{
     run_certification_step, CertificationLevel, CertificationStepReport,
-    CertificationVerdict, CertifiedRule, Certifier, DefaultCertifier,
+    CertificationVerdict, CertifiedRule, Certifier, CertifyingConsumer,
+    DefaultCertifier,
 };
 pub use mathscape_map::{
     BufferedConsumer, MapEvent, MapEventConsumer, MapSnapshot, MapSummary,
