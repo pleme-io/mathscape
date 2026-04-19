@@ -31,7 +31,8 @@ pub use bootstrap_lisp::{
     scenario_to_sexp, spec_from_sexp, spec_to_sexp,
 };
 pub use map_event_lisp::{
-    map_event_to_sexp, plasticity_report_to_sexp, trainer_snapshot_to_sexp,
+    map_event_from_sexp, map_event_to_sexp, plasticity_report_to_sexp,
+    trainer_snapshot_to_sexp,
 };
 pub use policy_lisp::{policy_from_sexp, policy_to_sexp};
 pub use primitives_lisp::{census_to_sexp, primitive_from_sexp, primitive_to_sexp};

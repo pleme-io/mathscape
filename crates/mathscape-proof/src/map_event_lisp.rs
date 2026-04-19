@@ -59,10 +59,13 @@
 //!      ...))
 //! ```
 
+use mathscape_core::eval::RewriteRule;
+use mathscape_core::hash::TermRef;
 use mathscape_core::mathscape_map::MapEvent;
 use mathscape_core::plasticity::PlasticityReport;
 use mathscape_core::streaming_policy::StreamingPolicyTrainer;
-use tatara_lisp::ast::Sexp;
+use mathscape_core::term::Term;
+use tatara_lisp::ast::{Atom, Sexp};
 
 /// Convert one `MapEvent` to its canonical Sexp form.
 #[must_use]
@@ -279,6 +282,203 @@ pub fn plasticity_report_to_sexp(report: &PlasticityReport) -> Sexp {
     Sexp::List(items)
 }
 
+/// Parse a `MapEvent` from its Sexp form. Returns `None` if the
+/// form is malformed. Lisp publishers use this to inject events
+/// into the hub:
+///
+/// ```text
+/// (let ((e (map-event :kind core-grew :prev 0 :new 1
+///                     :rule-name "add-id")))
+///   (hub-publish hub e))
+/// ```
+///
+/// Round-trip: `map_event_from_sexp(map_event_to_sexp(e)) ≈ e`
+/// for all variants except those carrying `TermRef` (NovelRoot,
+/// RootMutated) and full `RewriteRule` content (CoreGrew,
+/// RuleCertified, RuleRejectedAtCertification) — these round-trip
+/// by NAME/identity only. For full round-trip, use bincode (every
+/// MapEvent derives `Serialize`/`Deserialize`).
+#[must_use]
+pub fn map_event_from_sexp(sexp: &Sexp) -> Option<MapEvent> {
+    let items = match sexp {
+        Sexp::List(items) if !items.is_empty() => items,
+        _ => return None,
+    };
+    match &items[0] {
+        Sexp::Atom(Atom::Symbol(s)) if s == "map-event" => {}
+        _ => return None,
+    }
+    let fields = parse_keyword_args(&items[1..])?;
+    let kind = fields.get("kind").and_then(symbol_val)?;
+
+    match kind.as_str() {
+        "novel-root" => {
+            let seed = int_of(&fields, "seed")?;
+            let phase_index = int_of(&fields, "phase-index")?;
+            let library_size = int_of(&fields, "library-size")?;
+            Some(MapEvent::NovelRoot {
+                seed: seed as u64,
+                phase_index: phase_index as usize,
+                // Round-trip approximation: NovelRoot's real
+                // `root: TermRef` is content-hashed; reconstructing
+                // it requires the original bytes. We use a
+                // placeholder hash derived from the seed+phase
+                // tuple for Lisp-round-trip uses; full-fidelity
+                // persistence should use bincode.
+                root: TermRef::from_bytes(
+                    format!("lisp-{seed}-{phase_index}").as_bytes(),
+                ),
+                library_size: library_size as usize,
+            })
+        }
+        "root-mutated" => {
+            let seed = int_of(&fields, "seed")?;
+            let from_phase = int_of(&fields, "from")?;
+            let to_phase = int_of(&fields, "to")?;
+            let size_delta = int_of(&fields, "size-delta")?;
+            Some(MapEvent::RootMutated {
+                seed: seed as u64,
+                from_phase: from_phase as usize,
+                to_phase: to_phase as usize,
+                prev_root: TermRef::from_bytes(
+                    format!("lisp-prev-{seed}").as_bytes(),
+                ),
+                next_root: TermRef::from_bytes(
+                    format!("lisp-next-{seed}").as_bytes(),
+                ),
+                size_delta: size_delta as i64,
+            })
+        }
+        "core-grew" => {
+            let prev = int_of(&fields, "prev")?;
+            let new = int_of(&fields, "new")?;
+            let rule_name = string_of(&fields, "rule-name")?;
+            Some(MapEvent::CoreGrew {
+                prev_core_size: prev as usize,
+                new_core_size: new as usize,
+                // Named placeholder rule. Lisp-reconstructed events
+                // carry the name but not the full LHS/RHS term
+                // structure — that's reconstructed via the rule
+                // registry elsewhere.
+                added_rule: RewriteRule {
+                    name: rule_name,
+                    lhs: Term::Var(0),
+                    rhs: Term::Var(0),
+                },
+            })
+        }
+        "staleness-crossed" => {
+            let seed = int_of(&fields, "seed")?;
+            let phase_index = int_of(&fields, "phase-index")?;
+            let threshold = float_of(&fields, "threshold")?;
+            let observed = float_of(&fields, "observed")?;
+            Some(MapEvent::StalenessCrossed {
+                seed: seed as u64,
+                phase_index: phase_index as usize,
+                threshold,
+                observed,
+            })
+        }
+        "rule-certified" => {
+            let rule_name = string_of(&fields, "rule-name")?;
+            let evidence = int_of(&fields, "evidence")?;
+            Some(MapEvent::RuleCertified {
+                rule: RewriteRule {
+                    name: rule_name,
+                    lhs: Term::Var(0),
+                    rhs: Term::Var(0),
+                },
+                evidence_samples: evidence as usize,
+            })
+        }
+        "rule-rejected-at-certification" => {
+            let rule_name = string_of(&fields, "rule-name")?;
+            let reason = string_of(&fields, "reason")?;
+            Some(MapEvent::RuleRejectedAtCertification {
+                rule: RewriteRule {
+                    name: rule_name,
+                    lhs: Term::Var(0),
+                    rhs: Term::Var(0),
+                },
+                reason,
+            })
+        }
+        "benchmark-scored" => {
+            let solved = int_of(&fields, "solved")?;
+            let total = int_of(&fields, "total")?;
+            let fraction = float_of(&fields, "fraction")?;
+            // Delta can be :delta NaN-symbol OR a float.
+            let delta = fields.get("delta").and_then(|v| match v {
+                Sexp::Atom(Atom::Symbol(s)) if s == "nan" => Some(f64::NAN),
+                Sexp::Atom(Atom::Float(f)) => Some(*f),
+                Sexp::Atom(Atom::Int(n)) => Some(*n as f64),
+                _ => None,
+            })?;
+            Some(MapEvent::BenchmarkScored {
+                solved_count: solved as usize,
+                total: total as usize,
+                solved_fraction: fraction,
+                delta_from_prior: delta,
+            })
+        }
+        _ => None,
+    }
+}
+
+fn parse_keyword_args(
+    items: &[Sexp],
+) -> Option<std::collections::HashMap<String, Sexp>> {
+    let mut map = std::collections::HashMap::new();
+    let mut i = 0;
+    while i + 1 < items.len() {
+        let key = match &items[i] {
+            Sexp::Atom(Atom::Keyword(k)) => k.clone(),
+            _ => return None,
+        };
+        map.insert(key, items[i + 1].clone());
+        i += 2;
+    }
+    Some(map)
+}
+
+fn symbol_val(sexp: &Sexp) -> Option<String> {
+    match sexp {
+        Sexp::Atom(Atom::Symbol(s)) => Some(s.clone()),
+        _ => None,
+    }
+}
+
+fn int_of(
+    m: &std::collections::HashMap<String, Sexp>,
+    key: &str,
+) -> Option<i64> {
+    match m.get(key)? {
+        Sexp::Atom(Atom::Int(n)) => Some(*n),
+        _ => None,
+    }
+}
+
+fn float_of(
+    m: &std::collections::HashMap<String, Sexp>,
+    key: &str,
+) -> Option<f64> {
+    match m.get(key)? {
+        Sexp::Atom(Atom::Float(f)) => Some(*f),
+        Sexp::Atom(Atom::Int(n)) => Some(*n as f64),
+        _ => None,
+    }
+}
+
+fn string_of(
+    m: &std::collections::HashMap<String, Sexp>,
+    key: &str,
+) -> Option<String> {
+    match m.get(key)? {
+        Sexp::Atom(Atom::Str(s)) => Some(s.clone()),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -386,6 +586,205 @@ mod tests {
         assert!(rendered.contains(":ticks"));
         assert!(rendered.contains("component"));
         assert!(rendered.contains("streaming-policy-trainer"));
+    }
+
+    // ── Round-trip tests (map_event_from_sexp) ──────────────
+
+    #[test]
+    fn core_grew_round_trips_by_name() {
+        let original = MapEvent::CoreGrew {
+            prev_core_size: 2,
+            new_core_size: 3,
+            added_rule: add_rule(),
+        };
+        let s = map_event_to_sexp(&original);
+        let back = map_event_from_sexp(&s).expect("parse succeeds");
+        match back {
+            MapEvent::CoreGrew {
+                prev_core_size,
+                new_core_size,
+                added_rule,
+            } => {
+                assert_eq!(prev_core_size, 2);
+                assert_eq!(new_core_size, 3);
+                assert_eq!(added_rule.name, "add-id");
+            }
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    #[test]
+    fn benchmark_scored_round_trips_with_all_fields() {
+        let original = MapEvent::BenchmarkScored {
+            solved_count: 8,
+            total: 10,
+            solved_fraction: 0.8,
+            delta_from_prior: 0.1,
+        };
+        let s = map_event_to_sexp(&original);
+        let back = map_event_from_sexp(&s).expect("parse succeeds");
+        match back {
+            MapEvent::BenchmarkScored {
+                solved_count,
+                total,
+                solved_fraction,
+                delta_from_prior,
+            } => {
+                assert_eq!(solved_count, 8);
+                assert_eq!(total, 10);
+                assert_eq!(solved_fraction, 0.8);
+                assert_eq!(delta_from_prior, 0.1);
+            }
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    #[test]
+    fn benchmark_scored_round_trips_with_nan_delta() {
+        let original = MapEvent::BenchmarkScored {
+            solved_count: 5,
+            total: 10,
+            solved_fraction: 0.5,
+            delta_from_prior: f64::NAN,
+        };
+        let s = map_event_to_sexp(&original);
+        let back = map_event_from_sexp(&s).expect("parse succeeds");
+        match back {
+            MapEvent::BenchmarkScored {
+                delta_from_prior, ..
+            } => {
+                assert!(delta_from_prior.is_nan());
+            }
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    #[test]
+    fn staleness_crossed_round_trips_full_fidelity() {
+        let original = MapEvent::StalenessCrossed {
+            seed: 42,
+            phase_index: 7,
+            threshold: 0.6,
+            observed: 0.95,
+        };
+        let s = map_event_to_sexp(&original);
+        let back = map_event_from_sexp(&s).expect("parse succeeds");
+        match back {
+            MapEvent::StalenessCrossed {
+                seed,
+                phase_index,
+                threshold,
+                observed,
+            } => {
+                assert_eq!(seed, 42);
+                assert_eq!(phase_index, 7);
+                assert_eq!(threshold, 0.6);
+                assert_eq!(observed, 0.95);
+            }
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    #[test]
+    fn rule_certified_and_rejected_round_trip_by_name() {
+        let cert = MapEvent::RuleCertified {
+            rule: add_rule(),
+            evidence_samples: 100,
+        };
+        let s = map_event_to_sexp(&cert);
+        let back = map_event_from_sexp(&s).expect("parse succeeds");
+        match back {
+            MapEvent::RuleCertified {
+                rule,
+                evidence_samples,
+            } => {
+                assert_eq!(rule.name, "add-id");
+                assert_eq!(evidence_samples, 100);
+            }
+            _ => panic!("wrong variant"),
+        }
+
+        let rej = MapEvent::RuleRejectedAtCertification {
+            rule: add_rule(),
+            reason: "not enough support".into(),
+        };
+        let s2 = map_event_to_sexp(&rej);
+        let back2 = map_event_from_sexp(&s2).expect("parse succeeds");
+        match back2 {
+            MapEvent::RuleRejectedAtCertification { rule, reason } => {
+                assert_eq!(rule.name, "add-id");
+                assert_eq!(reason, "not enough support");
+            }
+            _ => panic!("wrong variant"),
+        }
+    }
+
+    #[test]
+    fn malformed_sexp_rejected() {
+        // Not a list.
+        let not_list = Sexp::symbol("foo");
+        assert!(map_event_from_sexp(&not_list).is_none());
+
+        // Wrong head symbol.
+        let wrong_head = Sexp::List(vec![
+            Sexp::symbol("not-map-event"),
+            Sexp::keyword("kind"),
+            Sexp::symbol("core-grew"),
+        ]);
+        assert!(map_event_from_sexp(&wrong_head).is_none());
+
+        // Unknown kind.
+        let unknown = Sexp::List(vec![
+            Sexp::symbol("map-event"),
+            Sexp::keyword("kind"),
+            Sexp::symbol("unknown-kind"),
+        ]);
+        assert!(map_event_from_sexp(&unknown).is_none());
+
+        // Missing required field (core-grew without :rule-name).
+        let partial = Sexp::List(vec![
+            Sexp::symbol("map-event"),
+            Sexp::keyword("kind"),
+            Sexp::symbol("core-grew"),
+            Sexp::keyword("prev"),
+            Sexp::int(0),
+            Sexp::keyword("new"),
+            Sexp::int(1),
+        ]);
+        assert!(map_event_from_sexp(&partial).is_none());
+    }
+
+    #[test]
+    fn lisp_publisher_injects_events_into_hub() {
+        // End-to-end demo: a "Lisp publisher" constructs a Sexp,
+        // parses it back to MapEvent, and publishes to the hub.
+        // The trainer (subscribed to the hub) sees the event and
+        // updates. This proves the write-side round-trip works
+        // for the full pipeline.
+        use mathscape_core::mathscape_map::EventHub;
+        use mathscape_core::streaming_policy::StreamingPolicyTrainer;
+
+        let hub = EventHub::new();
+        let trainer = Rc::new(StreamingPolicyTrainer::new(0.1));
+        hub.subscribe(trainer.clone());
+
+        // "Lisp-authored" event as Sexp.
+        let sexp = Sexp::List(vec![
+            Sexp::symbol("map-event"),
+            Sexp::keyword("kind"),
+            Sexp::symbol("core-grew"),
+            Sexp::keyword("prev"),
+            Sexp::int(0),
+            Sexp::keyword("new"),
+            Sexp::int(1),
+            Sexp::keyword("rule-name"),
+            Sexp::string("lisp-authored-rule"),
+        ]);
+        let event = map_event_from_sexp(&sexp).expect("parses");
+        hub.publish(&event);
+        // Trainer saw the event.
+        assert_eq!(trainer.events_seen(), 1);
+        assert!(trainer.updates_applied() >= 1);
     }
 
     #[test]
