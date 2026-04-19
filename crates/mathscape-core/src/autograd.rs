@@ -374,6 +374,50 @@ impl DomainOps for IntOps {
     }
 }
 
+/// Phase Z.9 (2026-04-19): Nat-domain ops.
+///
+/// The DomainOps pattern (R29) covered Int, Float, Tensor,
+/// FloatTensor — but when R7 added Nat as a second Value
+/// variant, NatOps was never added. This impl completes the
+/// pattern. Now eval_mul / eval_add can reuse
+/// `simplify_mul_of::<NatOps>` / `simplify_add_of::<NatOps>`
+/// and get zero-absorber + identity simplification "for free"
+/// by delegating to existing machinery rather than re-deriving
+/// it.
+///
+/// Uses ADD/MUL (the Nat-domain builtin ids), returns Nat(0)/
+/// Nat(1), and `is_zero` / `is_one` accept ONLY Nat values —
+/// no cross-domain bleed, keeps the Nat evaluation strict.
+pub struct NatOps;
+
+impl DomainOps for NatOps {
+    fn zero() -> Term {
+        Term::Number(Value::Nat(0))
+    }
+    fn one() -> Term {
+        Term::Number(Value::Nat(1))
+    }
+    fn add_id() -> u32 {
+        ADD
+    }
+    fn mul_id() -> u32 {
+        MUL
+    }
+    /// Nat has no negation primitive — the substrate expects
+    /// callers to use Int for signed ops. Return a sentinel
+    /// that never resolves to a live builtin; simplify_neg_of
+    /// never fires for NatOps in practice.
+    fn neg_id() -> u32 {
+        u32::MAX
+    }
+    fn is_zero(t: &Term) -> bool {
+        matches!(t, Term::Number(Value::Nat(0)))
+    }
+    fn is_one(t: &Term) -> bool {
+        matches!(t, Term::Number(Value::Nat(1)))
+    }
+}
+
 /// Float-domain derivative ops. Accepts Float(0.0) AND Int(0) as
 /// zero, tolerating cross-domain zeros produced by the scalar
 /// derivative path feeding into Float simplifiers.

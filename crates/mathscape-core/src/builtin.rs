@@ -156,6 +156,12 @@ fn eval_mul(args: &[Term]) -> Option<Term> {
     if args.len() != 2 {
         return None;
     }
+    // Pure-arithmetic kernel only. Symbolic simplification (zero-
+    // absorber, identity) remains the motor's job to DISCOVER as
+    // rules — not something the kernel short-circuits. The
+    // `simplify_mul_of` machinery in autograd.rs stays used by
+    // the derivative path; wiring it into eval would let the
+    // kernel solve what the motor should be solving.
     if let (Term::Number(Value::Nat(a)), Term::Number(Value::Nat(b))) =
         (&args[0], &args[1])
     {

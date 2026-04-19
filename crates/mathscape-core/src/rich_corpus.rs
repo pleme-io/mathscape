@@ -85,10 +85,18 @@ impl CorpusGenerator for RichCorpusGenerator {
                     corpus.push(apply(ADD, vec![nat(0), op.clone()]));
                     corpus.push(apply(ADD, vec![op.clone(), nat(0)])); // RIGHT
                 }
-                // Nat mul: left + right.
+                // Nat mul: left + right (identity).
                 for op in &nat_ops {
                     corpus.push(apply(MUL, vec![nat(1), op.clone()]));
                     corpus.push(apply(MUL, vec![op.clone(), nat(1)])); // RIGHT
+                }
+                // Phase Z.9 (2026-04-19): zero-absorber seeds.
+                // `mul(0, x) = 0` and `mul(x, 0) = 0`. Without
+                // these, the extractor never anti-unifies to
+                // the zero-absorber law; the frontier stays open.
+                for op in &nat_ops {
+                    corpus.push(apply(MUL, vec![nat(0), op.clone()]));
+                    corpus.push(apply(MUL, vec![op.clone(), nat(0)]));
                 }
                 // Tensor add: left + right.
                 for op in &tensor_ops {

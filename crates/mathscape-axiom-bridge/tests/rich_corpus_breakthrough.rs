@@ -222,11 +222,31 @@ fn rich_corpus_head_to_head_vs_default_on_right_identity() {
         default_report.total.solved_count,
     );
 
-    // ── Three-way verdict ──────────────────────────────────────
+    // ── Three-way verdict (right-identity + zero-absorber) ────
+    let default_zero = default_report
+        .per_subdomain
+        .get("zero-absorber")
+        .map(|r| r.solved_count)
+        .unwrap_or(0);
+    let rich_zero = rich_report
+        .per_subdomain
+        .get("zero-absorber")
+        .map(|r| r.solved_count)
+        .unwrap_or(0);
+    let rich_nd_zero = rich_nd_report
+        .per_subdomain
+        .get("zero-absorber")
+        .map(|r| r.solved_count)
+        .unwrap_or(0);
+
     println!("\n  ╔═══════════════════ VERDICT ════════════════════╗");
     println!(
         "    right-identity:  default={}/5  rich+canonical={}/5  rich+nodedup={}/5",
         default_right, rich_right, rich_nd_right
+    );
+    println!(
+        "    zero-absorber:   default={}/5  rich+canonical={}/5  rich+nodedup={}/5",
+        default_zero, rich_zero, rich_nd_zero
     );
     if rich_nd_right > rich_right {
         let gained = rich_nd_right - rich_right;
