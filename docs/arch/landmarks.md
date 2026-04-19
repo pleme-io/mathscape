@@ -37,7 +37,15 @@ The same two apex rules climb to Axiomatized at every scale:
 | Rule | Shape | Origin | Cross-corpus reach at 100k |
 |---|---|---|---|
 | `S_10000` | `(?op (?op ?x ?id) ?id)` | rank-1 meta (MetaPatternGenerator) | 93,257/100,007 (93.3%) |
-| `S_040` | successor-chain universal | rank-0 concrete | 46,883/100,007 (46.9%) |
+| `S_043` | successor-chain universal | rank-0 concrete | ~47% observed across sweep sizes |
+
+Rule IDs are allocated in discovery order (counter managed by
+`propose()` callers), so the specific index of the rank-0 apex
+shifts slightly as session history replays with different
+instrumentation ordering. The STRUCTURAL signature is stable: a
+rank-1 operator-identity meta-rule at S_10000 and a rank-0
+successor-family universal at a low-40s ID. Phase T confirmed
+S_043 at small (12), medium (19), and stress (47) scales.
 
 ### What the apex rules tell us
 
