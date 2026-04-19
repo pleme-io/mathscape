@@ -5,6 +5,7 @@ pub mod adaptive_corpus;
 pub mod autograd;
 pub mod bandit_probe;
 pub mod bettyfine;
+pub mod coach;
 pub mod bootstrap;
 pub mod certification;
 pub mod builtin;
@@ -65,6 +66,10 @@ pub use autograd::{
 };
 pub use adaptive_corpus::AdaptiveCorpusGenerator;
 pub use bandit_probe::BanditProbe;
+pub use coach::{
+    CoachObservation, CoachPolicy, CurriculumCoach, RuleBasedPolicy,
+    TuningAction,
+};
 pub use bootstrap::{
     compute_attestation, deduplicate_library, execute_scenario_core,
     execute_spec_core, library_merkle_root, AlphaDeduper, BootstrapCycle,
