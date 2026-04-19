@@ -207,14 +207,15 @@ pub fn paired_anti_unify(
     if var_count_in == 0 {
         return None;
     }
-    let lhs_vars: std::collections::BTreeSet<u32> =
-        collect_pattern_vars(&lhs_pattern);
-    let rhs_vars: std::collections::BTreeSet<u32> =
-        collect_pattern_vars(&rhs_pattern);
-    // Every var in RHS must be bound by LHS (otherwise the law is
-    // underdetermined — the RHS has a free variable the machine
-    // can't fill in).
-    if !rhs_vars.is_subset(&lhs_vars) {
+    // R38: Vec + binary_search instead of BTreeSet<u32> × 2. RHS
+    // is scanned without materializing its own set — we binary-
+    // search each RHS pattern var into the sorted LHS set and
+    // early-exit on the first miss.
+    let mut lhs_vars: Vec<u32> = Vec::new();
+    collect_pattern_vars_vec(&lhs_pattern, &mut lhs_vars);
+    lhs_vars.sort_unstable();
+    lhs_vars.dedup();
+    if !all_pattern_vars_in(&rhs_pattern, &lhs_vars) {
         return None;
     }
     // And LHS ≠ RHS — a vacuous law (LHS = LHS) carries no info.
@@ -225,34 +226,50 @@ pub fn paired_anti_unify(
     Some((lhs_pattern, rhs_pattern))
 }
 
-fn collect_pattern_vars(t: &Term) -> std::collections::BTreeSet<u32> {
-    let mut out = std::collections::BTreeSet::new();
-    collect_pattern_vars_inner(t, &mut out);
-    out
-}
-
-fn collect_pattern_vars_inner(t: &Term, out: &mut std::collections::BTreeSet<u32>) {
+/// R38: Vec variant of `collect_pattern_vars`. Caller sorts+dedups
+/// so the Vec can be used with `binary_search` in a subset check.
+/// Avoids BTreeSet's per-insert O(log n) tree-node allocations.
+fn collect_pattern_vars_vec(t: &Term, out: &mut Vec<u32>) {
     match t {
         Term::Var(v) => {
-            // Only pattern vars (>= 100 by anonymize convention);
-            // vocabulary (< 100) isn't a binding.
             if *v >= 100 {
-                out.insert(*v);
+                out.push(*v);
             }
         }
         Term::Apply(head, args) => {
-            collect_pattern_vars_inner(head, out);
+            collect_pattern_vars_vec(head, out);
             for a in args {
-                collect_pattern_vars_inner(a, out);
+                collect_pattern_vars_vec(a, out);
             }
         }
-        Term::Fn(_, body) => collect_pattern_vars_inner(body, out),
+        Term::Fn(_, body) => collect_pattern_vars_vec(body, out),
         Term::Symbol(_, args) => {
             for a in args {
-                collect_pattern_vars_inner(a, out);
+                collect_pattern_vars_vec(a, out);
             }
         }
         _ => {}
+    }
+}
+
+/// R38: streaming subset check. Returns true iff every pattern
+/// variable (`Var(v)` with `v >= 100`) in `t` is present in
+/// `sorted_allowed` (which MUST be sorted + deduped). Early-exits
+/// on the first missing var, so the common case (small RHS) is
+/// fast even for complex LHS sets.
+fn all_pattern_vars_in(t: &Term, sorted_allowed: &[u32]) -> bool {
+    match t {
+        Term::Var(v) if *v >= 100 => sorted_allowed.binary_search(v).is_ok(),
+        Term::Var(_) => true,
+        Term::Apply(head, args) => {
+            all_pattern_vars_in(head, sorted_allowed)
+                && args.iter().all(|a| all_pattern_vars_in(a, sorted_allowed))
+        }
+        Term::Fn(_, body) => all_pattern_vars_in(body, sorted_allowed),
+        Term::Symbol(_, args) => {
+            args.iter().all(|a| all_pattern_vars_in(a, sorted_allowed))
+        }
+        Term::Point(_) | Term::Number(_) => true,
     }
 }
 
