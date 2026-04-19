@@ -28,12 +28,12 @@
 mod common;
 
 use mathscape_compress::{
-    derive_laws_with_subterm_au, extract::ExtractConfig, validate_candidates,
-    MetaPatternGenerator,
+    derive_laws_validated, derive_laws_with_subterm_au,
+    extract::ExtractConfig, is_rank2_shape, rank2_candidates_from_library,
+    validate_candidates,
 };
 use mathscape_core::{
     builtin::{ADD, MUL},
-    epoch::{AcceptanceCertificate, Artifact, Generator},
     eval::RewriteRule,
     term::Term,
     value::Value,
@@ -84,24 +84,10 @@ fn matches_meta_head(t: &Term) -> bool {
     }
 }
 
-/// Does the rule's LHS look like a rank-2 meta-rule? I.e., outer
-/// head is a pattern var AND at least one arg is itself an Apply
-/// with a pattern-var head.
+/// Thin wrapper around the library's public `is_rank2_shape` for
+/// local use (keeping `is_rank2` as the short name in this test).
 fn is_rank2(t: &Term) -> bool {
-    match t {
-        Term::Apply(f, args) => {
-            let outer_is_meta = matches!(**f, Term::Var(v) if v >= 100);
-            let inner_has_meta = args.iter().any(|a| {
-                if let Term::Apply(inner_f, _) = a {
-                    matches!(**inner_f, Term::Var(v) if v >= 100)
-                } else {
-                    false
-                }
-            });
-            outer_is_meta && inner_has_meta
-        }
-        _ => false,
-    }
+    is_rank2_shape(t)
 }
 
 #[test]
@@ -181,21 +167,14 @@ fn phase_h_unblock_pipeline_runs_end_to_end() {
         );
     }
 
-    // ── Step 3: Phase H — run MetaPatternGenerator over the
-    //           validated library looking for rank-2 inception ──
-    let validated_artifacts: Vec<Artifact> = validated
-        .iter()
-        .enumerate()
-        .map(|(i, rule)| {
-            Artifact::seal(
-                rule.clone(),
-                0,
-                AcceptanceCertificate::trivial_conjecture(1.0 + i as f64),
-                Vec::new(),
-            )
-        })
-        .collect();
-    let mut meta_gen = MetaPatternGenerator::new(
+    // ── Step 3: Phase H — one-call integrated pipeline ──────────
+    // rank2_candidates_from_library handles the Artifact::seal
+    // plumbing + MetaPatternGenerator invocation. The test used to
+    // build Artifacts manually; post-integration it's one call.
+    let rank2_candidates = rank2_candidates_from_library(
+        &validated,
+        &corpus,
+        0,
         ExtractConfig {
             min_shared_size: 1,
             min_matches: 2,
@@ -203,8 +182,6 @@ fn phase_h_unblock_pipeline_runs_end_to_end() {
         },
         30_000,
     );
-    let rank2_candidates =
-        meta_gen.propose(0, &corpus, &validated_artifacts);
     let rank2_count = rank2_candidates
         .iter()
         .filter(|c| is_rank2(&c.rule.lhs))
@@ -257,4 +234,80 @@ fn phase_h_unblock_pipeline_runs_end_to_end() {
         "Phase H unblock must produce ≥1 rank-2 candidate from the \
          Phase I+J-validated library (observed: {rank2_count})"
     );
+}
+
+#[test]
+fn phase_h_integrated_pipeline_one_call() {
+    // Post-integration: the whole Phase I→J→H chain is a handful
+    // of library calls, no hand-rolled Artifact construction.
+    // Pinned here so the integration API stays stable.
+    let corpus = diverse_scalar_corpus();
+    let mut next_id: mathscape_core::term::SymbolId = 1000;
+    let (validated, stats) = derive_laws_validated(
+        &corpus, &[], 300, 2, 2, 8, 0, &mut next_id,
+    );
+    println!(
+        "\n── Integrated pipeline ──\n  corpus={} traces={} validated={}",
+        corpus.len(),
+        stats.trace_count,
+        validated.len()
+    );
+
+    let rank2 = rank2_candidates_from_library(
+        &validated,
+        &corpus,
+        0,
+        mathscape_compress::extract::ExtractConfig {
+            min_shared_size: 1,
+            min_matches: 2,
+            max_new_rules: 20,
+        },
+        30_000,
+    );
+    let rank2_count = rank2.iter().filter(|c| is_rank2(&c.rule.lhs)).count();
+    println!(
+        "  rank2_total={} rank2_count={}",
+        rank2.len(),
+        rank2_count
+    );
+    for c in &rank2 {
+        if is_rank2(&c.rule.lhs) {
+            println!("    [RANK-2] {} :: {} => {}", c.rule.name, c.rule.lhs, c.rule.rhs);
+        }
+    }
+
+    // Same invariant as the manual-plumbing variant.
+    assert!(stats.trace_count >= 2);
+    assert!(!validated.is_empty(), "Phase I+J must produce ≥1 validated law");
+    assert!(rank2_count >= 1, "integrated pipeline must mint ≥1 rank-2");
+}
+
+#[test]
+fn phase_h_integration_is_deterministic() {
+    // Running the integrated pipeline twice on the same corpus
+    // produces the same validated library and the same rank-2
+    // candidate set.
+    let corpus = diverse_scalar_corpus();
+    let mut id_a: mathscape_core::term::SymbolId = 1000;
+    let (va, _) = derive_laws_validated(&corpus, &[], 300, 2, 2, 8, 0, &mut id_a);
+    let mut id_b: mathscape_core::term::SymbolId = 1000;
+    let (vb, _) = derive_laws_validated(&corpus, &[], 300, 2, 2, 8, 0, &mut id_b);
+    assert_eq!(va.len(), vb.len());
+    for (a, b) in va.iter().zip(vb.iter()) {
+        assert_eq!(a.lhs, b.lhs);
+        assert_eq!(a.rhs, b.rhs);
+    }
+
+    let cfg = mathscape_compress::extract::ExtractConfig {
+        min_shared_size: 1,
+        min_matches: 2,
+        max_new_rules: 20,
+    };
+    let ca = rank2_candidates_from_library(&va, &corpus, 0, cfg.clone(), 30_000);
+    let cb = rank2_candidates_from_library(&vb, &corpus, 0, cfg, 30_000);
+    assert_eq!(ca.len(), cb.len());
+    for (a, b) in ca.iter().zip(cb.iter()) {
+        assert_eq!(a.rule.lhs, b.rule.lhs);
+        assert_eq!(a.rule.rhs, b.rule.rhs);
+    }
 }

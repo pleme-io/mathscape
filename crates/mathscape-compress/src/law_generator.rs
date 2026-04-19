@@ -583,6 +583,114 @@ pub fn validate_candidates(
     validate_candidates_ext(candidates, library, step_limit, 8, 0)
 }
 
+/// Phase H integration: wrap a validated library as `Artifact`s and
+/// run `MetaPatternGenerator` over it to surface rank-2 (and
+/// higher) meta-candidates. Returns the Candidate set; callers can
+/// filter for `is_rank2` shapes or accept all meta proposals.
+///
+/// This is the path the `phase_h_unblock` demo proved out: Phase I
+/// surfaces, Phase J certifies, MetaPatternGenerator mints.
+/// Encapsulating the Artifact-seal + MetaGen invocation here makes
+/// the pipeline a single call outside test code.
+///
+/// `epoch_id` is passed through to Artifact sealing and the
+/// Generator call. `0` is fine for standalone uses; real callers
+/// inside an Epoch pass their current epoch.
+///
+/// `extract_config` tunes `MetaPatternGenerator` — the Phase H
+/// demo used `min_shared_size = 1, min_matches = 2,
+/// max_new_rules = 20` with a `symbol_id_floor = 30_000`.
+#[must_use]
+pub fn rank2_candidates_from_library(
+    validated_library: &[RewriteRule],
+    corpus: &[Term],
+    epoch_id: u64,
+    extract_config: crate::extract::ExtractConfig,
+    symbol_id_floor: SymbolId,
+) -> Vec<mathscape_core::epoch::Candidate> {
+    use mathscape_core::epoch::{
+        AcceptanceCertificate, Artifact, Generator,
+    };
+    let artifacts: Vec<Artifact> = validated_library
+        .iter()
+        .enumerate()
+        .map(|(i, rule)| {
+            Artifact::seal(
+                rule.clone(),
+                epoch_id,
+                AcceptanceCertificate::trivial_conjecture(1.0 + i as f64),
+                Vec::new(),
+            )
+        })
+        .collect();
+    let mut meta_gen =
+        crate::MetaPatternGenerator::new(extract_config, symbol_id_floor);
+    meta_gen.propose(epoch_id, corpus, &artifacts)
+}
+
+/// Does the rule's LHS look like a rank-2 meta-rule? I.e., outer
+/// head is a pattern var AND at least one arg is itself an Apply
+/// with a pattern-var head. The structural signature of
+/// "operator-variables over operator-variables" — the Phase H
+/// inception signal.
+#[must_use]
+pub fn is_rank2_shape(t: &Term) -> bool {
+    match t {
+        Term::Apply(f, args) => {
+            let outer_is_meta = matches!(**f, Term::Var(v) if v >= 100);
+            let inner_has_meta = args.iter().any(|a| {
+                if let Term::Apply(inner_f, _) = a {
+                    matches!(**inner_f, Term::Var(v) if v >= 100)
+                } else {
+                    false
+                }
+            });
+            outer_is_meta && inner_has_meta
+        }
+        _ => false,
+    }
+}
+
+/// Phase I + Phase J composed: extract subterm-paired AU candidates
+/// then filter by empirical validity. The single entry point for
+/// "discover laws AND certify them" — the path the Phase H rank-2
+/// inception demo proved out.
+///
+/// `subterm_depth = 0` collapses to root-only (same behavior as
+/// `derive_laws_with_cache` + validation).
+///
+/// Returns `(validated_laws, stats)`. Stats covers Phase I timing;
+/// Phase J validation time is not broken out (a fixed K*|candidates|
+/// eval cost, negligible compared to AU).
+///
+/// Use when: you want the cleanest "just the laws that provably
+/// hold" output, without post-hoc filtering in caller code.
+/// Skip the validation pass when performance matters more than
+/// semantic correctness (the law generator's original behavior).
+#[must_use]
+pub fn derive_laws_validated(
+    corpus: &[Term],
+    library: &[RewriteRule],
+    step_limit: usize,
+    min_support: usize,
+    subterm_depth: usize,
+    k_samples: usize,
+    seed: u64,
+    next_id: &mut SymbolId,
+) -> (Vec<RewriteRule>, LawGenStats) {
+    let (raw, stats) = derive_laws_with_subterm_au(
+        corpus,
+        library,
+        step_limit,
+        min_support,
+        subterm_depth,
+        next_id,
+    );
+    let validated =
+        validate_candidates_ext(raw, library, step_limit, k_samples, seed);
+    (validated, stats)
+}
+
 /// Phase J with full knobs exposed.
 #[must_use]
 pub fn validate_candidates_ext(
