@@ -67,8 +67,8 @@ pub use autograd::{
 pub use adaptive_corpus::AdaptiveCorpusGenerator;
 pub use bandit_probe::BanditProbe;
 pub use coach::{
-    CoachObservation, CoachPolicy, CurriculumCoach, RuleBasedPolicy,
-    TuningAction,
+    CoachObservation, CoachPolicy, CurriculumCoach, LearnedCoachPolicy,
+    RuleBasedPolicy, TuningAction,
 };
 pub use bootstrap::{
     compute_attestation, deduplicate_library, execute_scenario_core,

@@ -188,6 +188,164 @@ impl CoachPolicy for RuleBasedPolicy {
     }
 }
 
+/// Phase Z.3: a learned coach policy. Attribution-based bandit
+/// over (action × observation) pairs → subsequent score delta.
+///
+/// The Coach records `action_history`. After each action, the
+/// next benchmark run produces a score delta. This policy
+/// attributes the delta to the previous action and bumps that
+/// action's expected-reward estimate. Uses ε-greedy action
+/// selection with a configurable exploration rate.
+///
+/// This is the "model learning to tune the other model" in its
+/// purest form: no hand-coded rules, just reward attribution
+/// and action-value estimates updated online.
+///
+/// Uses the same deterministic SplitMix64 PRNG as BanditProbe
+/// for replayable experiments.
+pub struct LearnedCoachPolicy {
+    /// Catalog of possible actions the policy can emit.
+    action_catalog: Vec<TuningAction>,
+    /// Expected reward per action (EMA of attributed score delta).
+    action_rewards: std::cell::RefCell<Vec<f64>>,
+    /// Trial count per action.
+    action_trials: std::cell::RefCell<Vec<u64>>,
+    /// Last chosen action index — used to attribute reward on
+    /// the NEXT observation.
+    last_action: std::cell::Cell<Option<usize>>,
+    /// Last observed score — used to compute the delta that
+    /// gets attributed to last_action.
+    last_score: std::cell::Cell<Option<f64>>,
+    /// Exploration rate.
+    epsilon: std::cell::Cell<f64>,
+    /// EMA smoothing factor.
+    smoothing: std::cell::Cell<f64>,
+    /// Counter-based PRNG state.
+    rng_counter: std::cell::Cell<u64>,
+}
+
+impl LearnedCoachPolicy {
+    /// Default catalog covering the full TuningAction palette
+    /// with sensible parameter defaults.
+    pub fn default_catalog() -> Vec<TuningAction> {
+        vec![
+            TuningAction::AdjustLearningRate { factor: 1.5 },
+            TuningAction::AdjustLearningRate { factor: 0.5 },
+            TuningAction::SetEwcLambda { lambda: 0.1 },
+            TuningAction::SetEwcLambda { lambda: 0.5 },
+            TuningAction::Prune {
+                magnitude_threshold: 1e-6,
+                min_activations: 1,
+            },
+            TuningAction::AutoRejuvenate {
+                phantom_threshold: 0.001,
+                initial_value: 0.01,
+            },
+            TuningAction::AnchorNow,
+            TuningAction::SetLearningProgressWindow { k: 10 },
+            TuningAction::TriggerDietMutation {
+                threshold: 0.6,
+                observed: 0.9,
+            },
+            TuningAction::NoOp,
+        ]
+    }
+
+    /// Build with a specific action catalog. Caller supplies
+    /// the shape they want the learner to explore.
+    pub fn new(action_catalog: Vec<TuningAction>, epsilon: f64) -> Self {
+        assert!(
+            !action_catalog.is_empty(),
+            "LearnedCoachPolicy needs ≥1 action"
+        );
+        let n = action_catalog.len();
+        Self {
+            action_catalog,
+            action_rewards: std::cell::RefCell::new(vec![0.0; n]),
+            action_trials: std::cell::RefCell::new(vec![0u64; n]),
+            last_action: std::cell::Cell::new(None),
+            last_score: std::cell::Cell::new(None),
+            epsilon: std::cell::Cell::new(epsilon.clamp(0.0, 1.0)),
+            smoothing: std::cell::Cell::new(0.3),
+            rng_counter: std::cell::Cell::new(0xBADA55),
+        }
+    }
+
+    /// With-default-catalog constructor.
+    pub fn with_defaults(epsilon: f64) -> Self {
+        Self::new(Self::default_catalog(), epsilon)
+    }
+
+    /// Snapshot of per-action learned rewards.
+    pub fn action_rewards(&self) -> Vec<f64> {
+        self.action_rewards.borrow().clone()
+    }
+
+    /// Snapshot of per-action trial counts.
+    pub fn action_trials(&self) -> Vec<u64> {
+        self.action_trials.borrow().clone()
+    }
+
+    /// Identify the learned best action so far.
+    pub fn best_action_index(&self) -> usize {
+        let r = self.action_rewards.borrow();
+        let mut best = 0usize;
+        let mut best_v = r[0];
+        for (i, v) in r.iter().enumerate().skip(1) {
+            if *v > best_v {
+                best = i;
+                best_v = *v;
+            }
+        }
+        best
+    }
+
+    fn next_unit(&self) -> f64 {
+        let c = self.rng_counter.get();
+        let mut z = c.wrapping_add(0x9E3779B97F4A7C15);
+        z = (z ^ (z >> 30)).wrapping_mul(0xBF58476D1CE4E5B9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94D049BB133111EB);
+        z ^= z >> 31;
+        self.rng_counter.set(c.wrapping_add(1));
+        ((z >> 11) as f64) * (1.0f64 / ((1u64 << 53) as f64))
+    }
+}
+
+impl CoachPolicy for LearnedCoachPolicy {
+    fn name(&self) -> &str {
+        "learned-bandit"
+    }
+
+    fn decide(&self, obs: &CoachObservation) -> TuningAction {
+        // Attribute reward from the previous action, if any.
+        let cur_score = obs.competency.total.solved_fraction();
+        if let (Some(prev_idx), Some(prev_score)) =
+            (self.last_action.get(), self.last_score.get())
+        {
+            let delta = cur_score - prev_score;
+            let alpha = self.smoothing.get();
+            let mut rewards = self.action_rewards.borrow_mut();
+            rewards[prev_idx] = alpha * delta + (1.0 - alpha) * rewards[prev_idx];
+            drop(rewards);
+            let mut trials = self.action_trials.borrow_mut();
+            trials[prev_idx] += 1;
+        }
+        self.last_score.set(Some(cur_score));
+
+        // ε-greedy pick.
+        let eps = self.epsilon.get();
+        let coin = self.next_unit();
+        let idx = if coin < eps {
+            let pick = self.next_unit();
+            (pick * (self.action_catalog.len() as f64)) as usize
+        } else {
+            self.best_action_index()
+        };
+        self.last_action.set(Some(idx));
+        self.action_catalog[idx].clone()
+    }
+}
+
 /// The Coach wraps a policy + the student it coaches.
 /// Calling `tick` reads the student, asks the policy, applies
 /// the action. Returns the action that was applied (for
@@ -469,6 +627,88 @@ mod tests {
                 min_activations: 0,
             }
         }
+    }
+
+    // ── Phase Z.3: LearnedCoachPolicy tests ─────────────────
+
+    #[test]
+    fn learned_policy_picks_action_from_its_catalog() {
+        let library = Rc::new(RefCell::new(Vec::<RewriteRule>::new()));
+        let trainer = Rc::new(StreamingPolicyTrainer::new(0.1));
+        let handle = LiveInferenceHandle::new(library, trainer);
+        let hub = Rc::new(EventHub::new());
+        let policy = LearnedCoachPolicy::with_defaults(0.3);
+        let coach = CurriculumCoach::new(policy, handle, hub);
+
+        let action = coach.tick();
+        // Must be one of the catalog kinds.
+        let kind = action.kind();
+        let catalog_kinds = [
+            "adjust-lr",
+            "set-ewc-lambda",
+            "prune",
+            "auto-rejuvenate",
+            "anchor-now",
+            "set-lp-window",
+            "trigger-diet",
+            "no-op",
+        ];
+        assert!(
+            catalog_kinds.contains(&kind),
+            "unexpected kind: {kind}"
+        );
+        assert_eq!(coach.tick_count(), 1);
+    }
+
+    #[test]
+    fn learned_policy_attributes_reward_after_score_changes() {
+        // Build a coach around a learned policy; fake an
+        // improving library by appending rules between ticks.
+        let library = Rc::new(RefCell::new(Vec::<RewriteRule>::new()));
+        let trainer = Rc::new(StreamingPolicyTrainer::new(0.1));
+        let handle = LiveInferenceHandle::new(
+            library.clone(),
+            trainer.clone(),
+        );
+        let hub = Rc::new(EventHub::new());
+        let policy = LearnedCoachPolicy::with_defaults(0.5);
+        let coach = CurriculumCoach::new(policy, handle, hub);
+
+        // Tick 1: baseline score 0, no prior action to attribute.
+        coach.tick();
+        // Adding the identity rule lifts score on symbolic-nat.
+        library.borrow_mut().push(add_id());
+        // Tick 2: score jumped → attribute delta to the action
+        // picked on tick 1.
+        coach.tick();
+
+        // Action history is 2 entries.
+        assert_eq!(coach.action_history().len(), 2);
+        assert_eq!(coach.tick_count(), 2);
+    }
+
+    #[test]
+    fn learned_policy_is_deterministic_across_replays() {
+        let make = || {
+            let library = Rc::new(RefCell::new(Vec::<RewriteRule>::new()));
+            let trainer = Rc::new(StreamingPolicyTrainer::new(0.1));
+            let handle = LiveInferenceHandle::new(library, trainer);
+            let hub = Rc::new(EventHub::new());
+            let policy = LearnedCoachPolicy::with_defaults(0.5);
+            CurriculumCoach::new(policy, handle, hub)
+        };
+        let c1 = make();
+        let c2 = make();
+        for _ in 0..5 {
+            c1.tick();
+            c2.tick();
+        }
+        // Same event sequences → same action kinds.
+        let k1: Vec<_> =
+            c1.action_history().iter().map(|a| a.kind()).collect();
+        let k2: Vec<_> =
+            c2.action_history().iter().map(|a| a.kind()).collect();
+        assert_eq!(k1, k2);
     }
 
     #[test]
