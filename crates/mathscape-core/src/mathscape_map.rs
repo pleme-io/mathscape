@@ -107,6 +107,23 @@ pub enum MapEvent {
         rule: RewriteRule,
         reason: String,
     },
+    /// Phase V.benchmark: a benchmark of a static labeled problem
+    /// set completed. `solved_fraction` ∈ [0, 1] is the competence
+    /// metric; `delta_from_prior` is the improvement relative to
+    /// the last benchmark (NaN on the first observation). This is
+    /// the labeled-data ingress — the stream gains a supervised
+    /// signal the trainer can reward with high confidence.
+    BenchmarkScored {
+        solved_count: usize,
+        total: usize,
+        solved_fraction: f64,
+        /// Improvement since previous benchmark. Positive = library
+        /// got strictly better at the labeled task; zero = no change;
+        /// negative = REGRESSION (something was discovered that
+        /// makes eval fail on a problem that used to work —
+        /// important signal for the trainer).
+        delta_from_prior: f64,
+    },
 }
 
 impl MapEvent {
@@ -124,6 +141,7 @@ impl MapEvent {
             MapEvent::RuleRejectedAtCertification { .. } => {
                 "rule-rejected-at-certification"
             }
+            MapEvent::BenchmarkScored { .. } => "benchmark-scored",
         }
     }
 }

@@ -17,6 +17,7 @@ pub mod event;
 pub mod form_tree;
 pub mod hash;
 pub mod lifecycle;
+pub mod math_problem;
 pub mod mathscape_map;
 pub mod meta;
 pub mod meta_loop;
@@ -82,6 +83,10 @@ pub use meta_loop::{
     AdaptiveProposer, DefaultScenarioExecutor, HeuristicProposer, MetaLoop,
     MetaLoopConfig, MetaLoopOutcome, MetaPhaseRecord, ScenarioExecutor,
     ScenarioProposer, SpecArchetype, TerminationReason,
+};
+pub use math_problem::{
+    canonical_problem_set, run_benchmark, solve_problem, BenchmarkConsumer,
+    BenchmarkReport, MathProblem, ProblemResult,
 };
 pub use streaming_policy::StreamingPolicyTrainer;
 pub use bettyfine::{bettyfine_library, standard_bettyfine_cardinality, OperatorSpec};

@@ -145,6 +145,32 @@ impl StreamingPolicyTrainer {
                 -((observed - threshold).max(0.0) as f64)
             }
             MapEvent::RuleRejectedAtCertification { .. } => -0.5,
+            // Phase V.benchmark: LABELED reward. The canonical
+            // problem set is human-known mathematics; the model
+            // getting better at it is the strongest signal
+            // available.
+            //   absolute competence: solved_fraction ∈ [0, 1]
+            //                        maps linearly to [0, 2.0]
+            //   delta reward       : ±3.0 per unit improvement
+            //                        (regressions hurt more than
+            //                        equivalent improvements help)
+            MapEvent::BenchmarkScored {
+                solved_fraction,
+                delta_from_prior,
+                ..
+            } => {
+                let absolute = 2.0 * solved_fraction;
+                let delta_signal = if delta_from_prior.is_nan() {
+                    0.0
+                } else if *delta_from_prior < 0.0 {
+                    // Regressions get asymmetric penalty —
+                    // "don't break what worked" signal.
+                    *delta_from_prior * 5.0
+                } else {
+                    *delta_from_prior * 3.0
+                };
+                absolute + delta_signal
+            }
         }
     }
 
@@ -170,7 +196,8 @@ impl StreamingPolicyTrainer {
             // doesn't update on them.
             MapEvent::NovelRoot { .. }
             | MapEvent::RootMutated { .. }
-            | MapEvent::StalenessCrossed { .. } => None,
+            | MapEvent::StalenessCrossed { .. }
+            | MapEvent::BenchmarkScored { .. } => None,
         }
     }
 
