@@ -75,17 +75,39 @@ fn step(term: &Term, library: &[RewriteRule]) -> EvalResult {
             Ok(Term::Fn(params.clone(), Box::new(new_body)))
         }
 
-        // Application: the heart of evaluation
+        // Application: the heart of evaluation.
+        //
+        // ORDER (Phase X fix, 2026-04-19):
+        //   1. Reduce the function.
+        //   2. Try builtin on ORIGINAL args (fast path for
+        //      already-concrete values).
+        //   3. If that misses, try beta reduction.
+        //   4. Reduce the args — THEN try builtin again. This
+        //      lets concrete-arithmetic folding win over any
+        //      discovered library rule that matches
+        //      structurally (e.g. a rule like
+        //      `add(?x, ?y) → …` must not pre-empt the
+        //      kernel's ability to reduce `add(3, 4)` to 7).
+        //   5. Only after builtin has been given both chances
+        //      do we try library rewrite rules on the reduced
+        //      term. Discovered rules still fire for symbolic
+        //      inputs the kernel can't fold.
+        //   6. If NOTHING matches, return the apply form with
+        //      reduced args.
+        //
+        // This eliminates the regression surfaced by the Phase X
+        // Mathematician's Curriculum: discovered rules no longer
+        // interfere with concrete arithmetic.
         Term::Apply(func, args) => {
-            // First, try to reduce the function
+            // Step 1: reduce function.
             let reduced_func = step(func, library)?;
 
-            // Try built-in evaluation
+            // Step 2: fast-path builtin on original args.
             if let Some(result) = try_builtin(&reduced_func, args)? {
                 return Ok(result);
             }
 
-            // Try beta reduction (applying a Fn to args)
+            // Step 3: beta reduction.
             if let Term::Fn(params, body) = &reduced_func {
                 if args.len() == params.len() {
                     let mut result = *body.clone();
@@ -96,9 +118,24 @@ fn step(term: &Term, library: &[RewriteRule]) -> EvalResult {
                 }
             }
 
-            // Try library rewrite rules on the whole term
+            // Step 4: reduce args, then retry builtin.
+            let reduced_args: Vec<Term> = args
+                .iter()
+                .map(|a| step(a, library))
+                .collect::<Result<_, _>>()?;
+
+            if let Some(result) = try_builtin(&reduced_func, &reduced_args)? {
+                return Ok(result);
+            }
+
+            // Step 5: library rules on the reduced-arg form.
+            let reduced_apply = Term::Apply(
+                Box::new(reduced_func.clone()),
+                reduced_args.clone(),
+            );
             for rule in library {
-                if let Some(bindings) = pattern_match(&rule.lhs, term) {
+                if let Some(bindings) = pattern_match(&rule.lhs, &reduced_apply)
+                {
                     let mut result = rule.rhs.clone();
                     for (var, val) in &bindings {
                         result = result.substitute(*var, val);
@@ -107,12 +144,7 @@ fn step(term: &Term, library: &[RewriteRule]) -> EvalResult {
                 }
             }
 
-            // Reduce args
-            let reduced_args: Vec<Term> = args
-                .iter()
-                .map(|a| step(a, library))
-                .collect::<Result<_, _>>()?;
-
+            // Step 6: nothing matched. Return reduced apply.
             Ok(Term::Apply(Box::new(reduced_func), reduced_args))
         }
     }
@@ -708,19 +740,33 @@ mod tests {
 
     #[test]
     fn step_limit_applied() {
-        // Chain of nested applications that require many reduction steps
-        // succ(succ(succ(... succ(0) ...))) — 20 layers
-        let mut expr = nat(0);
-        for _ in 0..20 {
-            expr = apply(var(BUILTIN_SUCC), vec![expr]);
-        }
-        // With a limit of 5, should hit the limit
-        let result = eval(&expr, &[], 5);
-        // Either it reduces partially or hits the limit; it should not fully reduce
-        match result {
-            Ok(Term::Number(Value::Nat(n))) => assert!(n < 20, "should not fully reduce with step limit 5"),
-            Err(EvalError::StepLimitExceeded) => {} // expected
-            other => panic!("unexpected result: {other:?}"),
-        }
+        // The step limit must terminate a divergent library rule.
+        // We build `f(?x) → f(?x)` (infinite rewrite loop) and
+        // verify eval halts at step_limit instead of looping
+        // forever. This is the REAL intent of the step limit: a
+        // guard against runaway reductions.
+        //
+        // Post-Phase-X (2026-04-19) note: before the eval-order
+        // fix, this test used a nested `succ(succ(...))` chain
+        // to exercise partial reduction. The new eval reduces
+        // bottom-up per outer step, which fully folds such
+        // chains in a single step — so we now use a genuinely
+        // divergent rule to test the limit's actual purpose.
+        // Rule: f(?x) → f(succ(?x)). Each step grows ?x, never
+        // reaches a fixed point.
+        let divergent_rule = RewriteRule {
+            name: "diverge".into(),
+            lhs: apply(var(999), vec![var(100)]),
+            rhs: apply(
+                var(999),
+                vec![apply(var(BUILTIN_SUCC), vec![var(100)])],
+            ),
+        };
+        let expr = apply(var(999), vec![nat(0)]);
+        let result = eval(&expr, &[divergent_rule], 5);
+        assert!(
+            matches!(result, Err(EvalError::StepLimitExceeded)),
+            "divergent rewrite must be halted by step_limit; got {result:?}"
+        );
     }
 }
