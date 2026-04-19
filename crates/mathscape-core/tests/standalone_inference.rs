@@ -235,4 +235,22 @@ fn standalone_query_against_big_run_snapshot_if_present() {
             expected_fraction
         );
     }
+
+    // ── RIGOROUS CERTIFICATION — the full test framework ─────
+    use mathscape_core::model_testing::{
+        certify_snapshot, verify_serialization_roundtrip,
+    };
+    println!("\n  Running rigorous certification pass...");
+    let cert = certify_snapshot(&snap);
+    println!("{}", cert.summary());
+    println!("\n  Invariants checked:");
+    for r in &cert.invariants {
+        let mark = if r.passed { "✓" } else { "✗" };
+        println!("    {mark} {:<35}  {}", r.name, r.detail);
+    }
+    assert!(cert.passed(), "snapshot must fully certify");
+
+    let serde_ok = verify_serialization_roundtrip(&snap).unwrap();
+    println!("\n  Serialization round-trip: {}", if serde_ok { "✓" } else { "✗" });
+    assert!(serde_ok);
 }

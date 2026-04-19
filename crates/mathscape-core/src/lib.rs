@@ -24,6 +24,7 @@ pub mod math_problem;
 pub mod mathscape_map;
 pub mod meta;
 pub mod meta_loop;
+pub mod model_testing;
 pub mod snapshot;
 pub mod streaming_policy;
 pub mod task;
@@ -118,6 +119,11 @@ pub use form_tree::{
 };
 pub use hash::TermRef;
 pub use inference::LiveInferenceHandle;
+pub use model_testing::{
+    certify_snapshot, check_invariants, compare_snapshots,
+    verify_serialization_roundtrip, CertificationReport, InvariantResult,
+    SnapshotDiff,
+};
 pub use snapshot::{
     analyze_snapshot, attach_analysis, deep_analyze, fork_from_snapshot,
     format_analysis, snapshot_handle, trainer_from_snapshot, trainer_snapshot,
