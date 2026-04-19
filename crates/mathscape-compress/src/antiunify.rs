@@ -157,6 +157,123 @@ pub fn anti_unify(t1: &Term, t2: &Term) -> AntiUnifyResult {
 /// This is the primitive the law-generator uses to extract laws
 /// from evaluation traces. Currently in antiunify rather than its
 /// own module because it shares the inner machinery.
+/// Phase I (2026-04-18): subterm-paired anti-unification.
+///
+/// Root-level `paired_anti_unify` surfaces laws only when the LAW
+/// LIVES AT ROOT — the paired inputs share root structure. Laws
+/// that live at a subterm position (e.g. `add(0, ?x) → ?x` inside
+/// a larger context) are invisible because root-level AU emits a
+/// fresh var whenever the outermost shape differs.
+///
+/// This function enumerates matching-position subterm pairs in
+/// `(in_a, in_b)` up to `max_depth` and anti-unifies each pair
+/// with the WHOLE OUTPUT PAIR. Asymmetric output pairing (not
+/// out-at-path, just the full out) keeps the function useful when
+/// outputs are fully-reduced leaves — eval commonly collapses
+/// deep inputs to atoms, so positional output-path matching would
+/// return empty for most traces.
+///
+/// Returns all candidate `(lhs, rhs)` patterns that pass the
+/// existing LHS-has-vars + RHS-subset-LHS + LHS-≠-RHS filters.
+/// Duplicates may appear when root + subterm positions produce
+/// the same pattern; the caller (law generator) is expected to
+/// tally support counts and dedup naturally.
+///
+/// Phase I is the move that unblocks Phase H (rank-2 inception).
+/// By surfacing shape-orthogonal candidate laws (associativity-
+/// shape, idempotence-shape, ...), the library grows meta-rules
+/// that fall into DISTINCT equivalence classes, which the R-R28
+/// subsumption gate then lets coexist — the precondition for
+/// rank-2 meta-rule discovery.
+#[must_use]
+pub fn paired_subterm_anti_unify(
+    inputs: (&Term, &Term),
+    outputs: (&Term, &Term),
+    max_depth: usize,
+) -> Vec<(Term, Term)> {
+    let (in_a, in_b) = inputs;
+    let (out_a, out_b) = outputs;
+    let mut out = Vec::new();
+    let mut seen: std::collections::HashSet<(Term, Term)> =
+        std::collections::HashSet::new();
+
+    for (sub_a, sub_b) in matching_subterm_pairs(in_a, in_b, max_depth) {
+        if let Some((lhs, rhs)) =
+            paired_anti_unify((&sub_a, &sub_b), (out_a, out_b))
+        {
+            if seen.insert((lhs.clone(), rhs.clone())) {
+                out.push((lhs, rhs));
+            }
+        }
+    }
+    out
+}
+
+/// Enumerate (sub_a, sub_b) pairs at matching tree positions up
+/// to `max_depth`, INCLUDING position `[]` (the roots). Only
+/// positions that exist in BOTH terms with compatible structure
+/// at each step are included.
+///
+/// This is position-matched not structurally-matched: at each
+/// step we require the same arity at the same index. If t1's
+/// position [0] is an Apply with 2 args and t2's position [0] is
+/// a Number leaf, descent stops — but [] and [0] are both
+/// enumerated. The anti-unify call itself handles the
+/// "roots differ" case internally.
+fn matching_subterm_pairs(
+    t1: &Term,
+    t2: &Term,
+    max_depth: usize,
+) -> Vec<(Term, Term)> {
+    let mut pairs = Vec::new();
+    matching_subterm_pairs_inner(t1, t2, max_depth, &mut pairs);
+    pairs
+}
+
+fn matching_subterm_pairs_inner(
+    t1: &Term,
+    t2: &Term,
+    remaining_depth: usize,
+    out: &mut Vec<(Term, Term)>,
+) {
+    out.push((t1.clone(), t2.clone()));
+    if remaining_depth == 0 {
+        return;
+    }
+    match (t1, t2) {
+        (Term::Apply(f1, a1), Term::Apply(f2, a2)) if a1.len() == a2.len() => {
+            matching_subterm_pairs_inner(f1, f2, remaining_depth - 1, out);
+            for (c1, c2) in a1.iter().zip(a2.iter()) {
+                matching_subterm_pairs_inner(
+                    c1,
+                    c2,
+                    remaining_depth - 1,
+                    out,
+                );
+            }
+        }
+        (Term::Symbol(i1, a1), Term::Symbol(i2, a2))
+            if i1 == i2 && a1.len() == a2.len() =>
+        {
+            for (c1, c2) in a1.iter().zip(a2.iter()) {
+                matching_subterm_pairs_inner(
+                    c1,
+                    c2,
+                    remaining_depth - 1,
+                    out,
+                );
+            }
+        }
+        (Term::Fn(p1, b1), Term::Fn(p2, b2)) if p1 == p2 => {
+            matching_subterm_pairs_inner(b1, b2, remaining_depth - 1, out);
+        }
+        _ => {
+            // Roots differ or arities mismatch — stop descending.
+            // The root-level pair is already in `out`.
+        }
+    }
+}
+
 pub fn paired_anti_unify(
     inputs: (&Term, &Term),
     outputs: (&Term, &Term),
