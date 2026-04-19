@@ -494,11 +494,17 @@ pub fn is_empirically_valid(
         return matches!((lhs_nf, rhs_nf), (Ok(l), Ok(r)) if l == r);
     }
 
+    // Phase J.2: detect the rule's domain once, route all samples
+    // through the matching pool. Falls back to Nat when no
+    // recognizable head operator is present.
+    let domain = Domain::detect(rule);
     for sample_index in 0..k_samples {
         let mut lhs = rule.lhs.clone();
         let mut rhs = rule.rhs.clone();
         for (var_pos, &var_id) in pattern_vars.iter().enumerate() {
-            let val = pick_concrete_value(seed, sample_index, var_pos);
+            let val = pick_concrete_value_for_domain(
+                seed, sample_index, var_pos, domain,
+            );
             lhs = lhs.substitute(var_id, &val);
             rhs = rhs.substitute(var_id, &val);
         }
@@ -512,31 +518,153 @@ pub fn is_empirically_valid(
     true
 }
 
-/// Pick a concrete `Term` for a given (seed, sample, var-position)
-/// triple. Deterministic — same (seed, sample, var_pos) → same
-/// value. Draws from a small pool covering Nat, Int, and small
-/// Tensor values.
-fn pick_concrete_value(seed: u64, sample_index: usize, var_pos: usize) -> Term {
+
+/// Phase J.2 (2026-04-18): the algebraic domain a rule operates
+/// over. Determines which binding pool we draw concrete values
+/// from during validation. Detected heuristically from the
+/// rule's LHS head operator; Nat is the conservative fallback.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Domain {
+    Nat,
+    Int,
+    Float,
+    Tensor,
+    FloatTensor,
+}
+
+impl Domain {
+    /// Detect the domain a rule operates over by inspecting its
+    /// LHS head. Falls back to `Nat` when no recognizable head
+    /// operator is present.
+    #[must_use]
+    pub fn detect(rule: &RewriteRule) -> Self {
+        Self::detect_in(&rule.lhs).unwrap_or(Self::Nat)
+    }
+
+    fn detect_in(t: &Term) -> Option<Self> {
+        match t {
+            Term::Apply(f, args) => {
+                if let Term::Var(op) = &**f {
+                    if let Some(d) = Self::from_op_id(*op) {
+                        return Some(d);
+                    }
+                }
+                // Recurse into args — sometimes the domain is
+                // surfaced only at a subterm (e.g. a meta-rule
+                // whose head is a pattern var but whose args
+                // contain concrete ops).
+                for a in args {
+                    if let Some(d) = Self::detect_in(a) {
+                        return Some(d);
+                    }
+                }
+                None
+            }
+            Term::Symbol(_, args) => {
+                for a in args {
+                    if let Some(d) = Self::detect_in(a) {
+                        return Some(d);
+                    }
+                }
+                None
+            }
+            _ => None,
+        }
+    }
+
+    /// Map a u32 operator id to its algebraic domain. Matches the
+    /// ranges in `mathscape_core::builtin`:
+    ///   0-9   → Nat
+    ///   10-19 → Int
+    ///   20-29 → Tensor
+    ///   30-39 → Float
+    ///   40+   → FloatTensor
+    /// Anything ≥ 100 is a pattern variable, not an op — return None.
+    fn from_op_id(id: u32) -> Option<Self> {
+        match id {
+            0..=9 => Some(Self::Nat),
+            10..=19 => Some(Self::Int),
+            20..=29 => Some(Self::Tensor),
+            30..=39 => Some(Self::Float),
+            40..=99 => Some(Self::FloatTensor),
+            _ => None,
+        }
+    }
+}
+
+/// Phase J.2: pick a concrete value from the pool matching the
+/// given domain. Same determinism property as `pick_concrete_value`.
+fn pick_concrete_value_for_domain(
+    seed: u64,
+    sample_index: usize,
+    var_pos: usize,
+    domain: Domain,
+) -> Term {
     use std::collections::hash_map::DefaultHasher;
     use std::hash::{Hash, Hasher};
     let mut h = DefaultHasher::new();
     (seed, sample_index as u64, var_pos as u64).hash(&mut h);
     let x = h.finish();
-    // Nat-only pool. Mixed-domain bindings (Nat + Int, Nat +
-    // Tensor) don't round-trip through the kernel's ADD/MUL
-    // (signatures require same-domain operands), which would
-    // falsely reject domain-homogeneous valid laws. Keeping the
-    // pool Nat means Phase J validates laws over the Nat algebra
-    // — Phase J.2 will add domain-aware sampling for Int/Tensor
-    // rules by reading the rule's operator signature.
-    match x % 7 {
-        0 => Term::Number(Value::Nat(0)),
-        1 => Term::Number(Value::Nat(1)),
-        2 => Term::Number(Value::Nat(2)),
-        3 => Term::Number(Value::Nat(5)),
-        4 => Term::Number(Value::Nat(17)),
-        5 => Term::Number(Value::Nat(3)),
-        _ => Term::Number(Value::Nat(8)),
+    match domain {
+        Domain::Nat => match x % 7 {
+            0 => Term::Number(Value::Nat(0)),
+            1 => Term::Number(Value::Nat(1)),
+            2 => Term::Number(Value::Nat(2)),
+            3 => Term::Number(Value::Nat(5)),
+            4 => Term::Number(Value::Nat(17)),
+            5 => Term::Number(Value::Nat(3)),
+            _ => Term::Number(Value::Nat(8)),
+        },
+        Domain::Int => match x % 7 {
+            0 => Term::Number(Value::Int(0)),
+            1 => Term::Number(Value::Int(1)),
+            2 => Term::Number(Value::Int(-1)),
+            3 => Term::Number(Value::Int(5)),
+            4 => Term::Number(Value::Int(-3)),
+            5 => Term::Number(Value::Int(42)),
+            _ => Term::Number(Value::Int(-7)),
+        },
+        Domain::Float => match x % 6 {
+            0 => float_term(0.0),
+            1 => float_term(1.0),
+            2 => float_term(2.5),
+            3 => float_term(-1.5),
+            4 => float_term(0.5),
+            _ => float_term(3.14),
+        },
+        Domain::Tensor => match x % 4 {
+            0 => tensor_term(vec![2], vec![0, 0]),
+            1 => tensor_term(vec![2], vec![1, 1]),
+            2 => tensor_term(vec![2], vec![2, 3]),
+            _ => tensor_term(vec![2], vec![5, 7]),
+        },
+        Domain::FloatTensor => match x % 4 {
+            0 => float_tensor_term(vec![2], &[0.0, 0.0]),
+            1 => float_tensor_term(vec![2], &[1.0, 1.0]),
+            2 => float_tensor_term(vec![2], &[0.5, 1.5]),
+            _ => float_tensor_term(vec![2], &[2.0, 3.0]),
+        },
+    }
+}
+
+fn float_term(f: f64) -> Term {
+    match Value::from_f64(f) {
+        Some(v) => Term::Number(v),
+        None => Term::Number(Value::Float(f.to_bits())),
+    }
+}
+
+fn tensor_term(shape: Vec<usize>, data: Vec<i64>) -> Term {
+    match Value::tensor(shape, data) {
+        Some(v) => Term::Number(v),
+        None => Term::Number(Value::Int(0)),
+    }
+}
+
+fn float_tensor_term(shape: Vec<usize>, data: &[f64]) -> Term {
+    match Value::float_tensor(shape, data.to_vec()) {
+        Some(v) => Term::Number(v),
+        None => Term::Number(Value::Float(0.0f64.to_bits())),
     }
 }
 
@@ -891,6 +1019,131 @@ mod tests {
         let v1 = is_empirically_valid(&rule, &[], 200, 16, 42);
         let v2 = is_empirically_valid(&rule, &[], 200, 16, 42);
         assert_eq!(v1, v2);
+    }
+
+    // ── Phase J.2: domain-aware sampling tests ────────────────────
+
+    #[test]
+    fn domain_detect_nat_vocabulary() {
+        let rule = RewriteRule {
+            name: "add-id".into(),
+            lhs: apply(var(ADD), vec![nat(0), var(100)]),
+            rhs: var(100),
+        };
+        assert_eq!(Domain::detect(&rule), Domain::Nat);
+    }
+
+    #[test]
+    fn domain_detect_int_vocabulary() {
+        // INT_ADD = 12
+        let rule = RewriteRule {
+            name: "int-add-id".into(),
+            lhs: apply(var(12), vec![Term::Number(Value::Int(0)), var(100)]),
+            rhs: var(100),
+        };
+        assert_eq!(Domain::detect(&rule), Domain::Int);
+    }
+
+    #[test]
+    fn domain_detect_tensor_vocabulary() {
+        // TENSOR_ADD = 20
+        let rule = RewriteRule {
+            name: "tensor-add-id".into(),
+            lhs: apply(
+                var(20),
+                vec![
+                    Term::Number(
+                        Value::tensor(vec![2], vec![0, 0]).unwrap(),
+                    ),
+                    var(100),
+                ],
+            ),
+            rhs: var(100),
+        };
+        assert_eq!(Domain::detect(&rule), Domain::Tensor);
+    }
+
+    #[test]
+    fn domain_detect_float_vocabulary() {
+        // FLOAT_ADD = 31
+        let rule = RewriteRule {
+            name: "float-add-id".into(),
+            lhs: apply(
+                var(31),
+                vec![
+                    Term::Number(Value::Float(0.0f64.to_bits())),
+                    var(100),
+                ],
+            ),
+            rhs: var(100),
+        };
+        assert_eq!(Domain::detect(&rule), Domain::Float);
+    }
+
+    #[test]
+    fn domain_detect_float_tensor_vocabulary() {
+        // FT_ADD = 40
+        let rule = RewriteRule {
+            name: "ft-add-id".into(),
+            lhs: apply(
+                var(40),
+                vec![
+                    Term::Number(
+                        Value::float_tensor(vec![2], vec![0.0, 0.0])
+                            .unwrap(),
+                    ),
+                    var(100),
+                ],
+            ),
+            rhs: var(100),
+        };
+        assert_eq!(Domain::detect(&rule), Domain::FloatTensor);
+    }
+
+    #[test]
+    fn domain_detect_unrecognized_falls_back_to_nat() {
+        // Rule whose head is a meta-var (≥100) with no recognizable
+        // op in args — no concrete domain signal.
+        let rule = RewriteRule {
+            name: "meta".into(),
+            lhs: apply(var(200), vec![var(100), var(101)]),
+            rhs: var(100),
+        };
+        assert_eq!(Domain::detect(&rule), Domain::Nat);
+    }
+
+    #[test]
+    fn validation_of_int_identity_uses_int_pool() {
+        // int_add(0, ?x) = ?x. Must pass validation using Int
+        // bindings (not Nat — the kernel's INT_ADD doesn't accept
+        // Nat(0)). Phase J.2's domain detection routes the binding
+        // pool correctly.
+        let rule = RewriteRule {
+            name: "int-add-id".into(),
+            lhs: apply(var(12), vec![Term::Number(Value::Int(0)), var(100)]),
+            rhs: var(100),
+        };
+        assert!(
+            is_empirically_valid(&rule, &[], 200, 8, 0),
+            "Int identity law must validate under domain-aware sampling"
+        );
+    }
+
+    #[test]
+    fn validation_is_deterministic_across_domains() {
+        // Same rule, same seed → same verdict regardless of how
+        // many times we call it.
+        let rule = RewriteRule {
+            name: "nat-add-id".into(),
+            lhs: apply(var(ADD), vec![nat(0), var(100)]),
+            rhs: var(100),
+        };
+        let v1 = is_empirically_valid(&rule, &[], 200, 8, 42);
+        let v2 = is_empirically_valid(&rule, &[], 200, 8, 42);
+        let v3 = is_empirically_valid(&rule, &[], 200, 8, 42);
+        assert_eq!(v1, v2);
+        assert_eq!(v2, v3);
+        assert!(v1);
     }
 
     #[test]

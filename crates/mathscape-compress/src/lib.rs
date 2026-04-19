@@ -17,7 +17,7 @@ pub use law_generator::{
     derive_laws_validated, derive_laws_with_cache,
     derive_laws_with_subterm_au, is_empirically_valid, is_rank2_shape,
     rank2_candidates_from_library, validate_candidates,
-    validate_candidates_ext, LawGenStats, MemoizingAntiUnifier,
+    validate_candidates_ext, Domain, LawGenStats, MemoizingAntiUnifier,
 };
 pub use antiunify::paired_subterm_anti_unify;
 pub use meta_gen::{CompositeGenerator, MetaPatternGenerator};
