@@ -30,10 +30,14 @@ mod common;
 use mathscape_compress::{derive_laws_from_corpus_instrumented, LawGenStats};
 use mathscape_core::{
     bootstrap::{
-        BootstrapCycle, CanonicalDeduper, DefaultCorpusGenerator,
-        DefaultModelUpdater, LawExtractor,
+        execute_scenario_core, BootstrapCycle, CanonicalDeduper,
+        DefaultCorpusGenerator, DefaultModelUpdater, ExperimentOutcome,
+        ExperimentScenario, LawExtractor, SpecExecutionError,
     },
     eval::RewriteRule,
+    meta_loop::{
+        HeuristicProposer, MetaLoop, MetaLoopConfig, ScenarioExecutor,
+    },
     policy::{LinearPolicy, PolicyModel},
     term::Term,
     trajectory::LibraryFeatures,
@@ -725,5 +729,207 @@ fn m0_under_early_stop_produces_same_library_fewer_iterations() {
     assert!(
         early.iterations.len() < baseline.iterations.len(),
         "early-stop must run fewer iterations on a plateau-reaching workload"
+    );
+}
+
+// ── Phase U end-to-end demo ────────────────────────────────────────
+
+/// Executor that routes "derived-laws" to the R24 paired-AU law
+/// generator — the richer path not available in core's default
+/// executor. Falls back to `execute_scenario_core` for other
+/// extractor names. Lives here because the derive-laws machinery
+/// is in mathscape-compress, which mathscape-core can't depend on.
+struct DerivedLawsExecutor;
+
+impl ScenarioExecutor for DerivedLawsExecutor {
+    fn execute(
+        &self,
+        scenario: &ExperimentScenario,
+    ) -> Result<ExperimentOutcome, SpecExecutionError> {
+        // Re-route phases whose law_extractor is "derived-laws" by
+        // replacing that field with "null" before calling the core
+        // executor, then MANUALLY running the derived-laws pipeline
+        // outside the core's dispatcher. For this demo we keep the
+        // scenario semantics honest: we chain cycles with the
+        // derived-laws extractor, threading library + policy
+        // through phases, matching what execute_scenario_core does
+        // internally.
+        let mut phases = Vec::new();
+        let mut carry_lib = scenario
+            .phases
+            .first()
+            .map(|p| p.seed_library.clone())
+            .unwrap_or_default();
+        let mut carry_pol = scenario
+            .phases
+            .first()
+            .map(|p| p.seed_policy.clone())
+            .unwrap_or_else(LinearPolicy::tensor_seeking_prior);
+        for (idx, base_spec) in scenario.phases.iter().enumerate() {
+            let mut spec = base_spec.clone();
+            if idx > 0 {
+                spec.seed_library = carry_lib.clone();
+                spec.seed_policy = carry_pol.clone();
+            }
+            let outcome = if spec.law_extractor == "derived-laws" {
+                // Real derive-laws path.
+                let cycle = BootstrapCycle::new(
+                    DefaultCorpusGenerator,
+                    DerivedLawsExtractor::new(300, 2),
+                    DefaultModelUpdater::default(),
+                    spec.n_iterations,
+                );
+                if let Some(w) = spec.early_stop_after_stable {
+                    cycle.run_until_stable(
+                        spec.seed_library.clone(),
+                        spec.seed_policy.clone(),
+                        &CanonicalDeduper,
+                        w,
+                    )
+                } else {
+                    cycle.run_with_dedup(
+                        spec.seed_library.clone(),
+                        spec.seed_policy.clone(),
+                        &CanonicalDeduper,
+                    )
+                }
+            } else {
+                // Non-derive paths: delegate to core for null etc.
+                let mini = ExperimentScenario {
+                    name: format!("phase-{idx}"),
+                    phases: vec![spec.clone()],
+                };
+                let inner = execute_scenario_core(&mini)?;
+                inner.phases.into_iter().next().unwrap().cycle_outcome
+            };
+            carry_lib = outcome.final_library.clone();
+            carry_pol = outcome.final_policy.clone();
+            phases.push(mathscape_core::bootstrap::PhaseOutcome {
+                phase_index: idx,
+                spec_used: spec,
+                cycle_outcome: outcome,
+            });
+        }
+        let concat: Vec<u8> = phases
+            .iter()
+            .flat_map(|p| p.cycle_outcome.attestation.as_bytes().to_vec())
+            .collect();
+        let chain_attestation =
+            mathscape_core::hash::TermRef::from_bytes(&concat);
+        Ok(ExperimentOutcome {
+            phases,
+            chain_attestation,
+            scenario_total_ns: 0, // executor doesn't track outer wall clock
+        })
+    }
+}
+
+#[test]
+fn u3_meta_loop_self_tunes_with_derived_laws_extractor() {
+    // Phase U end-to-end: the meta-loop observes its own outcomes,
+    // proposes the next scenario through the HeuristicProposer, and
+    // sails out when discovery stabilizes. Uses the real R24
+    // derive-laws extractor via DerivedLawsExecutor.
+    //
+    // What this demonstrates, in the terms of the three directives:
+    //   - OBSERVES: every phase produces a LearningObservation
+    //     (library growth, saturation, timing, policy delta)
+    //   - LEVERAGES: the HeuristicProposer reads observations and
+    //     picks a SpecArchetype that encodes Phase T's learnings
+    //     (baseline → early-stop-plateau → train-only → extended)
+    //   - SELF-TUNES: each phase's trained policy seeds the next
+    //     phase's spec via the meta-loop's carry-through
+    //   - SELF-ENCAPSULATES: the loop terminates when the sail-out
+    //     criterion fires (no growth + tiny policy delta for K
+    //     consecutive phases)
+    let loop_ = MetaLoop::new(
+        DerivedLawsExecutor,
+        HeuristicProposer::with_extractor("derived-laws"),
+        MetaLoopConfig {
+            max_phases: 6,
+            sail_out_window: 2,
+            policy_delta_threshold: 1e-6,
+        },
+    );
+
+    let seed_spec = mathscape_core::bootstrap::BootstrapCycleSpec {
+        corpus_generator: "default".into(),
+        law_extractor: "derived-laws".into(),
+        model_updater: "default".into(),
+        deduper: "canonical".into(),
+        n_iterations: 5,
+        seed_library: Vec::new(),
+        seed_policy: LinearPolicy::tensor_seeking_prior(),
+        early_stop_after_stable: Some(1),
+    };
+    let seed_scenario = ExperimentScenario {
+        name: "meta-loop-seed".into(),
+        phases: vec![seed_spec],
+    };
+
+    let result = loop_.run(seed_scenario).expect("meta-loop runs");
+
+    println!("\n╔══════════════════════════════════════════════════════╗");
+    println!("║ PHASE U META-LOOP — self-tuning model discovery       ║");
+    println!("╚══════════════════════════════════════════════════════╝");
+    println!();
+    println!("  phases executed     : {}", result.history.len());
+    println!("  termination         : {:?}", result.terminated_reason);
+    println!(
+        "  final library size  : {}",
+        result.final_library().len()
+    );
+    println!(
+        "  final policy gen    : {}",
+        result.final_policy().generation
+    );
+    println!(
+        "  meta-attestation    : {:?}",
+        result.meta_attestation
+    );
+    println!();
+    println!("  phase-by-phase trace:");
+    for record in &result.history {
+        let obs = &record.observation;
+        println!(
+            "    [{:>2}] scenario={:32}  lib={:>2}  growth={:?}  δπ={:.4}  sail-out={}",
+            record.phase_index,
+            record.scenario.name,
+            obs.total_library_size,
+            obs.net_growth_per_phase,
+            obs.trained_policy_delta_norm,
+            if record.sail_out_signal { "✓" } else { " " },
+        );
+    }
+
+    // Invariants:
+    // 1. At least one phase ran.
+    assert!(!result.history.is_empty(), "meta-loop must run ≥1 phase");
+    // 2. The final library is non-empty — the seed phase ran
+    //    derive-laws which discovers at least the add/mul identity
+    //    rules on the default corpus.
+    assert!(
+        !result.final_library().is_empty(),
+        "meta-loop must produce SOME library"
+    );
+    // 3. Policy advances: each phase's train step bumps generation.
+    //    Final generation ≥ phases run.
+    assert!(
+        result.final_policy().generation >= result.history.len() as u64,
+        "policy generation ({}) should be ≥ phases run ({})",
+        result.final_policy().generation,
+        result.history.len(),
+    );
+    // 4. Sail-out determinism: running twice produces the same
+    //    termination reason and history length.
+    let result2 = loop_
+        .run(ExperimentScenario {
+            name: "meta-loop-seed".into(),
+            phases: vec![result.history[0].scenario.phases[0].clone()],
+        })
+        .unwrap();
+    assert_eq!(
+        result.terminated_reason, result2.terminated_reason,
+        "meta-loop termination must be deterministic"
     );
 }

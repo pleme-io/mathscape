@@ -16,6 +16,8 @@ pub mod form_tree;
 pub mod hash;
 pub mod lifecycle;
 pub mod meta;
+pub mod meta_loop;
+
 pub mod migration;
 pub mod optimizer;
 pub mod parse;
@@ -61,6 +63,11 @@ pub use bootstrap::{
     SpecExecutionError, SubsumptionDeduper,
 };
 pub use optimizer::{sgd_step_int, sgd_step_tensor};
+pub use meta_loop::{
+    DefaultScenarioExecutor, HeuristicProposer, MetaLoop, MetaLoopConfig,
+    MetaLoopOutcome, MetaPhaseRecord, ScenarioExecutor, ScenarioProposer,
+    SpecArchetype, TerminationReason,
+};
 pub use bettyfine::{bettyfine_library, standard_bettyfine_cardinality, OperatorSpec};
 pub use event::{Event, EventCategory, StatusAdvance};
 pub use form_tree::{

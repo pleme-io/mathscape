@@ -681,8 +681,14 @@ impl ExperimentOutcome {
         } else {
             0.0
         };
+        let seed_library_size = self
+            .phases
+            .first()
+            .map(|p| p.spec_used.seed_library.len())
+            .unwrap_or(0);
         LearningObservation {
             total_library_size,
+            seed_library_size,
             net_growth_per_phase: growth,
             saturation_phase_index,
             extract_ns_per_iteration,
@@ -704,10 +710,20 @@ impl ExperimentOutcome {
 pub struct LearningObservation {
     /// Rule count in the final (last phase's) library.
     pub total_library_size: usize,
-    /// Per-phase library growth (same values as
-    /// `ExperimentOutcome::per_phase_growth`).
+    /// Rule count in the first phase's seed_library. With this,
+    /// `total_library_size - seed_library_size` is the TRUE net
+    /// growth across the scenario regardless of how the inner
+    /// `net_growth_per_phase` vector is computed (which starts
+    /// from 0 per-phase and over-counts single-phase scenarios
+    /// with pre-seeded libraries).
+    pub seed_library_size: usize,
+    /// Per-phase library growth computed as
+    /// `final_size - prev_phase_final_size`, seeded from 0. This
+    /// is the within-scenario delta — use `net_growth_true()` to
+    /// account for the starting seed.
     pub net_growth_per_phase: Vec<usize>,
-    /// Index of the first phase that added zero rules, if any.
+    /// Index of the first phase that added zero rules relative to
+    /// the immediately-preceding phase's final library.
     /// `None` = every phase grew the library (no plateau detected).
     pub saturation_phase_index: Option<usize>,
     /// Flattened `extract_ns` across every iteration in every
@@ -725,9 +741,18 @@ pub struct LearningObservation {
 
 impl LearningObservation {
     /// Did the scenario's library grow at all?
+    /// True when the final library is larger than the seed —
+    /// regardless of within-scenario phase bookkeeping.
     #[must_use]
     pub fn made_any_progress(&self) -> bool {
-        self.net_growth_per_phase.iter().any(|&g| g > 0)
+        self.total_library_size > self.seed_library_size
+    }
+
+    /// True net growth across the scenario (final - seed).
+    #[must_use]
+    pub fn net_growth(&self) -> usize {
+        self.total_library_size
+            .saturating_sub(self.seed_library_size)
     }
 
     /// Rules discovered per total wall-clock millisecond.
@@ -2229,8 +2254,11 @@ mod tests {
         let obs = outcome.observation();
 
         assert_eq!(obs.total_library_size, 1);
-        // Seed library has 1 rule; no phase adds — growth [1, 0]:
-        // phase 0 "grows" from 0 to 1 (the seed); phase 1 from 1 to 1.
+        assert_eq!(obs.seed_library_size, 1);
+        assert_eq!(obs.net_growth(), 0, "no net growth over seed");
+        // Internal per-phase bookkeeping still counts first-phase
+        // "growth" from the 0 starting baseline — seed_library_size
+        // is the field that tells the truth for meta-loop callers.
         assert_eq!(obs.net_growth_per_phase, vec![1, 0]);
         assert_eq!(obs.saturation_phase_index, Some(1));
         assert_eq!(obs.scenario_total_ns, outcome.scenario_total_ns);
@@ -2258,10 +2286,12 @@ mod tests {
         };
         let outcome = execute_scenario_core(&scenario).unwrap();
         let obs = outcome.observation();
-        // Phase 0 seeds 1 rule (growth 1); phase 1 adds nothing.
-        // made_any_progress is TRUE because phase 0 "grew" by 1.
-        assert!(obs.made_any_progress());
-        // But policy didn't move (null updater).
+        // Seed=1, null extractor adds nothing, final=1 → no true
+        // progress (total == seed).
+        assert!(!obs.made_any_progress());
+        assert_eq!(obs.net_growth(), 0);
+        assert_eq!(obs.seed_library_size, 1);
+        // Policy didn't move (null updater).
         assert!(obs.trained_policy_delta_norm < 1e-12);
     }
 
@@ -2296,6 +2326,7 @@ mod tests {
     fn observation_bincode_roundtrip() {
         let obs = LearningObservation {
             total_library_size: 7,
+            seed_library_size: 2,
             net_growth_per_phase: vec![3, 2, 1, 0],
             saturation_phase_index: Some(3),
             extract_ns_per_iteration: vec![100, 200, 300],
