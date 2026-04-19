@@ -1167,6 +1167,330 @@ pub fn mathematician_curriculum() -> Vec<CurriculumProblem> {
         });
     }
 
+    // ── Subdomain 14 (FRONTIER): zero-absorber (5 probes) ───────
+    //
+    // Mul by zero always yields zero, regardless of the other
+    // operand. The motor's identity rules DON'T cover this —
+    // `mul(0, ?x) → 0` is a distinct law from `mul(1, ?x) → ?x`.
+    // Frontier probe: does kernel constant-folding catch it on
+    // the Nat/Int side? Does a symbolic probe score?
+    let sd_zero = "zero-absorber";
+    let zero_cases: Vec<(&str, Term, Term)> = vec![
+        // Concrete — should fold.
+        ("zero-mul-concrete", apply(MUL, vec![nat(0), nat(42)]), nat(0)),
+        ("zero-mul-right", apply(MUL, vec![nat(99), nat(0)]), nat(0)),
+        // Symbolic — genuinely new.
+        ("zero-mul-sym", apply(MUL, vec![nat(0), pv(100)]), nat(0)),
+        ("zero-mul-sym-right", apply(MUL, vec![pv(100), nat(0)]), nat(0)),
+        // Nested: mul(0, _) inside another op.
+        (
+            "zero-absorb-under-add",
+            apply(ADD, vec![apply(MUL, vec![nat(0), pv(100)]), nat(7)]),
+            nat(7),
+        ),
+    ];
+    for (id, input, expected) in zero_cases {
+        curriculum.push(CurriculumProblem {
+            subdomain: sd_zero,
+            problem: MathProblem {
+                id: id.into(),
+                description: id.into(),
+                input,
+                expected,
+                step_limit: 40,
+            },
+        });
+    }
+
+    // ── Subdomain 15 (FRONTIER): distributivity (5 probes) ──────
+    //
+    // mul(a, add(b, c)) == add(mul(a, b), mul(a, c)). Concrete
+    // probes test whether the kernel evaluates both forms to
+    // the same value. Symbolic probes test whether the motor
+    // can discover the distributive law.
+    let sd_dist = "distributivity";
+    let dist_cases: Vec<(&str, Term, Term)> = vec![
+        // Concrete: mul(2, add(3, 4)) = 14 AND add(mul(2, 3), mul(2, 4)) = 14
+        (
+            "dist-concrete-factored",
+            apply(MUL, vec![nat(2), apply(ADD, vec![nat(3), nat(4)])]),
+            nat(14),
+        ),
+        (
+            "dist-concrete-expanded",
+            apply(
+                ADD,
+                vec![apply(MUL, vec![nat(2), nat(3)]), apply(MUL, vec![nat(2), nat(4)])],
+            ),
+            nat(14),
+        ),
+        (
+            "dist-concrete-3way",
+            apply(MUL, vec![nat(3), apply(ADD, vec![nat(2), apply(ADD, vec![nat(1), nat(4)])])]),
+            nat(21),
+        ),
+        // Identity composed with distribution:
+        // mul(1, add(0, ?x)) = mul(1, ?x) = ?x
+        (
+            "dist-with-id",
+            apply(
+                MUL,
+                vec![nat(1), apply(ADD, vec![nat(0), pv(100)])],
+            ),
+            pv(100),
+        ),
+        // Zero absorption inside expansion:
+        // mul(0, add(?x, ?y)) = 0
+        (
+            "dist-with-zero",
+            apply(
+                MUL,
+                vec![nat(0), apply(ADD, vec![pv(100), pv(200)])],
+            ),
+            nat(0),
+        ),
+    ];
+    for (id, input, expected) in dist_cases {
+        curriculum.push(CurriculumProblem {
+            subdomain: sd_dist,
+            problem: MathProblem {
+                id: id.into(),
+                description: id.into(),
+                input,
+                expected,
+                step_limit: 50,
+            },
+        });
+    }
+
+    // ── Subdomain 16: float-arithmetic (5 probes) ───────────────
+    //
+    // Float ops have been in the substrate since R18/R19. Let
+    // the curriculum actually probe them. Kernel should fold
+    // concrete float arithmetic.
+    const FLOAT_ADD: u32 = 31;
+    const FLOAT_MUL: u32 = 32;
+    let float_val = |f: f64| Term::Number(Value::from_f64(f).unwrap());
+    let float_cases: Vec<(&str, Term, Term)> = vec![
+        (
+            "float-add-concrete",
+            apply(FLOAT_ADD, vec![float_val(1.5), float_val(2.5)]),
+            float_val(4.0),
+        ),
+        (
+            "float-mul-concrete",
+            apply(FLOAT_MUL, vec![float_val(2.0), float_val(3.5)]),
+            float_val(7.0),
+        ),
+        (
+            "float-add-zero",
+            apply(FLOAT_ADD, vec![float_val(0.0), float_val(7.25)]),
+            float_val(7.25),
+        ),
+        (
+            "float-mul-one",
+            apply(FLOAT_MUL, vec![float_val(1.0), float_val(42.0)]),
+            float_val(42.0),
+        ),
+        (
+            "float-chain",
+            apply(
+                FLOAT_ADD,
+                vec![
+                    apply(FLOAT_MUL, vec![float_val(2.0), float_val(3.0)]),
+                    float_val(4.0),
+                ],
+            ),
+            float_val(10.0),
+        ),
+    ];
+    let sd_float = "float-arithmetic";
+    for (id, input, expected) in float_cases {
+        curriculum.push(CurriculumProblem {
+            subdomain: sd_float,
+            problem: MathProblem {
+                id: id.into(),
+                description: id.into(),
+                input,
+                expected,
+                step_limit: 40,
+            },
+        });
+    }
+
+    // ── Subdomain 17: tensor-2d (5 probes) ──────────────────────
+    //
+    // 2D tensor operations: transpose, reshape, matmul. The
+    // substrate has these builtins (R16); the curriculum has
+    // never tested them.
+    const TENSOR_TRANSPOSE: u32 = 27;
+    const TENSOR_RESHAPE: u32 = 28;
+    const TENSOR_MATMUL: u32 = 26;
+    let tensor2d_cases: Vec<(&str, Term, Term)> = vec![
+        // Transpose of [[1, 2], [3, 4]] is [[1, 3], [2, 4]]
+        // Stored row-major: [1, 2, 3, 4] → [1, 3, 2, 4]
+        (
+            "tensor-transpose-2x2",
+            apply(
+                TENSOR_TRANSPOSE,
+                vec![tensor(vec![2, 2], vec![1, 2, 3, 4])],
+            ),
+            tensor(vec![2, 2], vec![1, 3, 2, 4]),
+        ),
+        // Transpose is involutive: T(T(x)) = x
+        (
+            "tensor-transpose-involutive",
+            apply(
+                TENSOR_TRANSPOSE,
+                vec![apply(
+                    TENSOR_TRANSPOSE,
+                    vec![tensor(vec![2, 3], vec![1, 2, 3, 4, 5, 6])],
+                )],
+            ),
+            tensor(vec![2, 3], vec![1, 2, 3, 4, 5, 6]),
+        ),
+        // Reshape 1D → 2D
+        (
+            "tensor-reshape-1d-to-2d",
+            apply(
+                TENSOR_RESHAPE,
+                vec![
+                    tensor(vec![6], vec![1, 2, 3, 4, 5, 6]),
+                    tensor(vec![2], vec![2, 3]),
+                ],
+            ),
+            tensor(vec![2, 3], vec![1, 2, 3, 4, 5, 6]),
+        ),
+        // Matmul: [[1,2],[3,4]] @ [[5,6],[7,8]] = [[19,22],[43,50]]
+        (
+            "tensor-matmul-2x2",
+            apply(
+                TENSOR_MATMUL,
+                vec![
+                    tensor(vec![2, 2], vec![1, 2, 3, 4]),
+                    tensor(vec![2, 2], vec![5, 6, 7, 8]),
+                ],
+            ),
+            tensor(vec![2, 2], vec![19, 22, 43, 50]),
+        ),
+        // Matmul with identity-shaped 2D:
+        // [[1,0],[0,1]] @ [[a,b],[c,d]] = [[a,b],[c,d]]
+        (
+            "tensor-matmul-identity-left",
+            apply(
+                TENSOR_MATMUL,
+                vec![
+                    tensor(vec![2, 2], vec![1, 0, 0, 1]),
+                    tensor(vec![2, 2], vec![7, 8, 9, 10]),
+                ],
+            ),
+            tensor(vec![2, 2], vec![7, 8, 9, 10]),
+        ),
+    ];
+    let sd_tensor2d = "tensor-2d";
+    for (id, input, expected) in tensor2d_cases {
+        curriculum.push(CurriculumProblem {
+            subdomain: sd_tensor2d,
+            problem: MathProblem {
+                id: id.into(),
+                description: id.into(),
+                input,
+                expected,
+                step_limit: 50,
+            },
+        });
+    }
+
+    // ── Subdomain 18: mixed-depth-concrete (5 probes) ──────────
+    //
+    // Deep concrete arithmetic with varied operator mixing.
+    // Stress-tests that the kernel's step-limited evaluation
+    // reaches the right answer regardless of nesting shape.
+    let mixed_cases: Vec<(&str, Term, Term)> = vec![
+        // (((2 * 3) + 4) * 5) = 50
+        (
+            "mixed-left-heavy",
+            apply(
+                MUL,
+                vec![
+                    apply(
+                        ADD,
+                        vec![apply(MUL, vec![nat(2), nat(3)]), nat(4)],
+                    ),
+                    nat(5),
+                ],
+            ),
+            nat(50),
+        ),
+        // (2 * (3 + (4 * 5))) = 46
+        (
+            "mixed-right-heavy",
+            apply(
+                MUL,
+                vec![
+                    nat(2),
+                    apply(
+                        ADD,
+                        vec![nat(3), apply(MUL, vec![nat(4), nat(5)])],
+                    ),
+                ],
+            ),
+            nat(46),
+        ),
+        // add(mul(2, 3), mul(4, add(5, 6))) = 6 + 44 = 50
+        (
+            "mixed-balanced",
+            apply(
+                ADD,
+                vec![
+                    apply(MUL, vec![nat(2), nat(3)]),
+                    apply(
+                        MUL,
+                        vec![nat(4), apply(ADD, vec![nat(5), nat(6)])],
+                    ),
+                ],
+            ),
+            nat(50),
+        ),
+        // int chains with negatives
+        (
+            "mixed-int-signed",
+            apply(
+                INT_ADD,
+                vec![
+                    apply(INT_MUL, vec![int(3), int(-4)]),
+                    apply(INT_NEG, vec![int(-2)]),
+                ],
+            ),
+            int(-10),
+        ),
+        // identity laws composed with mixed arithmetic
+        (
+            "mixed-id-with-arithmetic",
+            apply(
+                ADD,
+                vec![
+                    nat(0),
+                    apply(MUL, vec![nat(1), apply(ADD, vec![nat(3), nat(7)])]),
+                ],
+            ),
+            nat(10),
+        ),
+    ];
+    let sd_mixed = "mixed-depth-concrete";
+    for (id, input, expected) in mixed_cases {
+        curriculum.push(CurriculumProblem {
+            subdomain: sd_mixed,
+            problem: MathProblem {
+                id: id.into(),
+                description: id.into(),
+                input,
+                expected,
+                step_limit: 80,
+            },
+        });
+    }
+
     curriculum
 }
 
