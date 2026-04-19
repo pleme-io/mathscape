@@ -20,6 +20,7 @@ pub mod lifecycle;
 pub mod mathscape_map;
 pub mod meta;
 pub mod meta_loop;
+pub mod streaming_policy;
 
 pub mod migration;
 pub mod optimizer;
@@ -82,6 +83,7 @@ pub use meta_loop::{
     MetaLoopConfig, MetaLoopOutcome, MetaPhaseRecord, ScenarioExecutor,
     ScenarioProposer, SpecArchetype, TerminationReason,
 };
+pub use streaming_policy::StreamingPolicyTrainer;
 pub use bettyfine::{bettyfine_library, standard_bettyfine_cardinality, OperatorSpec};
 pub use event::{Event, EventCategory, StatusAdvance};
 pub use form_tree::{
