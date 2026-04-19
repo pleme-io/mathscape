@@ -549,6 +549,98 @@ fn m0_through_mn_from_a_lisp_scenario() {
 }
 
 #[test]
+fn r39_multi_phase_scenario_early_stop_cascades() {
+    // R39: demonstrate that R37's early-stop compounds across
+    // multiple training phases. Four phases, each with upper bound
+    // of 5 iterations. Without early-stop every phase runs all 5
+    // iterations (20 total). With early-stop=1, each phase plateaus
+    // after ~3 iterations (12 total) — the savings multiply.
+    //
+    // This models the typical ExperimentScenario use case: long
+    // chains of training phases where only the FIRST iteration of
+    // each phase tends to discover anything new (libraries saturate
+    // fast under CanonicalDeduper). Early-stop turns "run to budget"
+    // into "stop when the work stops paying off" — at the phase
+    // level AND cumulatively.
+    use std::time::Instant;
+
+    let chain_lengths = 4usize;
+
+    // Baseline: run each of 4 phases for its full 5 iterations.
+    // Library + policy carry over phase-to-phase (manual chain
+    // because execute_scenario_core's core executor doesn't know
+    // the derived-laws extractor — the axiom-bridge does).
+    let t_baseline = Instant::now();
+    let mut lib_baseline = Vec::new();
+    let mut pol_baseline = LinearPolicy::tensor_seeking_prior();
+    let mut baseline_iters = 0usize;
+    for _ in 0..chain_lengths {
+        let cycle = BootstrapCycle::new(
+            DefaultCorpusGenerator,
+            DerivedLawsExtractor::new(300, 2),
+            DefaultModelUpdater::default(),
+            5,
+        );
+        let outcome =
+            cycle.run_with_dedup(lib_baseline, pol_baseline, &CanonicalDeduper);
+        baseline_iters += outcome.iterations.len();
+        lib_baseline = outcome.final_library;
+        pol_baseline = outcome.final_policy;
+    }
+    let baseline_elapsed = t_baseline.elapsed();
+
+    // Early-stop variant: same 4 phases, each with window=1.
+    let t_early = Instant::now();
+    let mut lib_early = Vec::new();
+    let mut pol_early = LinearPolicy::tensor_seeking_prior();
+    let mut early_iters = 0usize;
+    for _ in 0..chain_lengths {
+        let cycle = BootstrapCycle::new(
+            DefaultCorpusGenerator,
+            DerivedLawsExtractor::new(300, 2),
+            DefaultModelUpdater::default(),
+            5,
+        );
+        let outcome =
+            cycle.run_until_stable(lib_early, pol_early, &CanonicalDeduper, 1);
+        early_iters += outcome.iterations.len();
+        lib_early = outcome.final_library;
+        pol_early = outcome.final_policy;
+    }
+    let early_elapsed = t_early.elapsed();
+
+    println!("\n── R39 SCENARIO-LEVEL EARLY-STOP (cascading wins) ────");
+    println!(
+        "  baseline  : {:>8.3} ms, {} iterations, library = {}",
+        baseline_elapsed.as_secs_f64() * 1000.0,
+        baseline_iters,
+        lib_baseline.len(),
+    );
+    println!(
+        "  early-stop: {:>8.3} ms, {} iterations, library = {}",
+        early_elapsed.as_secs_f64() * 1000.0,
+        early_iters,
+        lib_early.len(),
+    );
+    let speedup = baseline_elapsed.as_secs_f64() / early_elapsed.as_secs_f64();
+    let iter_savings = baseline_iters.saturating_sub(early_iters);
+    println!(
+        "  savings   : {speedup:>5.2}x wall-clock, {iter_savings} iterations skipped",
+    );
+
+    // Same final library: early-stop never loses discoveries.
+    assert_eq!(
+        lib_baseline.len(),
+        lib_early.len(),
+        "chained early-stop must not lose any rules"
+    );
+    assert!(
+        early_iters < baseline_iters,
+        "early-stop must save iterations across the chain"
+    );
+}
+
+#[test]
 fn m0_under_early_stop_produces_same_library_fewer_iterations() {
     // R37 efficiency demo: running the exact same cycle under
     // `run_until_stable(..., window=1)` instead of `run_with_dedup`
