@@ -390,5 +390,19 @@
         mathscape-cli = self.packages.${final.system}.mathscape-cli;
         mathscape-mcp = self.packages.${final.system}.mathscape-mcp;
       };
+
+      # ── Home Manager module ─────────────────────────────────────────
+      #
+      # blackmatter.components.mathscape = {
+      #   enable = true;
+      #   mcp.enable = true;
+      # };
+      #
+      # Deploys:
+      #   - ~/.config/mathscape-mcp/mathscape-mcp.yaml  (shikumi-style)
+      #   - anvil.mcp.servers.mathscape  (Claude Code sees the tools)
+      homeManagerModules.default = import ./module {
+        mathscapePackages = self.packages;
+      };
     };
 }
