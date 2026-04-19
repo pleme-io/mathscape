@@ -779,6 +779,155 @@ pub fn mathematician_curriculum() -> Vec<CurriculumProblem> {
         });
     }
 
+    // ── Subdomain 7 (FRONTIER): right-identity ──────────────────
+    //
+    // The library today discovers `add(0, ?x) → ?x` (LEFT
+    // identity). This subdomain tests the RIGHT variant
+    // `add(?x, 0) → ?x` — semantically equivalent under
+    // commutativity, but a DIFFERENT rewrite pattern. If the
+    // motor's extractor finds only one orientation, these probes
+    // score 0 — the gap is where the frontier sits. If it finds
+    // both orientations (e.g. by AC canonicalization hitting the
+    // same normal form), they pass.
+    let sd_right = "right-identity";
+    let right_cases: Vec<(&str, Term, Term)> = vec![
+        // add(?x, 0) — symbolic right
+        ("right-add-sym", apply(ADD, vec![pv(100), nat(0)]), pv(100)),
+        // mul(?x, 1)
+        ("right-mul-sym", apply(MUL, vec![pv(100), nat(1)]), pv(100)),
+        // Different var id
+        ("right-add-sym-v200", apply(ADD, vec![pv(200), nat(0)]), pv(200)),
+        // Nested right
+        (
+            "right-add-nested",
+            apply(ADD, vec![apply(ADD, vec![pv(100), nat(0)]), nat(0)]),
+            pv(100),
+        ),
+        // Concrete right — if AC folds, 5+0 = 5
+        ("right-add-concrete", apply(ADD, vec![nat(5), nat(0)]), nat(5)),
+    ];
+    for (id, input, expected) in right_cases {
+        curriculum.push(CurriculumProblem {
+            subdomain: sd_right,
+            problem: MathProblem {
+                id: id.into(),
+                description: id.into(),
+                input,
+                expected,
+                step_limit: 30,
+            },
+        });
+    }
+
+    // ── Subdomain 8 (FRONTIER): deep-nested identity ───────────
+    //
+    // Stress the existing identity rules at depth. Four or five
+    // layers of add(0, …) / mul(1, …) should collapse
+    // progressively. These probes FAIL only if the eval step
+    // limit is too low for the resulting chain — a diagnostic
+    // for "is the motor's discovered library efficient enough
+    // to reduce deep terms?"
+    let sd_deep = "deep-nested-identity";
+    let deep_cases: Vec<(&str, Term, Term)> = vec![
+        (
+            "deep-add-4",
+            apply(
+                ADD,
+                vec![
+                    nat(0),
+                    apply(
+                        ADD,
+                        vec![
+                            nat(0),
+                            apply(
+                                ADD,
+                                vec![nat(0), apply(ADD, vec![nat(0), pv(100)])],
+                            ),
+                        ],
+                    ),
+                ],
+            ),
+            pv(100),
+        ),
+        (
+            "deep-mul-4",
+            apply(
+                MUL,
+                vec![
+                    nat(1),
+                    apply(
+                        MUL,
+                        vec![
+                            nat(1),
+                            apply(
+                                MUL,
+                                vec![nat(1), apply(MUL, vec![nat(1), pv(100)])],
+                            ),
+                        ],
+                    ),
+                ],
+            ),
+            pv(100),
+        ),
+        // Mixed 5-deep: alternating add/mul identities
+        (
+            "deep-mixed-5",
+            apply(
+                ADD,
+                vec![
+                    nat(0),
+                    apply(
+                        MUL,
+                        vec![
+                            nat(1),
+                            apply(
+                                ADD,
+                                vec![nat(0), apply(MUL, vec![nat(1), pv(100)])],
+                            ),
+                        ],
+                    ),
+                ],
+            ),
+            pv(100),
+        ),
+        // Concrete — Nat-arithmetic under identity chain
+        (
+            "deep-concrete-chain",
+            apply(
+                ADD,
+                vec![
+                    nat(0),
+                    apply(MUL, vec![nat(1), apply(ADD, vec![nat(3), nat(4)])]),
+                ],
+            ),
+            nat(7),
+        ),
+        // Far-right concrete
+        (
+            "deep-concrete-right",
+            apply(
+                MUL,
+                vec![
+                    nat(1),
+                    apply(ADD, vec![apply(MUL, vec![nat(2), nat(3)]), nat(0)]),
+                ],
+            ),
+            nat(6),
+        ),
+    ];
+    for (id, input, expected) in deep_cases {
+        curriculum.push(CurriculumProblem {
+            subdomain: sd_deep,
+            problem: MathProblem {
+                id: id.into(),
+                description: id.into(),
+                input,
+                expected,
+                step_limit: 50,
+            },
+        });
+    }
+
     curriculum
 }
 
