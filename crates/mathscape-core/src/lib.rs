@@ -23,6 +23,7 @@ pub mod mathscape_map;
 pub mod meta;
 pub mod meta_loop;
 pub mod streaming_policy;
+pub mod task;
 
 pub mod migration;
 pub mod optimizer;
@@ -92,6 +93,10 @@ pub use math_problem::{
     BenchmarkConsumer, BenchmarkReport, MathProblem, ProblemResult,
 };
 pub use streaming_policy::StreamingPolicyTrainer;
+pub use task::{
+    as_math_tasks, run_benchmark as run_task_benchmark, MathDomain, Task,
+    TaskDomain, TaskReport, TaskResult,
+};
 pub use bettyfine::{bettyfine_library, standard_bettyfine_cardinality, OperatorSpec};
 pub use event::{Event, EventCategory, StatusAdvance};
 pub use form_tree::{
