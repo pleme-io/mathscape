@@ -374,6 +374,414 @@ pub fn harder_problem_set() -> Vec<MathProblem> {
     ]
 }
 
+// ════════════════════════════════════════════════════════════════
+// Phase X — The Mathematician's Curriculum (2026-04-19)
+//
+// An excellent mathematician does not memorize answers; they
+// master *subdomains* and compose across them. This curriculum
+// is a tiered ladder that the machine can climb from the kernel
+// upward. Each problem is tagged with a subdomain so we can
+// measure per-subdomain mastery, not just an overall number.
+//
+// Subdomains:
+//   1. arithmetic-nat   — concrete additions, multiplications,
+//                         nesting over Peano naturals
+//   2. arithmetic-int   — negation, subtraction, signed combo
+//   3. symbolic-nat     — the identity laws on Nat operators
+//                         (needs add-id / mul-id discovered)
+//   4. tensor-algebra   — zeros/ones identities on tensor ops
+//   5. compound         — multi-step reductions mixing operators
+//   6. generalization   — the same law applied at multiple
+//                         concrete instantiations; all-or-nothing
+//
+// Each of the 6 subdomains carries 5+ problems for a total of
+// 30+. Scoring produces a per-subdomain breakdown so the machine
+// can see WHERE it's strong and WHERE it's weak.
+// ════════════════════════════════════════════════════════════════
+
+/// One problem tagged with its subdomain.
+#[derive(Debug, Clone)]
+pub struct CurriculumProblem {
+    pub subdomain: &'static str,
+    pub problem: MathProblem,
+}
+
+/// Full curriculum report with per-subdomain breakdown.
+#[derive(Debug, Clone)]
+pub struct CurriculumReport {
+    pub total: BenchmarkReport,
+    pub per_subdomain: std::collections::BTreeMap<&'static str, BenchmarkReport>,
+}
+
+impl CurriculumReport {
+    /// Human-readable per-subdomain summary.
+    pub fn summary(&self) -> String {
+        let mut s = format!(
+            "curriculum: {}/{} solved ({:.0}%)",
+            self.total.solved_count,
+            self.total.problem_set_size,
+            self.total.solved_fraction() * 100.0
+        );
+        for (subdomain, report) in &self.per_subdomain {
+            s.push_str(&format!(
+                "\n  {}: {}/{} ({:.0}%)",
+                subdomain,
+                report.solved_count,
+                report.problem_set_size,
+                report.solved_fraction() * 100.0
+            ));
+        }
+        s
+    }
+
+    /// Subdomains at which the model has fully mastered (100%).
+    pub fn mastered(&self) -> Vec<&'static str> {
+        self.per_subdomain
+            .iter()
+            .filter(|(_, r)| r.solved_fraction() >= 0.9999)
+            .map(|(k, _)| *k)
+            .collect()
+    }
+
+    /// Subdomains where the model scores zero (the frontier — where
+    /// the next most valuable learning can happen).
+    pub fn frontier(&self) -> Vec<&'static str> {
+        self.per_subdomain
+            .iter()
+            .filter(|(_, r)| r.solved_fraction() < 0.01)
+            .map(|(k, _)| *k)
+            .collect()
+    }
+}
+
+/// Run the full curriculum and produce a per-subdomain report.
+#[must_use]
+pub fn run_curriculum(
+    curriculum: &[CurriculumProblem],
+    library: &[RewriteRule],
+) -> CurriculumReport {
+    use std::collections::BTreeMap;
+    let mut all_results: Vec<ProblemResult> = Vec::with_capacity(curriculum.len());
+    let mut bucket: BTreeMap<&'static str, Vec<ProblemResult>> = BTreeMap::new();
+    for cp in curriculum {
+        let r = solve_problem(&cp.problem, library);
+        bucket.entry(cp.subdomain).or_default().push(r.clone());
+        all_results.push(r);
+    }
+    let total_solved = all_results.iter().filter(|r| r.solved).count();
+    let total = BenchmarkReport {
+        problem_set_size: all_results.len(),
+        solved_count: total_solved,
+        results: all_results,
+    };
+    let per_subdomain = bucket
+        .into_iter()
+        .map(|(k, v)| {
+            let solved = v.iter().filter(|r| r.solved).count();
+            (
+                k,
+                BenchmarkReport {
+                    problem_set_size: v.len(),
+                    solved_count: solved,
+                    results: v,
+                },
+            )
+        })
+        .collect();
+    CurriculumReport {
+        total,
+        per_subdomain,
+    }
+}
+
+/// The complete mathematician's curriculum — 32 problems across
+/// 6 subdomains. The machine's goal: score 100% on every
+/// subdomain. That is what "excellent mathematician" means for
+/// this substrate.
+#[must_use]
+pub fn mathematician_curriculum() -> Vec<CurriculumProblem> {
+    use crate::builtin::{ADD, MUL, TENSOR_ADD, TENSOR_MUL};
+    const INT_ADD: u32 = 12;
+    const INT_MUL: u32 = 13;
+    const INT_NEG: u32 = 14;
+    const INT_SUB: u32 = 15;
+
+    let apply = |h: u32, args: Vec<Term>| -> Term {
+        Term::Apply(Box::new(Term::Var(h)), args)
+    };
+    let nat = |n: u64| Term::Number(Value::Nat(n));
+    let int = |n: i64| Term::Number(Value::Int(n));
+    let tensor = |shape: Vec<usize>, data: Vec<i64>| {
+        Term::Number(Value::tensor(shape, data).unwrap())
+    };
+    let pv = |id: u32| Term::Var(id);
+
+    let mut curriculum = Vec::new();
+
+    // ── Subdomain 1: arithmetic-nat (5 problems) ────────────────
+    let sd_nat = "arithmetic-nat";
+    for (id, input, expected) in [
+        ("nat-0", apply(ADD, vec![nat(0), nat(0)]), nat(0)),
+        ("nat-simple-add", apply(ADD, vec![nat(3), nat(4)]), nat(7)),
+        ("nat-simple-mul", apply(MUL, vec![nat(6), nat(7)]), nat(42)),
+        (
+            "nat-deep-nested",
+            apply(
+                ADD,
+                vec![
+                    apply(ADD, vec![nat(1), nat(2)]),
+                    apply(ADD, vec![nat(3), nat(4)]),
+                ],
+            ),
+            nat(10),
+        ),
+        (
+            "nat-mul-chain",
+            apply(MUL, vec![apply(MUL, vec![nat(2), nat(3)]), nat(4)]),
+            nat(24),
+        ),
+    ] {
+        curriculum.push(CurriculumProblem {
+            subdomain: sd_nat,
+            problem: MathProblem {
+                id: id.into(),
+                description: id.into(),
+                input,
+                expected,
+                step_limit: 100,
+            },
+        });
+    }
+
+    // ── Subdomain 2: arithmetic-int (5 problems) ────────────────
+    let sd_int = "arithmetic-int";
+    for (id, input, expected) in [
+        ("int-add-neg", apply(INT_ADD, vec![int(-5), int(3)]), int(-2)),
+        ("int-mul-neg-neg", apply(INT_MUL, vec![int(-2), int(-4)]), int(8)),
+        ("int-neg-neg", apply(INT_NEG, vec![int(-7)]), int(7)),
+        ("int-sub", apply(INT_SUB, vec![int(10), int(3)]), int(7)),
+        (
+            "int-deep",
+            apply(
+                INT_ADD,
+                vec![
+                    apply(INT_MUL, vec![int(2), int(-3)]),
+                    apply(INT_NEG, vec![int(-4)]),
+                ],
+            ),
+            int(-2),
+        ),
+    ] {
+        curriculum.push(CurriculumProblem {
+            subdomain: sd_int,
+            problem: MathProblem {
+                id: id.into(),
+                description: id.into(),
+                input,
+                expected,
+                step_limit: 100,
+            },
+        });
+    }
+
+    // ── Subdomain 3: symbolic-nat (6 problems) ──────────────────
+    // These need identity rules in the library to solve.
+    let sd_symbolic = "symbolic-nat";
+    let symbolic_cases: Vec<(&str, Term, Term)> = vec![
+        (
+            "sym-add-id-left",
+            apply(ADD, vec![nat(0), pv(100)]),
+            pv(100),
+        ),
+        (
+            "sym-mul-id-left",
+            apply(MUL, vec![nat(1), pv(100)]),
+            pv(100),
+        ),
+        (
+            "sym-add-id-nested",
+            apply(ADD, vec![nat(0), apply(ADD, vec![nat(0), pv(100)])]),
+            pv(100),
+        ),
+        (
+            "sym-mul-id-nested",
+            apply(MUL, vec![nat(1), apply(MUL, vec![nat(1), pv(100)])]),
+            pv(100),
+        ),
+        (
+            "sym-add-id-different-var",
+            apply(ADD, vec![nat(0), pv(200)]),
+            pv(200),
+        ),
+        (
+            "sym-mul-id-different-var",
+            apply(MUL, vec![nat(1), pv(300)]),
+            pv(300),
+        ),
+    ];
+    for (id, input, expected) in symbolic_cases {
+        curriculum.push(CurriculumProblem {
+            subdomain: sd_symbolic,
+            problem: MathProblem {
+                id: id.into(),
+                description: id.into(),
+                input,
+                expected,
+                step_limit: 20,
+            },
+        });
+    }
+
+    // ── Subdomain 4: tensor-algebra (6 problems) ────────────────
+    let sd_tensor = "tensor-algebra";
+    let tensor_cases: Vec<(&str, Term, Term)> = vec![
+        (
+            "tensor-add-zeros-concrete",
+            apply(
+                TENSOR_ADD,
+                vec![tensor(vec![2], vec![0, 0]), tensor(vec![2], vec![3, 4])],
+            ),
+            tensor(vec![2], vec![3, 4]),
+        ),
+        (
+            "tensor-mul-ones-concrete",
+            apply(
+                TENSOR_MUL,
+                vec![tensor(vec![2], vec![1, 1]), tensor(vec![2], vec![5, 7])],
+            ),
+            tensor(vec![2], vec![5, 7]),
+        ),
+        (
+            "tensor-add-zeros-sym",
+            apply(
+                TENSOR_ADD,
+                vec![tensor(vec![2], vec![0, 0]), pv(100)],
+            ),
+            pv(100),
+        ),
+        (
+            "tensor-mul-ones-sym",
+            apply(
+                TENSOR_MUL,
+                vec![tensor(vec![2], vec![1, 1]), pv(100)],
+            ),
+            pv(100),
+        ),
+        (
+            "tensor-add-nested-zeros",
+            apply(
+                TENSOR_ADD,
+                vec![
+                    tensor(vec![2], vec![0, 0]),
+                    apply(
+                        TENSOR_ADD,
+                        vec![tensor(vec![2], vec![0, 0]), pv(100)],
+                    ),
+                ],
+            ),
+            pv(100),
+        ),
+        (
+            "tensor-3d-zeros",
+            apply(
+                TENSOR_ADD,
+                vec![tensor(vec![3], vec![0, 0, 0]), pv(100)],
+            ),
+            pv(100),
+        ),
+    ];
+    for (id, input, expected) in tensor_cases {
+        curriculum.push(CurriculumProblem {
+            subdomain: sd_tensor,
+            problem: MathProblem {
+                id: id.into(),
+                description: id.into(),
+                input,
+                expected,
+                step_limit: 20,
+            },
+        });
+    }
+
+    // ── Subdomain 5: compound (5 problems) ──────────────────────
+    // Multi-step problems that exercise MULTIPLE rules in sequence.
+    let sd_compound = "compound";
+    let compound_cases: Vec<(&str, Term, Term)> = vec![
+        // add(0, mul(1, ?x)) = ?x — needs BOTH add-id AND mul-id
+        (
+            "compound-add-mul-ids",
+            apply(ADD, vec![nat(0), apply(MUL, vec![nat(1), pv(100)])]),
+            pv(100),
+        ),
+        // mul(1, add(0, ?x)) = ?x
+        (
+            "compound-mul-add-ids",
+            apply(MUL, vec![nat(1), apply(ADD, vec![nat(0), pv(100)])]),
+            pv(100),
+        ),
+        // add(0, add(2, 3)) = 5 — identity on top of concrete
+        (
+            "compound-id-over-concrete",
+            apply(ADD, vec![nat(0), apply(ADD, vec![nat(2), nat(3)])]),
+            nat(5),
+        ),
+        // mul(1, mul(2, 3)) = 6
+        (
+            "compound-mul-id-over-concrete",
+            apply(MUL, vec![nat(1), apply(MUL, vec![nat(2), nat(3)])]),
+            nat(6),
+        ),
+        // tensor_add(zeros, tensor_mul(ones, ?x)) = ?x
+        (
+            "compound-tensor-both-ids",
+            apply(
+                TENSOR_ADD,
+                vec![
+                    tensor(vec![2], vec![0, 0]),
+                    apply(
+                        TENSOR_MUL,
+                        vec![tensor(vec![2], vec![1, 1]), pv(100)],
+                    ),
+                ],
+            ),
+            pv(100),
+        ),
+    ];
+    for (id, input, expected) in compound_cases {
+        curriculum.push(CurriculumProblem {
+            subdomain: sd_compound,
+            problem: MathProblem {
+                id: id.into(),
+                description: id.into(),
+                input,
+                expected,
+                step_limit: 30,
+            },
+        });
+    }
+
+    // ── Subdomain 6: generalization (5 problems) ────────────────
+    // Same law instantiated with distinct concrete values — the
+    // rule generalizes if and only if ALL pass.
+    let sd_gen = "generalization";
+    for n in [7u64, 42, 123, 999, 5555] {
+        curriculum.push(CurriculumProblem {
+            subdomain: sd_gen,
+            problem: MathProblem {
+                id: format!("gen-add-id-at-{n}"),
+                description: format!(
+                    "add(0, {n}) = {n} — generalization probe"
+                ),
+                input: apply(ADD, vec![nat(0), nat(n)]),
+                expected: nat(n),
+                step_limit: 100,
+            },
+        });
+    }
+
+    curriculum
+}
+
 /// The ingress point: a consumer that periodically benchmarks
 /// the current library against a fixed problem set and emits
 /// `MapEvent::BenchmarkScored` with delta-from-prior. This is

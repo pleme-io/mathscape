@@ -90,8 +90,10 @@ pub use meta_loop::{
     TerminationReason,
 };
 pub use math_problem::{
-    canonical_problem_set, harder_problem_set, run_benchmark, solve_problem,
-    BenchmarkConsumer, BenchmarkReport, MathProblem, ProblemResult,
+    canonical_problem_set, harder_problem_set, mathematician_curriculum,
+    run_benchmark, run_curriculum, solve_problem, BenchmarkConsumer,
+    BenchmarkReport, CurriculumProblem, CurriculumReport, MathProblem,
+    ProblemResult,
 };
 pub use plasticity::{
     ComponentTick, Plastic, PlasticityController, PlasticityReport,
