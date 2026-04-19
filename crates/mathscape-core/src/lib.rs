@@ -66,7 +66,10 @@ pub use bootstrap::{
     ModelUpdater, NoDedup, PhaseOutcome, SpecExecutionError,
     SubsumptionDeduper,
 };
-pub use mathscape_map::{MapSnapshot, MapSummary, MathscapeMap};
+pub use mathscape_map::{
+    BufferedConsumer, MapEvent, MapEventConsumer, MapSnapshot, MapSummary,
+    MathscapeMap,
+};
 pub use optimizer::{sgd_step_int, sgd_step_tensor};
 pub use meta_loop::{
     AdaptiveProposer, DefaultScenarioExecutor, HeuristicProposer, MetaLoop,
