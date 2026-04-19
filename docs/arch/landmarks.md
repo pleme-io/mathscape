@@ -418,12 +418,40 @@ Phase I's `paired_subterm_anti_unify` + Phase J's
 MetaPatternGenerator needs. `phase_h_unblock_pipeline_runs_end_to_end`
 asserts `rank2_count ≥ 1` — the first Phase-H invariant.
 
-**Caveat**: Phase H via the Phase I+J pipeline requires hand-
-preparing the Artifact set (via `Artifact::seal` in the demo).
-Integrating this path into the default autonomous-traversal
-pipeline is future work — for now, the Phase H unblock is demoed
-via an explicit pipeline, not wired into the default extractor
-stack.
+**Post-landing integration** (2026-04-18): the Phase I+J+H
+pipeline is now a single public call, not hand-wired demo code.
+Public API in `mathscape-compress`:
+
+```rust
+derive_laws_validated(corpus, lib, step, min, subterm_depth,
+                     k_samples, seed, next_id) -> (rules, stats)
+rank2_candidates_from_library(validated, corpus, epoch_id,
+                              extract_cfg, symbol_floor) -> Vec<Candidate>
+is_rank2_shape(term: &Term) -> bool
+```
+
+Pinned by `phase_h_integrated_pipeline_one_call` and
+`phase_h_integration_is_deterministic`.
+
+**Phase J.2** (2026-04-18): Phase J's empirical-validity sampler
+now auto-detects the rule's algebraic domain from its LHS head
+operator and routes bindings through the matching pool:
+
+  0-9 → Nat, 10-19 → Int, 20-29 → Tensor, 30-39 → Float,
+  40-99 → FloatTensor, unrecognized → Nat fallback
+
+Before J.2, Int/Float/Tensor rules would falsely fail validation
+because the Nat pool's bindings don't type-check through those
+operators. After J.2, domain-homogeneous rules across all 5
+kernel domains validate correctly. Pinned by
+`validation_of_int_identity_uses_int_pool` et al.
+
+**Remaining integration work**: wire the Phase I+J+H pipeline
+into the default autonomous-traversal extractor stack so rank-2
+rules emerge from the standard traversal without hand-authoring.
+The plumbing (public API, tests, determinism) is in place;
+hooking it into `BootstrapCycle` / the default `DerivedLawsExtractor`
+is a behavior change that warrants a fresh attestation fingerprint.
 
 **What landed.** `reduction::detect_subsumption_pairs` now includes
 an irreducibility-aware gate: two meta-rules only subsume each other
