@@ -209,6 +209,63 @@ impl<T: Clone + std::fmt::Debug + 'static> MapEventConsumer for BanditProbe<T> {
     }
 }
 
+/// Phase W.8: `Plastic` — the probe's phase-out is "arms with
+/// consistently-negative EMA after enough trials"; its
+/// reinforcement is "bias ε closer to 0 so the best arm gets
+/// exploited more."
+impl<T: Clone + std::fmt::Debug + 'static> crate::plasticity::Plastic
+    for BanditProbe<T>
+{
+    fn component_name(&self) -> &str {
+        &self.name
+    }
+
+    fn active_count(&self) -> usize {
+        let rewards = self.arm_reward_ema.borrow();
+        let trials = self.arm_trials.borrow();
+        rewards
+            .iter()
+            .zip(trials.iter())
+            .filter(|(r, t)| **t > 0 && **r > -1e-9)
+            .count()
+    }
+
+    fn phased_out_count(&self) -> usize {
+        self.arms.len().saturating_sub(self.active_count())
+    }
+
+    fn capacity(&self) -> usize {
+        self.arms.len()
+    }
+
+    /// Currently a no-op at the arm level — arms stay in the
+    /// selection pool. Exploration rate `ε` decays slightly
+    /// instead: over time the probe commits more to its best
+    /// arm. Returns 0 (no arms literally shed) but does alter
+    /// plastic state (ε).
+    fn phase_out_stale(&self) -> usize {
+        let eps = self.epsilon.get();
+        let decayed = (eps * 0.95).max(0.05);
+        self.epsilon.set(decayed);
+        0
+    }
+
+    /// Reinforcement: ensure the best arm is currently selected
+    /// if ε-exploit would pick it. Returns 1 if the current arm
+    /// changed (reinforcement fired), 0 otherwise.
+    fn reinforce_strong(&self) -> usize {
+        let best = self.best_arm_index();
+        let current = self.current_arm.get();
+        if best != current {
+            self.current_arm.set(best);
+            (self.apply)(&self.arms[best]);
+            1
+        } else {
+            0
+        }
+    }
+}
+
 impl<T: Clone + std::fmt::Debug + 'static> std::fmt::Debug for BanditProbe<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("BanditProbe")

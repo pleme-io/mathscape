@@ -299,6 +299,73 @@ fn event_hub_is_deterministic_and_non_lossy() {
     assert_eq!(t1.updates_applied(), t2.updates_applied());
 }
 
+/// Phase W.8: universal plasticity controller drives shed +
+/// reinforce across heterogeneous components (trainer + probe)
+/// through the same `Plastic` trait. Demonstrates that the
+/// outer controller treats each component uniformly despite
+/// completely different internal vocabularies (weights vs arms).
+#[test]
+fn plasticity_controller_ticks_trainer_and_probe_uniformly() {
+    use mathscape_core::{BanditProbe, Plastic, PlasticityController};
+    use std::cell::RefCell;
+
+    let hub = EventHub::new();
+    let trainer = Rc::new(StreamingPolicyTrainer::new(0.1));
+    let applied = Rc::new(RefCell::new(Vec::<f64>::new()));
+    let applied_c = applied.clone();
+    let probe = Rc::new(BanditProbe::new(
+        "lr",
+        vec![0.01, 0.05, 0.1, 0.2],
+        Box::new(move |v: &f64| applied_c.borrow_mut().push(*v)),
+        3,
+        0.3,
+    ));
+
+    hub.subscribe(trainer.clone());
+    hub.subscribe(probe.clone());
+
+    // Train via a realistic event stream with some benchmark
+    // signals so both components accrue state.
+    for phase in 0..10 {
+        hub.publish(&MapEvent::CoreGrew {
+            prev_core_size: phase,
+            new_core_size: phase + 1,
+            added_rule: add_identity_rule(),
+        });
+        hub.publish(&MapEvent::BenchmarkScored {
+            solved_count: (5 + phase).min(10),
+            total: 10,
+            solved_fraction: ((5 + phase).min(10) as f64) / 10.0,
+            delta_from_prior: 0.05,
+        });
+    }
+
+    // Register both in the controller; one tick runs shed +
+    // reinforce on both.
+    let controller = PlasticityController::new();
+    controller.register(trainer.clone() as Rc<dyn Plastic>);
+    controller.register(probe.clone() as Rc<dyn Plastic>);
+    assert_eq!(controller.component_count(), 2);
+
+    let report = controller.tick();
+    eprintln!("{}", report.summary());
+    assert_eq!(report.ticks.len(), 2);
+    assert_eq!(controller.tick_count(), 1);
+
+    // Every named component appears in the report.
+    let names: Vec<_> =
+        report.ticks.iter().map(|t| t.name.as_str()).collect();
+    assert!(names.contains(&"streaming-policy-trainer"));
+    assert!(names.contains(&"lr"));
+
+    // Each tick is idempotent in the sense that a second call
+    // also produces a valid report. (Counts may change as the
+    // internal state shifts — that's expected.)
+    let r2 = controller.tick();
+    assert_eq!(r2.ticks.len(), 2);
+    assert_eq!(controller.tick_count(), 2);
+}
+
 /// The hub composes with a history-keeping consumer that both
 /// records events AND re-emits derived events. Demonstrates the
 /// "chain of consumers" pattern via a custom consumer.

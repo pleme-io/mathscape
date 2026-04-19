@@ -629,6 +629,65 @@ impl StreamingPolicyTrainer {
     }
 }
 
+/// Phase W.8: `Plastic` — universal neuroplasticity. The trainer's
+/// phase-out is dead-at-birth + dormant + corrupted pruning
+/// composed; reinforce is phantom-gradient auto-rejuvenation.
+/// Thresholds are component-internal defaults; external
+/// orchestrators that want finer control can call the specific
+/// methods (`prune`, `prune_dormant_or_corrupted`,
+/// `auto_rejuvenate`) directly.
+impl crate::plasticity::Plastic for StreamingPolicyTrainer {
+    fn component_name(&self) -> &str {
+        "streaming-policy-trainer"
+    }
+
+    fn active_count(&self) -> usize {
+        LibraryFeatures::WIDTH - self.pruned_count()
+    }
+
+    fn phased_out_count(&self) -> usize {
+        self.pruned_count()
+    }
+
+    fn capacity(&self) -> usize {
+        LibraryFeatures::WIDTH
+    }
+
+    /// Dead-at-birth pass + stalled/corrupted pass. Uses
+    /// conservative thresholds so this can be called frequently
+    /// without destabilizing the active set.
+    fn phase_out_stale(&self) -> usize {
+        let before = self.pruned_count();
+        // Dead-at-birth: tiny magnitude AND ≤1 activation.
+        let _ = self.prune(1e-6, 1);
+        // Dormant or corrupted: significant dormancy window OR
+        // pressure-flattened (Fisher high, magnitude zero).
+        //
+        // stall_events threshold: 256 events of dormancy after
+        // having been active at least once.
+        //
+        // corruption: Fisher accumulated above 1e-6 and magnitude
+        // below 1e-6.
+        let _ = self.prune_dormant_or_corrupted(256, 1e-6, 1e-6);
+        self.pruned_count().saturating_sub(before)
+    }
+
+    /// Phantom-gradient auto-rejuvenation. Threshold adapts to
+    /// the current maximum phantom value so the rule is
+    /// "rejuvenate anything in the top quartile of phantom
+    /// accumulation."
+    fn reinforce_strong(&self) -> usize {
+        let phantoms = self.phantom_gradients();
+        let max_phantom = phantoms.iter().copied().fold(0.0f64, f64::max);
+        if max_phantom <= 0.0 {
+            return 0;
+        }
+        // Top-quartile threshold.
+        let threshold = max_phantom * 0.75;
+        self.auto_rejuvenate(threshold, 0.01).len()
+    }
+}
+
 impl MapEventConsumer for StreamingPolicyTrainer {
     fn on_event(&self, event: &MapEvent) {
         self.events_seen.set(self.events_seen.get() + 1);

@@ -29,6 +29,7 @@ pub mod migration;
 pub mod optimizer;
 pub mod parse;
 pub mod orchestrator;
+pub mod plasticity;
 pub mod promotion;
 pub mod promotion_gate;
 pub mod policy;
@@ -91,6 +92,9 @@ pub use meta_loop::{
 pub use math_problem::{
     canonical_problem_set, harder_problem_set, run_benchmark, solve_problem,
     BenchmarkConsumer, BenchmarkReport, MathProblem, ProblemResult,
+};
+pub use plasticity::{
+    ComponentTick, Plastic, PlasticityController, PlasticityReport,
 };
 pub use streaming_policy::StreamingPolicyTrainer;
 pub use task::{
