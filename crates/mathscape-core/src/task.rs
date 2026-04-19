@@ -159,6 +159,68 @@ pub fn run_benchmark<D: TaskDomain>(
     }
 }
 
+/// Phase W.12.1 — generic benchmark consumer that works for any
+/// `TaskDomain`. The math-specific `BenchmarkConsumer` in
+/// `math_problem` is the same shape specialized to
+/// `MathDomain`; this generic variant proves the hub pipeline is
+/// truly domain-agnostic — the trainer, bandit probe, plasticity
+/// controller, etc. cannot tell which domain produced a
+/// `BenchmarkScored` event.
+///
+/// Runs the task set, emits `MapEvent::BenchmarkScored` into the
+/// hub, tracks its own running history so `delta_from_prior` is
+/// computed within-domain rather than across-domain.
+pub struct GenericBenchmarkConsumer<D: TaskDomain> {
+    tasks: Vec<Task<D>>,
+    last_score: std::cell::Cell<Option<f64>>,
+    runs: std::cell::Cell<u64>,
+}
+
+impl<D: TaskDomain> GenericBenchmarkConsumer<D> {
+    #[must_use]
+    pub fn new(tasks: Vec<Task<D>>) -> Self {
+        Self {
+            tasks,
+            last_score: std::cell::Cell::new(None),
+            runs: std::cell::Cell::new(0),
+        }
+    }
+
+    pub fn runs(&self) -> u64 {
+        self.runs.get()
+    }
+
+    pub fn last_score(&self) -> Option<f64> {
+        self.last_score.get()
+    }
+
+    /// Run one benchmark, emit `BenchmarkScored`, return the
+    /// full report.
+    pub fn benchmark_now<C: crate::mathscape_map::MapEventConsumer>(
+        &self,
+        ctx: &D::Context,
+        downstream: &C,
+    ) -> TaskReport<D> {
+        let report = run_benchmark(&self.tasks, ctx);
+        let fraction = report.solved_fraction();
+        let delta = match self.last_score.get() {
+            Some(prev) => fraction - prev,
+            None => f64::NAN,
+        };
+        self.last_score.set(Some(fraction));
+        self.runs.set(self.runs.get() + 1);
+        downstream.on_event(
+            &crate::mathscape_map::MapEvent::BenchmarkScored {
+                solved_count: report.solved_count,
+                total: report.problem_set_size,
+                solved_fraction: fraction,
+                delta_from_prior: delta,
+            },
+        );
+        report
+    }
+}
+
 // ── MathDomain — the first task domain ────────────────────────
 
 /// The math-problem domain: input is a Term, output is the
@@ -310,6 +372,134 @@ mod tests {
         ) -> Option<Self::Output> {
             Some(input.iter().sum::<i64>() + *ctx)
         }
+    }
+
+    // ── Phase W.12.1: GenericBenchmarkConsumer tests ───────────
+
+    #[test]
+    fn generic_benchmark_consumer_emits_benchmark_scored_event() {
+        use crate::mathscape_map::{BufferedConsumer, MapEvent};
+        use std::rc::Rc;
+        let tasks = as_math_tasks(&canonical_problem_set());
+        let consumer = GenericBenchmarkConsumer::<MathDomain>::new(tasks);
+        let buffer = Rc::new(BufferedConsumer::new());
+
+        let _report = consumer.benchmark_now(&[], &*buffer);
+        assert_eq!(consumer.runs(), 1);
+        assert!(consumer.last_score().is_some());
+        assert_eq!(buffer.len(), 1);
+
+        let captured = buffer.drain();
+        match &captured[0] {
+            MapEvent::BenchmarkScored {
+                solved_count,
+                total,
+                solved_fraction,
+                delta_from_prior,
+            } => {
+                assert!(*total >= 10);
+                assert!(*solved_fraction >= 0.0 && *solved_fraction <= 1.0);
+                assert_eq!(
+                    *solved_fraction,
+                    *solved_count as f64 / *total as f64
+                );
+                assert!(delta_from_prior.is_nan(), "first run → NaN delta");
+            }
+            _ => panic!("expected BenchmarkScored"),
+        }
+    }
+
+    #[test]
+    fn generic_benchmark_delta_tracks_same_domain_only() {
+        use crate::mathscape_map::{BufferedConsumer, MapEvent};
+        use std::rc::Rc;
+        let tasks = as_math_tasks(&canonical_problem_set());
+        let consumer = GenericBenchmarkConsumer::<MathDomain>::new(tasks);
+        let buffer = Rc::new(BufferedConsumer::new());
+
+        consumer.benchmark_now(&[], &*buffer); // first run → NaN
+        consumer.benchmark_now(&[], &*buffer); // second → delta = 0 (same lib)
+        assert_eq!(buffer.len(), 2);
+        let captured = buffer.drain();
+        match &captured[1] {
+            MapEvent::BenchmarkScored {
+                delta_from_prior, ..
+            } => {
+                assert_eq!(*delta_from_prior, 0.0);
+            }
+            _ => panic!(),
+        }
+    }
+
+    #[test]
+    fn two_task_domains_on_same_hub_produce_independent_benchmark_events() {
+        use crate::mathscape_map::{
+            BufferedConsumer, EventHub, MapEvent,
+        };
+        use std::rc::Rc;
+
+        // Math tasks (existing canonical set).
+        let math_tasks = as_math_tasks(&canonical_problem_set());
+        let math_consumer =
+            GenericBenchmarkConsumer::<MathDomain>::new(math_tasks);
+
+        // Sum tasks (non-math domain, defined above).
+        let sum_tasks = vec![
+            Task::<SumDomain> {
+                id: "a".into(),
+                description: "1+2=3 @ bias 0".into(),
+                input: vec![1, 2],
+                expected: 3,
+                step_limit: 0,
+            },
+            Task::<SumDomain> {
+                id: "b".into(),
+                description: "5+5=10 @ bias 0".into(),
+                input: vec![5, 5],
+                expected: 10,
+                step_limit: 0,
+            },
+        ];
+        let sum_consumer =
+            GenericBenchmarkConsumer::<SumDomain>::new(sum_tasks);
+
+        let hub = EventHub::new();
+        let buffer = Rc::new(BufferedConsumer::new());
+        hub.subscribe(buffer.clone());
+
+        // Run both benchmarks serially against the same hub.
+        let math_report = math_consumer.benchmark_now(&[], &hub);
+        let sum_report = sum_consumer.benchmark_now(&0i64, &hub);
+
+        assert_eq!(buffer.len(), 2);
+        let events = buffer.drain();
+
+        // Both events are BenchmarkScored but carry the results
+        // of different domains — domain-agnostic from the hub's
+        // perspective but correctly scored per domain.
+        match &events[0] {
+            MapEvent::BenchmarkScored {
+                solved_fraction,
+                ..
+            } => {
+                assert_eq!(*solved_fraction, math_report.solved_fraction());
+            }
+            _ => panic!(),
+        }
+        match &events[1] {
+            MapEvent::BenchmarkScored {
+                solved_fraction,
+                ..
+            } => {
+                assert_eq!(*solved_fraction, sum_report.solved_fraction());
+                assert_eq!(*solved_fraction, 1.0, "all sum tasks correct");
+            }
+            _ => panic!(),
+        }
+
+        // Per-consumer state is isolated.
+        assert_eq!(math_consumer.runs(), 1);
+        assert_eq!(sum_consumer.runs(), 1);
     }
 
     #[test]
