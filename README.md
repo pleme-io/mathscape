@@ -3,7 +3,7 @@
 Evolutionary symbolic compression engine — discovers mathematical
 abstractions by rewarding compression and novelty over expression trees.
 
-## Status: autonomous traversal, self-containing compute, self-tuning meta-loop
+## Status: autonomous traversal, self-containing compute, self-tuning meta-loop, perpetual self-optimizing model
 
 As of 2026-04-18 (post-Phase U), the machine traverses mathscape
 **autonomously**, with **self-containing compute**, and now a
@@ -94,10 +94,36 @@ reachable territory for a seed is exhausted:
   re-seeds. Pruned weights are skipped on future updates. The
   policy sheds dead dimensions while the stream continues to form
   new ones — neuroplasticity applied to the policy head.
+- **Phase W** (perpetual self-optimizing model): four
+  research-grade mechanisms absorbed from continual-learning and
+  dynamic-sparse-training literature.
+  - **W.1 RigL phantom gradients**: pruned weights still
+    accumulate `|would-be-delta|`; `auto_rejuvenate` picks up
+    phantom-active weights automatically. The shed+grow loop is
+    now fully autonomous (Evci et al. 2020).
+  - **W.2 EWC Fisher-weighted stability**: per-weight Fisher EMA;
+    anchor on benchmark improvement; Fisher-weighted pullback on
+    regression events protects load-bearing weights from drift
+    while marginal weights stay plastic (Kirkpatrick et al.
+    2017).
+  - **W.3 Learning-progress intrinsic reward**: benchmark events
+    get a +4× bonus for `current - min(last K scores)` positive
+    improvement — the agent is rewarded for improving itself
+    (Schmidhuber / Oudeyer).
+  - **W.stall Corrupted/stalled pruning**:
+    `prune_dormant_or_corrupted` sheds weights that went silent
+    after being active or that stay zero despite high Fisher
+    (pressure-flattened).
+  - **W.4 EventHub + motor translator**: synchronous reentrant-
+    safe pub/sub spine; `publish_outcome_events` translates
+    `MetaLoopOutcome` → `MapEvent` stream fanned out to every
+    subscriber. The full perpetual loop runs end-to-end in one
+    subscription (`tests/perpetual_loop.rs`).
 
 See `docs/arch/autonomous-traversal.md` for the milestone doc,
-`docs/arch/self-tuning-meta-loop.md` for the Phase U+V frame, and
-`docs/arch/landmarks.md` for the full canonical map (phases A–V).
+`docs/arch/self-tuning-meta-loop.md` for the Phase U+V+W frame,
+and `docs/arch/landmarks.md` for the full canonical map
+(phases A–W).
 
 ## Quickstart
 

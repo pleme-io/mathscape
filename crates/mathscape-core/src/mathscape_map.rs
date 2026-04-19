@@ -186,6 +186,92 @@ impl MapEventConsumer for BufferedConsumer {
     }
 }
 
+/// Phase W.4: synchronous publish/subscribe hub. The piece that
+/// makes the machine a live, self-sustaining loop instead of a
+/// collection of components that a caller has to wire together
+/// by hand.
+///
+/// Producers (motor, benchmark runner, certifier, external
+/// probes) publish `MapEvent`s. Subscribers (streaming trainer,
+/// certifier, buffered history, experimentation probes) see
+/// every event in order. The hub owns the subscription list;
+/// consumers are held as `Rc<dyn MapEventConsumer>` so callers
+/// can still retain handles to query them out-of-band
+/// (`trainer.snapshot()`, `buffer.drain()`, etc.) while the hub
+/// fans out.
+///
+/// Single-threaded today. For multi-threaded publishing wrap
+/// the Vec in `RwLock` and switch `Rc` → `Arc`; public API is
+/// identical.
+///
+/// # Reentrancy
+///
+/// `publish` clones the subscription list before dispatching so
+/// a consumer may subscribe a new consumer while being
+/// dispatched (for dynamic probe attachment) without triggering
+/// reentrant-borrow panic.
+#[derive(Default)]
+pub struct EventHub {
+    subscribers: std::cell::RefCell<Vec<std::rc::Rc<dyn MapEventConsumer>>>,
+    published_count: std::cell::Cell<u64>,
+}
+
+impl std::fmt::Debug for EventHub {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("EventHub")
+            .field("subscribers", &self.subscribers.borrow().len())
+            .field("published_count", &self.published_count.get())
+            .finish()
+    }
+}
+
+impl EventHub {
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Subscribe a consumer. Consumers are held behind `Rc`; the
+    /// caller typically keeps its own `Rc` clone so it can query
+    /// the consumer later.
+    pub fn subscribe(
+        &self,
+        consumer: std::rc::Rc<dyn MapEventConsumer>,
+    ) {
+        self.subscribers.borrow_mut().push(consumer);
+    }
+
+    /// Publish an event. All subscribers see it in subscription
+    /// order. See "Reentrancy" on the struct doc.
+    pub fn publish(&self, event: &MapEvent) {
+        let subs: Vec<_> = self.subscribers.borrow().clone();
+        for s in subs {
+            s.on_event(event);
+        }
+        self.published_count.set(self.published_count.get() + 1);
+    }
+
+    /// Number of events published since the hub started.
+    pub fn published_count(&self) -> u64 {
+        self.published_count.get()
+    }
+
+    /// Number of subscribers currently attached.
+    pub fn subscriber_count(&self) -> usize {
+        self.subscribers.borrow().len()
+    }
+}
+
+/// An `EventHub` is itself a consumer — `on_event` forwards to
+/// `publish`. This lets the hub sit as the `downstream` of
+/// producer APIs (e.g. `BenchmarkConsumer::benchmark_now`) so
+/// producer-published events fan out to all hub subscribers.
+impl MapEventConsumer for EventHub {
+    fn on_event(&self, event: &MapEvent) {
+        self.publish(event);
+    }
+}
+
 /// A single snapshot of the library's state at a moment.
 /// Hash-identified by `library_root`. Two snapshots with the same
 /// root are the same library (possibly reached by different paths).
@@ -875,5 +961,124 @@ mod tests {
         let bytes = bincode::serialize(&m).unwrap();
         let back: MathscapeMap = bincode::deserialize(&bytes).unwrap();
         assert_eq!(m, back);
+    }
+
+    // ── Phase W.4: EventHub pub/sub tests ───────────────────────
+
+    #[test]
+    fn event_hub_fans_out_to_multiple_subscribers() {
+        let hub = EventHub::new();
+        let a = std::rc::Rc::new(BufferedConsumer::new());
+        let b = std::rc::Rc::new(BufferedConsumer::new());
+        hub.subscribe(a.clone());
+        hub.subscribe(b.clone());
+        assert_eq!(hub.subscriber_count(), 2);
+
+        let e = MapEvent::CoreGrew {
+            prev_core_size: 0,
+            new_core_size: 1,
+            added_rule: add_id(),
+        };
+        hub.publish(&e);
+
+        assert_eq!(a.len(), 1);
+        assert_eq!(b.len(), 1);
+        assert_eq!(hub.published_count(), 1);
+    }
+
+    #[test]
+    fn event_hub_maintains_publish_order_per_subscriber() {
+        let hub = EventHub::new();
+        let buf = std::rc::Rc::new(BufferedConsumer::new());
+        hub.subscribe(buf.clone());
+
+        let events = vec![
+            MapEvent::NovelRoot {
+                seed: 1,
+                phase_index: 0,
+                root: TermRef::from_bytes(b"a"),
+                library_size: 0,
+            },
+            MapEvent::CoreGrew {
+                prev_core_size: 0,
+                new_core_size: 1,
+                added_rule: add_id(),
+            },
+            MapEvent::StalenessCrossed {
+                seed: 1,
+                phase_index: 0,
+                threshold: 0.6,
+                observed: 0.9,
+            },
+        ];
+        for e in &events {
+            hub.publish(e);
+        }
+        assert_eq!(buf.len(), 3);
+        let captured = buf.drain();
+        assert_eq!(captured.len(), 3);
+        assert_eq!(captured[0].category(), "novel-root");
+        assert_eq!(captured[1].category(), "core-grew");
+        assert_eq!(captured[2].category(), "staleness-crossed");
+    }
+
+    #[test]
+    fn event_hub_handle_survives_external_access() {
+        let hub = EventHub::new();
+        let buf = std::rc::Rc::new(BufferedConsumer::new());
+        hub.subscribe(buf.clone());
+
+        hub.publish(&MapEvent::CoreGrew {
+            prev_core_size: 0,
+            new_core_size: 1,
+            added_rule: add_id(),
+        });
+        // External access still works while subscribed.
+        let drained = buf.drain();
+        assert_eq!(drained.len(), 1);
+        // Next publish still reaches the same consumer instance.
+        hub.publish(&MapEvent::NovelRoot {
+            seed: 1,
+            phase_index: 0,
+            root: TermRef::from_bytes(b"b"),
+            library_size: 1,
+        });
+        assert_eq!(buf.len(), 1);
+    }
+
+    #[test]
+    fn event_hub_reentrant_subscribe_during_publish_is_safe() {
+        // A subscriber that subscribes ANOTHER subscriber mid-
+        // dispatch must not panic on reentrant borrow.
+        struct SelfSubscriber {
+            hub: std::rc::Weak<EventHub>,
+            added: std::cell::Cell<bool>,
+        }
+        impl MapEventConsumer for SelfSubscriber {
+            fn on_event(&self, _: &MapEvent) {
+                if self.added.get() {
+                    return;
+                }
+                if let Some(hub) = self.hub.upgrade() {
+                    hub.subscribe(std::rc::Rc::new(BufferedConsumer::new()));
+                    self.added.set(true);
+                }
+            }
+        }
+
+        let hub = std::rc::Rc::new(EventHub::new());
+        let ss = std::rc::Rc::new(SelfSubscriber {
+            hub: std::rc::Rc::downgrade(&hub),
+            added: std::cell::Cell::new(false),
+        });
+        hub.subscribe(ss.clone());
+
+        hub.publish(&MapEvent::CoreGrew {
+            prev_core_size: 0,
+            new_core_size: 1,
+            added_rule: add_id(),
+        });
+        // The self-subscriber added one more sub mid-dispatch.
+        assert_eq!(hub.subscriber_count(), 2);
     }
 }

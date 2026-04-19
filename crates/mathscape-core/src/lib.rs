@@ -75,14 +75,15 @@ pub use certification::{
     DefaultCertifier,
 };
 pub use mathscape_map::{
-    BufferedConsumer, MapEvent, MapEventConsumer, MapSnapshot, MapSummary,
-    MathscapeMap,
+    BufferedConsumer, EventHub, MapEvent, MapEventConsumer, MapSnapshot,
+    MapSummary, MathscapeMap,
 };
 pub use optimizer::{sgd_step_int, sgd_step_tensor};
 pub use meta_loop::{
-    AdaptiveProposer, DefaultScenarioExecutor, HeuristicProposer, MetaLoop,
-    MetaLoopConfig, MetaLoopOutcome, MetaPhaseRecord, ScenarioExecutor,
-    ScenarioProposer, SpecArchetype, TerminationReason,
+    publish_outcome_events, AdaptiveProposer, DefaultScenarioExecutor,
+    HeuristicProposer, MetaLoop, MetaLoopConfig, MetaLoopOutcome,
+    MetaPhaseRecord, ScenarioExecutor, ScenarioProposer, SpecArchetype,
+    TerminationReason,
 };
 pub use math_problem::{
     canonical_problem_set, harder_problem_set, run_benchmark, solve_problem,

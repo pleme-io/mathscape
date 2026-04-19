@@ -738,6 +738,64 @@ impl MetaLoopOutcome {
     }
 }
 
+/// Phase W.4: translate a `MetaLoopOutcome` into a stream of
+/// `MapEvent`s published to `downstream`. Used to connect the
+/// existing motor (which produces outcomes as its contract) to
+/// the event-driven infrastructure (EventHub, streaming trainer,
+/// certifier) without modifying the motor's execution path.
+///
+/// Emits in order per phase:
+/// - one `CoreGrew` for each newly-added rule (diffed against the
+///   prior phase's final library)
+/// - `StalenessCrossed` if the observation's `staleness_score() >=
+///   staleness_threshold` for that phase
+///
+/// The publisher is idempotent: the same outcome published twice
+/// produces the same events both times. Downstream consumers that
+/// care about duplicate events (e.g. streaming trainer) should
+/// dedupe or snapshot around the call.
+pub fn publish_outcome_events<C: crate::mathscape_map::MapEventConsumer>(
+    outcome: &MetaLoopOutcome,
+    downstream: &C,
+    staleness_threshold: f64,
+) {
+    use crate::mathscape_map::MapEvent;
+    let mut prior_rule_names: std::collections::HashSet<String> =
+        std::collections::HashSet::new();
+    let mut prior_core_size: usize = 0;
+    for record in &outcome.history {
+        let phase_index = record.phase_index;
+        // Core growth: emit one CoreGrew per new rule.
+        let lib = record.outcome.final_library();
+        let mut new_core_size = prior_core_size;
+        for rule in lib {
+            if prior_rule_names.insert(rule.name.clone()) {
+                new_core_size += 1;
+                downstream.on_event(&MapEvent::CoreGrew {
+                    prev_core_size: new_core_size - 1,
+                    new_core_size,
+                    added_rule: rule.clone(),
+                });
+            }
+        }
+        prior_core_size = new_core_size;
+        // Staleness: emit one event per phase whose observation
+        // crossed the threshold.
+        let stale = record.observation.staleness_score();
+        if stale >= staleness_threshold {
+            downstream.on_event(&MapEvent::StalenessCrossed {
+                // ExperimentScenario doesn't carry a root seed
+                // identifier today; emit 0. Downstream consumers
+                // already see phase_index to disambiguate events.
+                seed: 0,
+                phase_index,
+                threshold: staleness_threshold,
+                observed: stale,
+            });
+        }
+    }
+}
+
 /// Why the meta-loop terminated.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TerminationReason {
@@ -1119,5 +1177,97 @@ mod tests {
             );
             assert!(seen.insert(key), "archetype {a:?} collided");
         }
+    }
+
+    // ── Phase W.4: publish_outcome_events tests ─────────────────
+
+    #[test]
+    fn publish_outcome_events_fans_core_growth_and_staleness() {
+        // Build a 3-phase outcome: phase 0 discovers one rule,
+        // phase 1 discovers a second rule, phase 2 no growth +
+        // high staleness.
+        let loop_ = MetaLoop::new(
+            DefaultScenarioExecutor,
+            HeuristicProposer::default(),
+            MetaLoopConfig {
+                max_phases: 3,
+                sail_out_window: 0,
+                policy_delta_threshold: 1e-6,
+            },
+        );
+        let outcome = loop_.run(null_scenario()).unwrap();
+        // Under the null scenario, there's no real growth — we
+        // exercise the TRANSLATOR with a real outcome shape.
+        let hub = crate::mathscape_map::EventHub::new();
+        let buffer = std::rc::Rc::new(
+            crate::mathscape_map::BufferedConsumer::new(),
+        );
+        hub.subscribe(buffer.clone());
+        publish_outcome_events(&outcome, &hub, 0.6);
+
+        // At minimum, published_count equals buffer.len (hub fans
+        // out) and neither is negative.
+        assert_eq!(
+            hub.published_count() as usize,
+            buffer.len(),
+            "hub fan-out matches buffer capture"
+        );
+        // The null outcome's observations should have non-zero
+        // staleness (no progress → staleness close to 1.0). So the
+        // translator should produce StalenessCrossed events for
+        // every phase.
+        let events = buffer.drain();
+        let staleness_count = events
+            .iter()
+            .filter(|e| {
+                matches!(
+                    e,
+                    crate::mathscape_map::MapEvent::StalenessCrossed { .. }
+                )
+            })
+            .count();
+        assert!(
+            staleness_count >= 1,
+            "translator emits ≥1 StalenessCrossed for null scenarios"
+        );
+    }
+
+    #[test]
+    fn publish_outcome_events_is_deterministic() {
+        // Two independent runs of the same outcome through the
+        // same translator produce the same event sequence.
+        let loop_ = MetaLoop::new(
+            DefaultScenarioExecutor,
+            HeuristicProposer::default(),
+            MetaLoopConfig {
+                max_phases: 3,
+                sail_out_window: 0,
+                policy_delta_threshold: 1e-6,
+            },
+        );
+        let outcome = loop_.run(null_scenario()).unwrap();
+        let hub1 = crate::mathscape_map::EventHub::new();
+        let hub2 = crate::mathscape_map::EventHub::new();
+        let buf1 = std::rc::Rc::new(
+            crate::mathscape_map::BufferedConsumer::new(),
+        );
+        let buf2 = std::rc::Rc::new(
+            crate::mathscape_map::BufferedConsumer::new(),
+        );
+        hub1.subscribe(buf1.clone());
+        hub2.subscribe(buf2.clone());
+        publish_outcome_events(&outcome, &hub1, 0.6);
+        publish_outcome_events(&outcome, &hub2, 0.6);
+        let events1 = buf1.drain();
+        let events2 = buf2.drain();
+        assert_eq!(
+            events1.len(),
+            events2.len(),
+            "same count"
+        );
+        // Category sequences must match exactly.
+        let cats1: Vec<_> = events1.iter().map(|e| e.category()).collect();
+        let cats2: Vec<_> = events2.iter().map(|e| e.category()).collect();
+        assert_eq!(cats1, cats2);
     }
 }

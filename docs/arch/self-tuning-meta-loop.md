@@ -4,7 +4,15 @@ The machine observes its own learning, leverages that observation to
 author its own next training recipe, and executes in complete
 linguistic isolation. The system sails itself.
 
-Status: **Phase V landed, 2026-04-18.** The motor runs end-to-end on a
+Status: **Phase W landed, 2026-04-18.** The perpetual self-optimizing
+streaming trainer now composes with an EventHub pub/sub spine;
+`publish_outcome_events` translates motor outcomes into MapEvents that
+fan out to every subscribed consumer. RigL phantom gradients, EWC
+Fisher-weighted stability, learning-progress intrinsic reward, and
+corrupted/stalled pruning all operate continuously on the live event
+stream. 895 workspace tests pass.
+
+Earlier status: **Phase V landed, 2026-04-18.** The motor runs end-to-end on a
 real derive-laws extractor. Built on R26 (BootstrapCycle), R32
 (Sexp-describable spec), R33 (ExperimentScenario chain), R34-R35
 (wall-clock observability), R37/R39 (opt-in work elimination),

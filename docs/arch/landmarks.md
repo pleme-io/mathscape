@@ -542,6 +542,77 @@ grow or shed to keep pace with a non-stationary reward stream.
   they keep the policy head's representation size tracking the
   learnable signal instead of the feature vector's allocated size.
 
+### Phase W: the perpetual self-optimizing model (2026-04-18)
+
+Four research-grade mechanisms from the continual-learning and
+dynamic-sparse-training literature, absorbed into the streaming
+trainer. Together they produce a never-off, self-pruning,
+self-rejuvenating, stability-aware, intrinsically-motivated
+adaptive controller that operates continuously on the live
+MapEvent stream.
+
+| Landmark | Closes |
+|---|---|
+| **W.1 RigL-style phantom gradients** | pruned weights still accumulate \|would-be-delta\|; `auto_rejuvenate(threshold, init)` promotes phantom-active weights back into the active set. The neuroplasticity loop is now fully automatic (Evci et al. 2020) |
+| **W.2 EWC-style Fisher stability** | per-weight Fisher EMA; anchor on benchmark improvement; Fisher-weighted pullback on regression-producing events protects load-bearing weights while plastic weights adapt. `ewc_lambda = 0` disables (Kirkpatrick et al. 2017) |
+| **W.3 Learning-progress intrinsic reward** | on BenchmarkScored, reward += 4.0 × (current − min(last K scores)). Schmidhuber/Oudeyer intrinsic motivation: the agent is rewarded for improving itself |
+| **W.stall Corrupted/stalled pruning** | `prune_dormant_or_corrupted(stall_events, fisher_floor, mag_ceiling)` sheds weights that went silent after being active OR that stay near zero despite high Fisher (pressure-flattened); complements V.shed's dead-at-birth pruning |
+| **W.4 EventHub pub/sub + motor translator** | `EventHub` synchronous reentrant-safe pub/sub; `publish_outcome_events(outcome, downstream, staleness_threshold)` translates a `MetaLoopOutcome` into MapEvents on any consumer. The motor now drives the full proprioceptive loop through the hub |
+
+**Phase W headline findings:**
+
+- **The perpetual loop composes end-to-end.** The integration
+  test `perpetual_loop_composes_all_phase_v_and_w_mechanisms`
+  demonstrates EventHub + StreamingPolicyTrainer + BufferedConsumer
+  + BenchmarkConsumer + prune + auto_rejuvenate + EWC anchor +
+  Fisher EMA + learning-progress bonus all running in one hub
+  subscription. Trained steps monotonic, weights finite,
+  no resets, deterministic.
+- **The hub is Lisp-morphable-ready.** `MapEventConsumer` is
+  object-safe and `&self`; Lisp callbacks can wrap themselves as
+  consumers via a thin Rust adapter and subscribe at runtime
+  without FFI. Every trainer mutation (`inject`, `prune`,
+  `rejuvenate`, `set_ewc_lambda`, `anchor_current_weights`) is
+  typed and narrow — direct Lisp bindings land as pure wiring.
+- **Determinism preserved throughout.** Two independent trainers
+  subscribed to the same hub converge to bit-identical weights
+  (`event_hub_is_deterministic_and_non_lossy`). The outcome
+  publisher is idempotent across runs
+  (`publish_outcome_events_is_deterministic`).
+
+**Kernel invariant status after Phase W:**
+
+All prior invariants preserved. Phase W adds:
+- **Monotonic training steps**: `trained_steps` only increases.
+  Not reset by `snapshot`, `inject`, `adjust_learning_rate`,
+  `prune`, `rejuvenate`, `auto_rejuvenate`, or any `set_*`.
+- **Phantom-gradient safety**: phantom gradients stay finite.
+  Pruned weights stay at 0.0 until rejuvenated.
+- **Hub fan-out equality**: for any sequence of publishes,
+  every subscriber receives the same sequence in the same order;
+  `published_count == min(subscriber.received_count)` for any
+  passive subscriber.
+- **Outcome-publish translator determinism**: the same outcome
+  published twice produces the same event sequence both times.
+
+**What Phase W unlocks:**
+
+- **Lisp-morphable runtime (Phase W.6).** The Rust infrastructure
+  is now shaped exactly as tatara-lisp needs: typed snapshots for
+  read, narrow mutation API, reentrant-safe subscribe/publish,
+  single-method `&self` consumer trait. A Lisp adapter crate can
+  expose the hub + trainer to Lisp with minimal ceremony.
+- **Online experimentation (Phase W.5).** The hub makes bandit
+  probes trivial to attach: each probe subscribes as a consumer,
+  observes event rates, adjusts hyperparameters via the narrow
+  mutation API, and measures outcomes through subsequent events.
+  The infrastructure is in place; probes are pure policy.
+- **Async-ready (Phase W.7).** The current hub is synchronous for
+  single-threaded determinism. Swapping `RefCell<Vec<Rc<...>>>` →
+  `RwLock<Vec<Arc<...>>>` and wrapping consumers in tokio tasks
+  gives the same public API running multi-threaded. No logic
+  changes; a drop-in scale-up.
+
 ### Phase U: Self-tuning meta-loop (2026-04-18)
 
 The outer orchestrator lands. The machine now observes its own
