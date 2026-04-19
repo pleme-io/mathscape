@@ -1,6 +1,7 @@
 //! Core types: Point, Number, Fn, Term enum, hash-consing, evaluation,
 //! substitution, s-expression parser/printer.
 
+pub mod adaptive_corpus;
 pub mod autograd;
 pub mod bettyfine;
 pub mod bootstrap;
@@ -53,6 +54,7 @@ pub use autograd::{
     simplify_add_of, simplify_mul_of, simplify_neg_of, symbolic_derivative,
     symbolic_derivative_float, DomainOps, FloatOps, IntOps, TensorOps,
 };
+pub use adaptive_corpus::AdaptiveCorpusGenerator;
 pub use bootstrap::{
     compute_attestation, deduplicate_library, execute_scenario_core,
     execute_spec_core, AlphaDeduper, BootstrapCycle, BootstrapCycleSpec,

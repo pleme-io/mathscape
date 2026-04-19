@@ -95,6 +95,14 @@ impl ScenarioExecutor for DefaultScenarioExecutor {
 /// Catalog of candidate next-spec archetypes. Keep small; the
 /// proposer scores each against the current observation state and
 /// picks the top one.
+///
+/// **Phase V** adds `AdaptiveDiet` — a DIET-MUTATION archetype the
+/// proposer picks when the staleness signal is high (library
+/// saturated AND policy barely moving). Unlike the other
+/// archetypes which tune the TRAINING RECIPE, `AdaptiveDiet`
+/// changes what the machine eats: a corpus generator that reads
+/// the current library state and synthesizes novelty-inviting
+/// terms.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SpecArchetype {
     /// Baseline: 5 iterations, no early-stop, canonical deduper.
@@ -112,6 +120,14 @@ pub enum SpecArchetype {
     /// Good when growth was positive last phase — more budget to
     /// keep finding.
     ExtendedDiscovery,
+    /// **Phase V**: DIET MUTATION — swap the corpus generator from
+    /// the default tensor zoo to `AdaptiveCorpusGenerator`, which
+    /// reads the current library state and synthesizes terms the
+    /// library partially-reduces (leaving novel residue for the
+    /// extractor to anti-unify). The proposer picks this when the
+    /// staleness signal averaged over recent observations crosses
+    /// a threshold (≥ 0.6 by default in `HeuristicProposer`).
+    AdaptiveDiet,
 }
 
 impl SpecArchetype {
@@ -169,6 +185,18 @@ impl SpecArchetype {
                 seed_policy,
                 early_stop_after_stable: Some(2),
             },
+            SpecArchetype::AdaptiveDiet => BootstrapCycleSpec {
+                // Phase V: the corpus generator reads the library
+                // state, so it self-tunes to what's been learned.
+                corpus_generator: "adaptive".into(),
+                law_extractor: extractor_name.into(),
+                model_updater: "default".into(),
+                deduper: "canonical".into(),
+                n_iterations: 5,
+                seed_library,
+                seed_policy,
+                early_stop_after_stable: Some(1),
+            },
         }
     }
 
@@ -180,6 +208,7 @@ impl SpecArchetype {
             SpecArchetype::EarlyStopPlateau => "early-stop-plateau",
             SpecArchetype::TrainOnly => "train-only",
             SpecArchetype::ExtendedDiscovery => "extended-discovery",
+            SpecArchetype::AdaptiveDiet => "adaptive-diet",
         }
     }
 
@@ -190,6 +219,7 @@ impl SpecArchetype {
             SpecArchetype::EarlyStopPlateau,
             SpecArchetype::TrainOnly,
             SpecArchetype::ExtendedDiscovery,
+            SpecArchetype::AdaptiveDiet,
         ]
     }
 }
@@ -234,6 +264,26 @@ impl ScenarioProposer for HeuristicProposer {
 
         let last = history.last();
 
+        // Phase V: compute aggregate staleness over recent history.
+        // When the machine has been producing no novelty for a
+        // window of phases, the correct action is DIET MUTATION,
+        // not another training-recipe tweak.
+        let recent_window = history.len().min(3);
+        let mean_recent_staleness = if recent_window == 0 {
+            0.0
+        } else {
+            let start = history.len() - recent_window;
+            history[start..]
+                .iter()
+                .map(|o| o.staleness_score())
+                .sum::<f64>()
+                / recent_window as f64
+        };
+        // Threshold picked empirically: 0.6 is "≥3 of the last few
+        // phases had zero growth + flat policy" — a clear signal
+        // that the current diet has been exhausted.
+        let staleness_triggered = mean_recent_staleness >= 0.6;
+
         let archetype = match last {
             None => {
                 // First iteration — baseline. The proposer has no
@@ -241,7 +291,14 @@ impl ScenarioProposer for HeuristicProposer {
                 SpecArchetype::Baseline
             }
             Some(obs) => {
-                if !obs.made_any_progress() {
+                if staleness_triggered && recent_window >= 2 {
+                    // Phase V: the diet is stale. Change what the
+                    // machine eats. This fires before the other
+                    // branches because staleness is the highest-
+                    // priority signal — training-recipe tweaks
+                    // won't help when the data itself is exhausted.
+                    SpecArchetype::AdaptiveDiet
+                } else if !obs.made_any_progress() {
                     // No growth at all. Try the extended-discovery
                     // archetype which has longer budget — if THAT
                     // doesn't grow either, the next loop will
@@ -886,6 +943,162 @@ mod tests {
         );
         let outcome = loop_.run(null_scenario()).unwrap();
         assert_eq!(outcome.history.len(), 4);
+    }
+
+    // ── Phase V: staleness + AdaptiveDiet proof tests ────────────
+
+    #[test]
+    fn staleness_score_is_one_when_stuck_and_zero_when_flowing() {
+        use crate::hash::TermRef;
+        let stuck = LearningObservation {
+            total_library_size: 3,
+            seed_library_size: 3,
+            net_growth_per_phase: vec![3, 0],
+            saturation_phase_index: Some(1),
+            extract_ns_per_iteration: vec![],
+            trained_policy_delta_norm: 0.0,
+            scenario_total_ns: 1000,
+            chain_attestation: TermRef::from_bytes(b"stuck"),
+        };
+        assert!(
+            stuck.staleness_score() > 0.9,
+            "stuck scenario → staleness ~1.0, got {}",
+            stuck.staleness_score()
+        );
+
+        let flowing = LearningObservation {
+            total_library_size: 7,
+            seed_library_size: 3,
+            net_growth_per_phase: vec![3, 2, 1, 1],
+            saturation_phase_index: None,
+            extract_ns_per_iteration: vec![],
+            trained_policy_delta_norm: 0.5,
+            scenario_total_ns: 1000,
+            chain_attestation: TermRef::from_bytes(b"flow"),
+        };
+        assert!(
+            flowing.staleness_score() < 0.2,
+            "flowing scenario → staleness ~0, got {}",
+            flowing.staleness_score()
+        );
+    }
+
+    #[test]
+    fn heuristic_proposer_picks_adaptive_diet_when_history_is_stale() {
+        use crate::hash::TermRef;
+        // History: three consecutive stuck observations.
+        let stuck_obs = LearningObservation {
+            total_library_size: 3,
+            seed_library_size: 3,
+            net_growth_per_phase: vec![0],
+            saturation_phase_index: Some(0),
+            extract_ns_per_iteration: vec![],
+            trained_policy_delta_norm: 0.0,
+            scenario_total_ns: 1000,
+            chain_attestation: TermRef::from_bytes(b"s"),
+        };
+        let history = vec![stuck_obs.clone(), stuck_obs.clone(), stuck_obs];
+        let proposer = HeuristicProposer::default();
+        let scenario = proposer.propose(&history, &LinearPolicy::new());
+        assert!(
+            scenario.name.contains("adaptive-diet"),
+            "stale history must trigger AdaptiveDiet archetype, got {}",
+            scenario.name
+        );
+        // The emitted spec routes through the "adaptive" corpus
+        // generator — the diet-mutation target.
+        assert_eq!(scenario.phases[0].corpus_generator, "adaptive");
+    }
+
+    #[test]
+    fn heuristic_proposer_does_not_pick_adaptive_diet_when_flowing() {
+        use crate::hash::TermRef;
+        let flowing_obs = LearningObservation {
+            total_library_size: 5,
+            seed_library_size: 0,
+            net_growth_per_phase: vec![5],
+            saturation_phase_index: None,
+            extract_ns_per_iteration: vec![],
+            trained_policy_delta_norm: 0.3,
+            scenario_total_ns: 1000,
+            chain_attestation: TermRef::from_bytes(b"f"),
+        };
+        let history = vec![flowing_obs.clone(), flowing_obs];
+        let proposer = HeuristicProposer::default();
+        let scenario = proposer.propose(&history, &LinearPolicy::new());
+        assert!(
+            !scenario.name.contains("adaptive-diet"),
+            "flowing history must NOT trigger AdaptiveDiet, got {}",
+            scenario.name
+        );
+    }
+
+    #[test]
+    fn meta_loop_reaches_adaptive_diet_when_null_executor_saturates() {
+        // Null executor: every scenario returns no progress. The
+        // HeuristicProposer sees a history of stuck observations
+        // and, after enough accumulate, picks AdaptiveDiet. This
+        // is the fix-point behavior in miniature: observe → detect
+        // staleness → pick diet mutation.
+        let loop_ = MetaLoop::new(
+            DefaultScenarioExecutor,
+            HeuristicProposer::default(),
+            MetaLoopConfig {
+                max_phases: 6,
+                sail_out_window: 0,
+                policy_delta_threshold: 1e-9,
+            },
+        );
+        let seed = ExperimentScenario {
+            name: "seed".into(),
+            phases: vec![null_spec()],
+        };
+        let outcome = loop_.run(seed).unwrap();
+        // At least one phase past the first three should have
+        // proposed AdaptiveDiet (history accumulates stuck obs).
+        let adaptive_phases: Vec<_> = outcome
+            .history
+            .iter()
+            .filter(|r| r.scenario.name.contains("adaptive-diet"))
+            .collect();
+        assert!(
+            !adaptive_phases.is_empty(),
+            "meta-loop with saturating null executor must eventually \
+             propose AdaptiveDiet via the staleness signal; observed \
+             scenarios: {:?}",
+            outcome.history.iter().map(|r| r.scenario.name.as_str()).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn adaptive_archetype_emits_spec_with_adaptive_corpus() {
+        let spec = SpecArchetype::AdaptiveDiet.to_spec(
+            "null",
+            Vec::new(),
+            LinearPolicy::new(),
+        );
+        assert_eq!(spec.corpus_generator, "adaptive");
+        assert_eq!(spec.law_extractor, "null");
+        assert_eq!(spec.deduper, "canonical");
+        assert_eq!(spec.early_stop_after_stable, Some(1));
+    }
+
+    #[test]
+    fn adaptive_diet_spec_executes_via_core_executor() {
+        // The "adaptive" corpus_generator name resolves in
+        // execute_spec_core — no UnknownLayer error.
+        let spec = SpecArchetype::AdaptiveDiet.to_spec(
+            "null",
+            Vec::new(),
+            LinearPolicy::new(),
+        );
+        let scenario = ExperimentScenario {
+            name: "adaptive-test".into(),
+            phases: vec![spec],
+        };
+        let outcome =
+            crate::bootstrap::execute_scenario_core(&scenario).unwrap();
+        assert_eq!(outcome.phases.len(), 1);
     }
 
     #[test]

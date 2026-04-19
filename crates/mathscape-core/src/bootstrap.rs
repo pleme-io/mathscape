@@ -411,11 +411,14 @@ impl std::error::Error for SpecExecutionError {}
 pub fn execute_spec_core(
     spec: &BootstrapCycleSpec,
 ) -> Result<BootstrapOutcome, SpecExecutionError> {
-    // Resolve corpus generator. Only "default" and "null" live here
-    // (core doesn't know about tensor corpora or other specialties).
+    // Resolve corpus generator. Phase V: "adaptive" joins the set —
+    // it's the diet-mutation target the meta-loop picks when
+    // staleness is high. Its output depends on the seeded library
+    // so the generator self-tunes to what the machine has learned.
     match spec.corpus_generator.as_str() {
         "default" => {}
         "null" => {}
+        "adaptive" => {}
         other => {
             return Err(SpecExecutionError::UnknownLayer {
                 role: "corpus_generator",
@@ -521,6 +524,24 @@ pub fn execute_spec_core(
         }
         ("null", "null", "null") => {
             run_all_dedup!(NullGen, NullExtractor, NullUpdater)
+        }
+        // Phase V: "adaptive" corpus — null extractor in core (richer
+        // extractors live downstream). Still useful at the core level
+        // because the adaptive corpus exercises the cycle + policy
+        // training pipeline end-to-end under diet-mutation.
+        ("adaptive", "null", "default") => {
+            run_all_dedup!(
+                crate::adaptive_corpus::AdaptiveCorpusGenerator::default(),
+                NullExtractor,
+                DefaultModelUpdater::default()
+            )
+        }
+        ("adaptive", "null", "null") => {
+            run_all_dedup!(
+                crate::adaptive_corpus::AdaptiveCorpusGenerator::default(),
+                NullExtractor,
+                NullUpdater
+            )
         }
         _ => unreachable!(), // validated above
     };
@@ -780,6 +801,32 @@ impl LearningObservation {
             .iter()
             .fold(0u64, |a, b| a.saturating_add(*b));
         (sum as f64) / (self.extract_ns_per_iteration.len() as f64)
+    }
+
+    /// Phase V (2026-04-18): staleness signal. Returns a scalar in
+    /// [0.0, 1.0] where 1.0 means "the scenario produced zero
+    /// novelty AND the policy barely moved" and 0.0 means "growth
+    /// and training signal both present."
+    ///
+    /// The fix-point proposer reads this: when averaged across the
+    /// last K observations in its history, high staleness means
+    /// the current diet has been exhausted and a diet-mutation
+    /// intervention is the correct next action.
+    ///
+    /// Derivation:
+    ///   growth_term = 1.0 if no net growth, else 0.0
+    ///   delta_term  = 1.0 - sigmoid_like(trained_policy_delta_norm)
+    ///   staleness   = 0.5 * growth_term + 0.5 * delta_term
+    ///
+    /// Pure function of observation fields — deterministic across
+    /// replays, Sexp-bridgeable, no side effects.
+    #[must_use]
+    pub fn staleness_score(&self) -> f64 {
+        let growth_term = if self.made_any_progress() { 0.0 } else { 1.0 };
+        // Sigmoid-like saturation: delta=0 → 1.0, delta=0.1 → 0.5,
+        // delta=1.0 → ~0.1. Keeps the scalar in [0, 1].
+        let delta_term = 1.0 / (1.0 + 10.0 * self.trained_policy_delta_norm);
+        0.5 * growth_term + 0.5 * delta_term
     }
 }
 
