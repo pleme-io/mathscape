@@ -57,8 +57,8 @@ pub use bootstrap::{
     BootstrapOutcome, CanonicalDeduper, CorpusGenerator, CycleTimings,
     DefaultCorpusGenerator, DefaultModelUpdater, ExperimentOutcome,
     ExperimentScenario, IterationSnapshot, IterationTimings, LawExtractor,
-    LibraryDeduper, ModelUpdater, NoDedup, PhaseOutcome, SpecExecutionError,
-    SubsumptionDeduper,
+    LearningObservation, LibraryDeduper, ModelUpdater, NoDedup, PhaseOutcome,
+    SpecExecutionError, SubsumptionDeduper,
 };
 pub use optimizer::{sgd_step_int, sgd_step_tensor};
 pub use bettyfine::{bettyfine_library, standard_bettyfine_cardinality, OperatorSpec};

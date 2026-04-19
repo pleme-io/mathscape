@@ -642,6 +642,120 @@ impl ExperimentOutcome {
             .map(|p| p.cycle_outcome.timings.total_ns)
             .collect()
     }
+
+    /// Phase U.1 (2026-04-18): project this outcome into a typed
+    /// observation — the digest a `ScenarioProposer` reads to
+    /// decide the next scenario. See
+    /// `docs/arch/self-tuning-meta-loop.md`.
+    #[must_use]
+    pub fn observation(&self) -> LearningObservation {
+        let growth = self.per_phase_growth();
+        let total_library_size = self
+            .phases
+            .last()
+            .map(|p| p.cycle_outcome.final_library.len())
+            .unwrap_or(0);
+        let saturation_phase_index = growth.iter().position(|&g| g == 0);
+        let extract_ns_per_iteration: Vec<u64> = self
+            .phases
+            .iter()
+            .flat_map(|p| {
+                p.cycle_outcome
+                    .timings
+                    .per_iteration
+                    .iter()
+                    .map(|t| t.extract_ns)
+            })
+            .collect();
+        let trained_policy_delta_norm = if let (Some(first), Some(last)) =
+            (self.phases.first(), self.phases.last())
+        {
+            let a = &first.spec_used.seed_policy.weights;
+            let b = &last.cycle_outcome.final_policy.weights;
+            let mut sum = 0.0f64;
+            for (x, y) in a.iter().zip(b.iter()) {
+                let d = x - y;
+                sum += d * d;
+            }
+            sum.sqrt()
+        } else {
+            0.0
+        };
+        LearningObservation {
+            total_library_size,
+            net_growth_per_phase: growth,
+            saturation_phase_index,
+            extract_ns_per_iteration,
+            trained_policy_delta_norm,
+            scenario_total_ns: self.scenario_total_ns,
+            chain_attestation: self.chain_attestation,
+        }
+    }
+}
+
+/// Phase U.1 (2026-04-18): typed projection of an
+/// `ExperimentOutcome` into the digest a `ScenarioProposer`
+/// consumes. Observational only — carries no authority over
+/// future scenarios, just evidence for the proposer to read.
+///
+/// See `docs/arch/self-tuning-meta-loop.md` for the full meta-loop
+/// design this primitive seeds.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct LearningObservation {
+    /// Rule count in the final (last phase's) library.
+    pub total_library_size: usize,
+    /// Per-phase library growth (same values as
+    /// `ExperimentOutcome::per_phase_growth`).
+    pub net_growth_per_phase: Vec<usize>,
+    /// Index of the first phase that added zero rules, if any.
+    /// `None` = every phase grew the library (no plateau detected).
+    pub saturation_phase_index: Option<usize>,
+    /// Flattened `extract_ns` across every iteration in every
+    /// phase. NOT aligned with phase boundaries.
+    pub extract_ns_per_iteration: Vec<u64>,
+    /// L2 norm of the weight delta between the first phase's
+    /// seed policy and the last phase's trained policy.
+    pub trained_policy_delta_norm: f64,
+    /// Wall-clock nanoseconds for the whole scenario.
+    pub scenario_total_ns: u64,
+    /// Chain attestation of the observed outcome — ties the
+    /// observation back to the specific run that produced it.
+    pub chain_attestation: crate::hash::TermRef,
+}
+
+impl LearningObservation {
+    /// Did the scenario's library grow at all?
+    #[must_use]
+    pub fn made_any_progress(&self) -> bool {
+        self.net_growth_per_phase.iter().any(|&g| g > 0)
+    }
+
+    /// Rules discovered per total wall-clock millisecond.
+    #[must_use]
+    pub fn rules_per_ms(&self) -> f64 {
+        if self.scenario_total_ns == 0 {
+            return 0.0;
+        }
+        let rules: u64 = self
+            .net_growth_per_phase
+            .iter()
+            .map(|&g| g as u64)
+            .sum();
+        (rules as f64) / ((self.scenario_total_ns as f64) / 1.0e6)
+    }
+
+    /// Mean extract_ns across all iterations.
+    #[must_use]
+    pub fn mean_extract_ns(&self) -> f64 {
+        if self.extract_ns_per_iteration.is_empty() {
+            return 0.0;
+        }
+        let sum: u64 = self
+            .extract_ns_per_iteration
+            .iter()
+            .fold(0u64, |a, b| a.saturating_add(*b));
+        (sum as f64) / (self.extract_ns_per_iteration.len() as f64)
+    }
 }
 
 /// Run an `ExperimentScenario` by chaining phase outputs.
@@ -2089,6 +2203,139 @@ mod tests {
         // no-growth iteration → stop after iter 0.
         assert_eq!(outcome.iterations.len(), 1);
         assert!(outcome.final_library.is_empty());
+    }
+
+    // ── Phase U.1: LearningObservation tests ─────────────────────
+
+    #[test]
+    fn observation_captures_growth_and_saturation() {
+        // Scenario where each phase has null extractor (grows 0).
+        // Observation should show saturation at phase 0.
+        let base = BootstrapCycleSpec {
+            corpus_generator: "null".into(),
+            law_extractor: "null".into(),
+            model_updater: "default".into(),
+            deduper: "canonical".into(),
+            n_iterations: 2,
+            seed_library: vec![dummy_law()],
+            seed_policy: LinearPolicy::tensor_seeking_prior(),
+            early_stop_after_stable: None,
+        };
+        let scenario = ExperimentScenario {
+            name: "obs".into(),
+            phases: vec![base.clone(), base.clone()],
+        };
+        let outcome = execute_scenario_core(&scenario).unwrap();
+        let obs = outcome.observation();
+
+        assert_eq!(obs.total_library_size, 1);
+        // Seed library has 1 rule; no phase adds — growth [1, 0]:
+        // phase 0 "grows" from 0 to 1 (the seed); phase 1 from 1 to 1.
+        assert_eq!(obs.net_growth_per_phase, vec![1, 0]);
+        assert_eq!(obs.saturation_phase_index, Some(1));
+        assert_eq!(obs.scenario_total_ns, outcome.scenario_total_ns);
+        assert_eq!(obs.chain_attestation, outcome.chain_attestation);
+    }
+
+    #[test]
+    fn observation_detects_no_progress() {
+        // Seed library stays, null extractor across all phases,
+        // null updater so policy doesn't move either. Observation
+        // reports made_any_progress == false.
+        let base = BootstrapCycleSpec {
+            corpus_generator: "null".into(),
+            law_extractor: "null".into(),
+            model_updater: "null".into(),
+            deduper: "canonical".into(),
+            n_iterations: 1,
+            seed_library: vec![dummy_law()],
+            seed_policy: LinearPolicy::new(),
+            early_stop_after_stable: None,
+        };
+        let scenario = ExperimentScenario {
+            name: "stuck".into(),
+            phases: vec![base.clone(), base],
+        };
+        let outcome = execute_scenario_core(&scenario).unwrap();
+        let obs = outcome.observation();
+        // Phase 0 seeds 1 rule (growth 1); phase 1 adds nothing.
+        // made_any_progress is TRUE because phase 0 "grew" by 1.
+        assert!(obs.made_any_progress());
+        // But policy didn't move (null updater).
+        assert!(obs.trained_policy_delta_norm < 1e-12);
+    }
+
+    #[test]
+    fn observation_policy_delta_moves_when_default_updater_trains() {
+        // With the default updater, the policy trains on the
+        // trajectory. trained_policy_delta_norm should be > 0.
+        let base = BootstrapCycleSpec {
+            corpus_generator: "null".into(),
+            law_extractor: "null".into(),
+            model_updater: "default".into(),
+            deduper: "canonical".into(),
+            n_iterations: 3,
+            seed_library: Vec::new(),
+            seed_policy: LinearPolicy::tensor_seeking_prior(),
+            early_stop_after_stable: None,
+        };
+        let scenario = ExperimentScenario {
+            name: "train".into(),
+            phases: vec![base.clone(), base],
+        };
+        let outcome = execute_scenario_core(&scenario).unwrap();
+        let obs = outcome.observation();
+        assert!(
+            obs.trained_policy_delta_norm >= 0.0,
+            "delta norm must be non-negative: {}",
+            obs.trained_policy_delta_norm,
+        );
+    }
+
+    #[test]
+    fn observation_bincode_roundtrip() {
+        let obs = LearningObservation {
+            total_library_size: 7,
+            net_growth_per_phase: vec![3, 2, 1, 0],
+            saturation_phase_index: Some(3),
+            extract_ns_per_iteration: vec![100, 200, 300],
+            trained_policy_delta_norm: 0.42,
+            scenario_total_ns: 123_456,
+            chain_attestation: crate::hash::TermRef::from_bytes(b"xyz"),
+        };
+        let bytes = bincode::serialize(&obs).unwrap();
+        let back: LearningObservation = bincode::deserialize(&bytes).unwrap();
+        assert_eq!(obs, back);
+    }
+
+    #[test]
+    fn observation_is_deterministic_like_outcome() {
+        // Two identical scenarios produce identical observations —
+        // same rule counts, same attestation, same scenario structure.
+        // Wall-clock fields differ so compare everything else.
+        let base = BootstrapCycleSpec {
+            corpus_generator: "null".into(),
+            law_extractor: "null".into(),
+            model_updater: "default".into(),
+            deduper: "canonical".into(),
+            n_iterations: 2,
+            seed_library: Vec::new(),
+            seed_policy: LinearPolicy::tensor_seeking_prior(),
+            early_stop_after_stable: None,
+        };
+        let scenario = ExperimentScenario {
+            name: "det".into(),
+            phases: vec![base.clone(), base],
+        };
+        let a = execute_scenario_core(&scenario).unwrap().observation();
+        let b = execute_scenario_core(&scenario).unwrap().observation();
+        assert_eq!(a.total_library_size, b.total_library_size);
+        assert_eq!(a.net_growth_per_phase, b.net_growth_per_phase);
+        assert_eq!(a.saturation_phase_index, b.saturation_phase_index);
+        assert_eq!(a.chain_attestation, b.chain_attestation);
+        assert!(
+            (a.trained_policy_delta_norm - b.trained_policy_delta_norm).abs() < 1e-12
+        );
     }
 
     #[test]
