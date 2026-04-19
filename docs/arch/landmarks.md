@@ -3,7 +3,7 @@
 Where the machine is, where it's been, and where it goes next. This doc
 is the canonical map. Updated every time a milestone closes.
 
-## Where we are (2026-04-18, post-Phase T)
+## Where we are (2026-04-18, post-Phase U)
 
 The machine:
 - Traverses mathscape **autonomously** — discovers primitives, reinforces
@@ -29,6 +29,20 @@ The machine:
   speedup on 4-phase training chains. Autonomous-traversal
   milestone picks up a ~1.5× bonus from R38 micro-opts inside
   `paired_anti_unify`
+- **Surfaces subterm-level laws** — Phase I adds
+  `paired_subterm_anti_unify` alongside the root-level primitive,
+  enumerating matching subterm positions up to a depth cap.
+  Unblocks Phase H rank-2 inception once Phase J certifies
+  candidates. Exposed as `derive_laws_with_subterm_au`
+- **Self-tunes end-to-end** — Phase U's `MetaLoop` observes each
+  scenario's outcome via `LearningObservation`, hands the history
+  to a `ScenarioProposer`, executes the proposed next scenario,
+  and sails out when no-progress + tiny policy delta persist for
+  K consecutive phases. `HeuristicProposer` encodes Phase T as
+  static decisions; `AdaptiveProposer` LEARNS per-archetype
+  performance at runtime with ε-greedy exploration. All pieces
+  Lisp-residential; meta-attestation is BLAKE3 over the chain of
+  chain-attestations
 
 ### Apex fingerprint
 
@@ -275,6 +289,79 @@ All Phase R + Phase S invariants preserved. Phase T adds:
   post-plateau iterations without changing the final library on
   plateau-reaching workloads. Pinned invariant: early-stop produces
   bit-identical library to full run.
+
+### Phase I: subterm-paired anti-unification (2026-04-18)
+
+Law discovery no longer limited to root-level pattern matches.
+`paired_subterm_anti_unify` in `mathscape-compress/antiunify.rs`
+enumerates matching subterm positions in both inputs (up to a
+depth cap) and anti-unifies each pair against the whole output.
+Asymmetric output pairing keeps the function useful when eval
+folds deep inputs to leaf outputs.
+
+| Landmark | Closes |
+|---|---|
+| **Phase I.1** (subterm AU primitive) | root-only AU → pairs at every matching subterm position; min-depth descent with shape-compatible-arity check |
+| **Phase I.2** (`derive_laws_with_subterm_au`) | sibling of `derive_laws_with_cache`, routes through the subterm primitive; `subterm_depth=0` collapses to root-only |
+
+**Unblocks Phase H** (rank-2 meta-inception): the
+`rank2_inception_probe` test was stuck at ONE active meta-rule
+because every root-level candidate collapsed into S_10000's
+equivalence class. Phase I surfaces shape-orthogonal candidates
+at inner positions — the precondition for
+`MetaPatternGenerator` to mint rank-2 across distinct classes.
+Phase J (empirical validity) still needed to certify them.
+
+**Honest limitation** (pinned by
+`subterm_au_surfaces_inner_pattern`): eval-fold collapses output
+structure so many subterm candidates fail the RHS-subset-LHS
+filter. Phase I surfaces; Phase J certifies.
+
+### Phase U: Self-tuning meta-loop (2026-04-18)
+
+The outer orchestrator lands. The machine now observes its own
+learning, proposes its own next training recipe, and sails out
+when the reachable territory for a given seed is exhausted.
+Closes the directive arc "observe what we're learning / let the
+model tune its own training / leverage Lisp virtualization."
+
+| Landmark | Closes |
+|---|---|
+| **U.1** (`LearningObservation`) | typed digest of an ExperimentOutcome — total_library_size, seed_library_size, net_growth_per_phase, saturation_phase_index, extract_ns_per_iteration, trained_policy_delta_norm, scenario_total_ns, chain_attestation. Pure projection, no authority |
+| **U.2** (`ScenarioProposer` trait) | seam for "emit next scenario from observation history + current policy." `HeuristicProposer` encodes Phase T as a static decision tree (baseline / early-stop-plateau / train-only / extended-discovery) |
+| **U.3** (`MetaLoop<E, P>` driver) | executes seed → observes → proposes → executes, ... Terminates on max_phases or sail-out (K consecutive no-progress phases with tiny policy delta). MetaLoopOutcome carries full history + meta-attestation (BLAKE3 over chain of chain-attestations) |
+| **U.6** (`AdaptiveProposer`) | SELF-LEARNING proposer. Tracks per-archetype empirical stats (progress rate, rules-per-ms, policy delta), scores archetypes via weighted sum, picks argmax with ε-greedy exploration. Interior mutability for the stats; deterministic replay preserved |
+| **arch doc** (`docs/arch/self-tuning-meta-loop.md`) | full Phase U frame, the Lisp/WASI/WASM path for U.5 virtualization |
+
+**Phase U headline findings:**
+
+- **The proposer genuinely picks different archetypes**. Demo
+  trace on the default corpus: seed→baseline→baseline→
+  extended-discovery→train-only×3 — the heuristic branches fire
+  based on observed history, not a fixed loop.
+- **Self-encapsulation achieved**. The proposer sees only
+  observations (typed projections), not raw scenarios or
+  outcomes. The executor sees only scenarios, not the proposer's
+  history. Each seam is its own black box. Chaos is in the
+  layer, not the interface.
+- **Full Lisp-residency within reach**. R10 policy Sexp, R32
+  spec Sexp, R33 scenario Sexp, U.1 observation (needs bridge).
+  Once the observation Sexp bridge lands, the entire meta-loop
+  is a pure `(Sexp, Sexp) → Sexp` function — the exact signature
+  of a WASI module. Phase U.5 is the virtualization move.
+
+**Kernel invariant status after Phase U:**
+All Phase R + S + T invariants preserved. Phase U adds:
+- **Meta-attestation**: BLAKE3 over the sequence of per-phase
+  chain-attestations. Stable under identical seed + proposer +
+  executor; shifts on any change.
+- **Observation purity**: `ExperimentOutcome::observation()` is
+  a deterministic projection. Same outcome → same observation
+  → same proposer decision → same next scenario.
+- **Adaptive determinism**: `AdaptiveProposer` uses a
+  count-keyed hash for ε-greedy coin-flips rather than a
+  random RNG, so two proposers fed the same observation
+  sequence emit identical archetype sequences.
 
 ## Where we go next
 

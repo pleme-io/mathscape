@@ -105,6 +105,18 @@ machine produces the trajectory.
     its own bottleneck, proposes mutations, keeps winners,
     resumes. Zero human intervention for parameter-bump
     saturations. Design only — implementation starts at ML4.1.
+24. `docs/arch/self-tuning-meta-loop.md` — **PHASE U DESIGN + LANDED U.1-U.3+U.6**
+    (2026-04-18). The outer orchestrator: observe → propose →
+    execute → observe, ... Each component is a pure-Lisp value once
+    U.4 Sexp bridge for LearningObservation lands. `LearningObservation`
+    is the typed digest the proposer consumes. `HeuristicProposer`
+    encodes Phase T's findings as a fixed decision tree;
+    `AdaptiveProposer` LEARNS per-archetype performance at runtime
+    and biases its picks (ε-greedy). `MetaLoop<E, P>` terminates on
+    sail-out (no progress + tiny policy delta for K consecutive
+    phases) or max-phase ceiling. Meta-attestation = BLAKE3 over
+    chain of chain-attestations. See also landmarks.md Phase U
+    section for the canonical map.
 22. `docs/arch/edge-riding.md` — **PERPETUAL DISCOVERY** (2026-04-18).
     The L5 architectural frame. By Gödel's incompleteness, any
     sufficiently-rich substrate has unprovable-from-inside

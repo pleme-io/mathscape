@@ -308,6 +308,195 @@ fn current_policy_projection(policy: &LinearPolicy) -> LibraryFeatures {
     LibraryFeatures::extract(&[])
 }
 
+// ── Adaptive proposer — learns which archetypes are productive ────
+//
+// The HeuristicProposer encodes STATIC decisions from Phase T. The
+// AdaptiveProposer LEARNS at runtime: after each phase, it updates
+// a per-archetype performance score, then biases its next pick
+// toward archetypes that earned high scores on similar observed
+// states.
+//
+// This is the direct realization of "let the model tune its own
+// training." Where HeuristicProposer is a fixed decision tree,
+// AdaptiveProposer is a running empirical model.
+
+/// Per-archetype running statistics. Stored in the proposer so it
+/// persists across `propose` calls — the proposer IS stateful
+/// learning.
+#[derive(Debug, Clone, Default)]
+struct ArchetypeStats {
+    /// Count of times this archetype was proposed.
+    proposal_count: usize,
+    /// Count of times its follow-up observation showed
+    /// `made_any_progress() == true`.
+    progress_count: usize,
+    /// Running sum of `rules_per_ms` for productive phases.
+    productive_rules_per_ms_sum: f64,
+    /// Running sum of policy-delta-norm achieved under this archetype.
+    policy_delta_sum: f64,
+}
+
+impl ArchetypeStats {
+    /// Empirical progress rate in [0, 1]. Prior-agnostic Laplace
+    /// smoothing (adds 1 to numerator + 2 to denominator) so an
+    /// untried archetype starts at 0.5 rather than 0 or NaN.
+    fn progress_rate(&self) -> f64 {
+        (self.progress_count as f64 + 1.0)
+            / (self.proposal_count as f64 + 2.0)
+    }
+
+    fn mean_productive_rules_per_ms(&self) -> f64 {
+        if self.progress_count == 0 {
+            0.0
+        } else {
+            self.productive_rules_per_ms_sum / self.progress_count as f64
+        }
+    }
+
+    fn mean_policy_delta(&self) -> f64 {
+        if self.proposal_count == 0 {
+            0.0
+        } else {
+            self.policy_delta_sum / self.proposal_count as f64
+        }
+    }
+}
+
+/// Self-learning scenario proposer. Keeps per-archetype empirical
+/// stats and picks the archetype with the highest expected value
+/// on the next proposal. `exploration_bias` in [0, 1] mixes in
+/// uniform-random selection to keep less-tried archetypes in play
+/// (classic ε-greedy).
+///
+/// Uses interior mutability for the stats: `propose` takes `&self`
+/// to satisfy the trait, but updates its internal model based on
+/// the observation that just happened. `update_from_last(obs)`
+/// must be called between `propose` calls to feed in what was
+/// learned; `MetaLoop::run` does this automatically.
+///
+/// The `update_from_last` mechanism is exposed explicitly so
+/// callers who don't use `MetaLoop` (future custom drivers) can
+/// still maintain the learning.
+#[derive(Debug)]
+pub struct AdaptiveProposer {
+    pub extractor_name: String,
+    /// ε-greedy exploration: at probability `exploration_bias`,
+    /// pick a uniform-random archetype instead of the argmax.
+    /// Range [0, 1]. 0.0 = pure exploit. 1.0 = pure explore.
+    pub exploration_bias: f64,
+    stats: std::cell::RefCell<
+        std::collections::BTreeMap<&'static str, ArchetypeStats>,
+    >,
+    /// Deterministic random state for exploration choice. Seeded
+    /// from the proposal count so replays are bit-identical.
+    last_proposed: std::cell::RefCell<Option<SpecArchetype>>,
+}
+
+impl AdaptiveProposer {
+    #[must_use]
+    pub fn with_extractor(extractor_name: impl Into<String>) -> Self {
+        Self {
+            extractor_name: extractor_name.into(),
+            exploration_bias: 0.25,
+            stats: std::cell::RefCell::new(
+                std::collections::BTreeMap::new(),
+            ),
+            last_proposed: std::cell::RefCell::new(None),
+        }
+    }
+
+    /// Feed the most recent observation into the adaptive model.
+    /// Must be called after each `propose → execute` round so the
+    /// proposer learns from what happened.
+    pub fn observe(&self, obs: &LearningObservation) {
+        let Some(archetype) = *self.last_proposed.borrow() else {
+            return;
+        };
+        let mut stats = self.stats.borrow_mut();
+        let entry = stats.entry(archetype.name()).or_default();
+        entry.proposal_count += 1;
+        entry.policy_delta_sum += obs.trained_policy_delta_norm;
+        if obs.made_any_progress() {
+            entry.progress_count += 1;
+            entry.productive_rules_per_ms_sum += obs.rules_per_ms();
+        }
+    }
+
+    /// Deterministic coin-flip keyed on the cumulative proposal
+    /// count. Returns true when the coin lands on "explore."
+    fn should_explore(&self, proposal_count: usize) -> bool {
+        if self.exploration_bias <= 0.0 {
+            return false;
+        }
+        if self.exploration_bias >= 1.0 {
+            return true;
+        }
+        // Deterministic PRN from a u64 hash of the count.
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        use std::hash::{Hash, Hasher};
+        (proposal_count as u64).hash(&mut h);
+        let x = h.finish();
+        let unit = (x as f64) / (u64::MAX as f64);
+        unit < self.exploration_bias
+    }
+
+    /// Score each archetype and pick the best, with ε-greedy
+    /// exploration. Score = 2 * progress_rate + productivity_term.
+    fn pick_archetype(&self, proposal_count: usize) -> SpecArchetype {
+        let stats = self.stats.borrow();
+        let all = SpecArchetype::all();
+        if self.should_explore(proposal_count) {
+            // Rotate through archetypes by count for deterministic
+            // replay. round-robin is cleaner than pseudo-random
+            // for determinism — tests want identical outputs.
+            return all[proposal_count % all.len()];
+        }
+        let mut best: Option<(SpecArchetype, f64)> = None;
+        for a in all {
+            let s = stats
+                .get(a.name())
+                .cloned()
+                .unwrap_or_default();
+            let score = 2.0 * s.progress_rate()
+                + s.mean_productive_rules_per_ms()
+                + s.mean_policy_delta();
+            match best {
+                None => best = Some((*a, score)),
+                Some((_, best_score)) if score > best_score => {
+                    best = Some((*a, score))
+                }
+                _ => {}
+            }
+        }
+        best.map(|(a, _)| a).unwrap_or(SpecArchetype::Baseline)
+    }
+}
+
+impl ScenarioProposer for AdaptiveProposer {
+    fn propose(
+        &self,
+        history: &[LearningObservation],
+        _current_policy: &LinearPolicy,
+    ) -> ExperimentScenario {
+        // Update stats from whatever just happened (no-op on first
+        // call since last_proposed is None).
+        if let Some(last) = history.last() {
+            self.observe(last);
+        }
+        let archetype = self.pick_archetype(history.len());
+        *self.last_proposed.borrow_mut() = Some(archetype);
+        let spec = archetype.to_spec(
+            &self.extractor_name,
+            Vec::new(),
+            LinearPolicy::tensor_seeking_prior(),
+        );
+        ExperimentScenario {
+            name: format!("adaptive-{}", archetype.name()),
+            phases: vec![spec],
+        }
+    }
+}
+
 // ── MetaLoop driver ───────────────────────────────────────────────
 
 /// Config for a meta-loop run. All fields have sensible defaults;
@@ -617,6 +806,86 @@ mod tests {
         other.phases[0].n_iterations = 2;
         let b = loop_.run(other).unwrap();
         assert_ne!(a.meta_attestation, b.meta_attestation);
+    }
+
+    // ── U.6 AdaptiveProposer tests ───────────────────────────────
+
+    #[test]
+    fn adaptive_proposer_first_call_has_no_history() {
+        let p = AdaptiveProposer::with_extractor("null");
+        let scenario = p.propose(&[], &LinearPolicy::new());
+        assert_eq!(scenario.phases.len(), 1);
+        assert!(scenario.name.starts_with("adaptive-"));
+    }
+
+    #[test]
+    fn adaptive_proposer_observes_and_updates_stats() {
+        let p = AdaptiveProposer::with_extractor("null");
+        let obs = LearningObservation {
+            total_library_size: 4,
+            seed_library_size: 0,
+            net_growth_per_phase: vec![4],
+            saturation_phase_index: None,
+            extract_ns_per_iteration: vec![],
+            trained_policy_delta_norm: 0.5,
+            scenario_total_ns: 1_000_000,
+            chain_attestation: TermRef::from_bytes(b"a"),
+        };
+        // First propose — no history, picks something.
+        let _ = p.propose(&[], &LinearPolicy::new());
+        // Now feed an observation — the stats should update.
+        let hist = vec![obs];
+        let _ = p.propose(&hist, &LinearPolicy::new());
+        // After 2 proposals, at least one archetype has
+        // non-default stats.
+        let stats = p.stats.borrow();
+        let any_tracked = stats.values().any(|s| s.proposal_count > 0);
+        assert!(any_tracked);
+    }
+
+    #[test]
+    fn adaptive_proposer_is_deterministic() {
+        // Two fresh proposers + same sequence of observations →
+        // same sequence of proposed archetypes.
+        let a = AdaptiveProposer::with_extractor("null");
+        let b = AdaptiveProposer::with_extractor("null");
+        let obs = LearningObservation {
+            total_library_size: 3,
+            seed_library_size: 0,
+            net_growth_per_phase: vec![3],
+            saturation_phase_index: None,
+            extract_ns_per_iteration: vec![],
+            trained_policy_delta_norm: 0.2,
+            scenario_total_ns: 500_000,
+            chain_attestation: TermRef::from_bytes(b"b"),
+        };
+        let pol = LinearPolicy::new();
+        let mut hist: Vec<LearningObservation> = Vec::new();
+        let mut names_a = Vec::new();
+        let mut names_b = Vec::new();
+        for _ in 0..5 {
+            let sa = a.propose(&hist, &pol);
+            let sb = b.propose(&hist, &pol);
+            names_a.push(sa.name.clone());
+            names_b.push(sb.name.clone());
+            hist.push(obs.clone());
+        }
+        assert_eq!(names_a, names_b);
+    }
+
+    #[test]
+    fn meta_loop_with_adaptive_proposer_runs_and_terminates() {
+        let loop_ = MetaLoop::new(
+            DefaultScenarioExecutor,
+            AdaptiveProposer::with_extractor("null"),
+            MetaLoopConfig {
+                max_phases: 4,
+                sail_out_window: 0,
+                policy_delta_threshold: 1e-6,
+            },
+        );
+        let outcome = loop_.run(null_scenario()).unwrap();
+        assert_eq!(outcome.history.len(), 4);
     }
 
     #[test]

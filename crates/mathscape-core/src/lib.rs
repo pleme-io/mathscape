@@ -64,9 +64,9 @@ pub use bootstrap::{
 };
 pub use optimizer::{sgd_step_int, sgd_step_tensor};
 pub use meta_loop::{
-    DefaultScenarioExecutor, HeuristicProposer, MetaLoop, MetaLoopConfig,
-    MetaLoopOutcome, MetaPhaseRecord, ScenarioExecutor, ScenarioProposer,
-    SpecArchetype, TerminationReason,
+    AdaptiveProposer, DefaultScenarioExecutor, HeuristicProposer, MetaLoop,
+    MetaLoopConfig, MetaLoopOutcome, MetaPhaseRecord, ScenarioExecutor,
+    ScenarioProposer, SpecArchetype, TerminationReason,
 };
 pub use bettyfine::{bettyfine_library, standard_bettyfine_cardinality, OperatorSpec};
 pub use event::{Event, EventCategory, StatusAdvance};
