@@ -1,0 +1,476 @@
+openapi: 3.0.3
+
+info:
+  title: Mathscape Live Inference
+  description: |
+    Live inference surface over a running mathscape model.
+
+    This API exposes the `LiveInferenceHandle` Rust type
+    (in `mathscape-core/src/inference.rs`) as an HTTP / MCP /
+    gRPC / GraphQL surface. The model is **alive** — the
+    library can change between calls as the motor continues to
+    discover rules. Every endpoint is non-blocking and
+    snapshot-consistent: one call reads a coherent picture of
+    the world; the next call may see a different, newer world.
+
+    # Pipeline (normalized)
+
+    This spec is the SINGLE SOURCE OF TRUTH. All downstream
+    artifacts are mechanically generated:
+
+    ```
+    apis/mathscape-inference/openapi.yaml   (this file)
+         │
+         ▼
+       sekkei  (OpenAPI 3.0 → typed Rust structs)
+         │
+         ▼
+       takumi  (resolved IR, CRUD grouping)
+         │
+         ├─▶ forge-gen --servers   → axum REST + tonic gRPC + async-graphql
+         ├─▶ forge-gen --sdks      → Rust, TypeScript, Python, Go clients
+         ├─▶ forge-gen --mcp       → mathscape-inference-mcp (MCP server)
+         ├─▶ forge-gen --schemas   → JSON Schema, Protobuf, GraphQL SDL
+         ├─▶ forge-gen --docs      → Markdown + redoc HTML
+         └─▶ forge-gen --completions → fish + skim-tab YAML
+    ```
+
+    Changing a type here regenerates EVERYTHING. No hand-rolled
+    API surfaces, no drift, one commit lands on all platforms.
+
+  version: 0.1.0
+  contact:
+    name: pleme-io
+    url: https://github.com/pleme-io/mathscape
+  license:
+    name: MIT
+
+servers:
+  - url: http://localhost:8080
+    description: Local embedded service
+  - url: https://inference.quero.lol
+    description: Production service
+
+tags:
+  - name: inference
+    description: Term reduction against the live library
+  - name: competency
+    description: Per-subdomain mathematical competency measurement
+  - name: model
+    description: Live model snapshots (library + policy)
+
+paths:
+  # ── INFERENCE ────────────────────────────────────────────────
+  /infer:
+    post:
+      tags: [inference]
+      operationId: infer
+      summary: Reduce a term using the current library
+      description: |
+        Reduces `term` against the current live library.
+        Results reflect any rules the motor has added up to
+        the moment of the call.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InferRequest"
+      responses:
+        "200":
+          description: Reduction completed (success or eval error)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EvalResult"
+        "400":
+          description: Malformed request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  # ── COMPETENCY ───────────────────────────────────────────────
+  /competency:
+    get:
+      tags: [competency]
+      operationId: currentCompetency
+      summary: Run the mathematician's curriculum
+      description: |
+        Runs the 32-problem Mathematician's Curriculum against
+        the current library. Returns a per-subdomain breakdown
+        (arithmetic-nat, arithmetic-int, symbolic-nat,
+        tensor-algebra, compound, generalization).
+      responses:
+        "200":
+          description: Curriculum report
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CurriculumReport"
+
+  # ── MODEL SNAPSHOTS ──────────────────────────────────────────
+  /model/policy:
+    get:
+      tags: [model]
+      operationId: policySnapshot
+      summary: Clone the trainer's current policy
+      description: |
+        Returns a deep copy of the StreamingPolicyTrainer's
+        current LinearPolicy. Does NOT freeze the training
+        stream — the next call may see different weights.
+      responses:
+        "200":
+          description: Policy snapshot
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LinearPolicy"
+
+  /model/library:
+    get:
+      tags: [model]
+      operationId: librarySnapshot
+      summary: Clone the current rule library
+      description: |
+        Returns a deep copy of the full set of rewrite rules
+        the motor has discovered so far.
+      responses:
+        "200":
+          description: Library snapshot
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/RewriteRule"
+
+  /model/library/size:
+    get:
+      tags: [model]
+      operationId: librarySize
+      summary: Count of rules in the library
+      description: |
+        O(1) query. Cheap dashboard probe when only the count
+        is needed.
+      responses:
+        "200":
+          description: Rule count
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [size]
+                properties:
+                  size:
+                    type: integer
+                    format: int64
+                    minimum: 0
+
+components:
+  schemas:
+
+    # ── INPUT / OUTPUT ───────────────────────────────────────
+
+    InferRequest:
+      type: object
+      required: [term, stepLimit]
+      properties:
+        term:
+          $ref: "#/components/schemas/Term"
+        stepLimit:
+          type: integer
+          format: int64
+          minimum: 1
+          default: 100
+          description: Maximum eval steps before forced termination.
+
+    EvalResult:
+      description: |
+        Sum type: `Ok(Term)` for successful reduction, `Err(msg)`
+        for eval failure (step limit, type mismatch, etc.).
+      oneOf:
+        - $ref: "#/components/schemas/EvalOk"
+        - $ref: "#/components/schemas/EvalErr"
+      discriminator:
+        propertyName: status
+        mapping:
+          ok: "#/components/schemas/EvalOk"
+          err: "#/components/schemas/EvalErr"
+
+    EvalOk:
+      type: object
+      required: [status, value]
+      properties:
+        status:
+          type: string
+          enum: [ok]
+        value:
+          $ref: "#/components/schemas/Term"
+
+    EvalErr:
+      type: object
+      required: [status, message]
+      properties:
+        status:
+          type: string
+          enum: [err]
+        message:
+          type: string
+
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+
+    # ── TERM / VALUE (core substrate types) ──────────────────
+
+    Term:
+      description: |
+        Recursive term tree. Sum type over Var, Number, Apply.
+        The Rust source is `mathscape_core::term::Term`.
+      oneOf:
+        - $ref: "#/components/schemas/TermVar"
+        - $ref: "#/components/schemas/TermNumber"
+        - $ref: "#/components/schemas/TermApply"
+      discriminator:
+        propertyName: kind
+        mapping:
+          var: "#/components/schemas/TermVar"
+          number: "#/components/schemas/TermNumber"
+          apply: "#/components/schemas/TermApply"
+
+    TermVar:
+      type: object
+      required: [kind, symbolId]
+      properties:
+        kind:
+          type: string
+          enum: [var]
+        symbolId:
+          type: integer
+          format: int32
+          minimum: 0
+          description: |
+            Symbol identifier (Rust u32). See
+            `mathscape_core::builtin` for reserved IDs (ADD=2,
+            MUL=3, TENSOR_ADD, TENSOR_MUL, etc.).
+
+    TermNumber:
+      type: object
+      required: [kind, value]
+      properties:
+        kind:
+          type: string
+          enum: [number]
+        value:
+          $ref: "#/components/schemas/Value"
+
+    TermApply:
+      type: object
+      required: [kind, head, args]
+      properties:
+        kind:
+          type: string
+          enum: [apply]
+        head:
+          $ref: "#/components/schemas/Term"
+        args:
+          type: array
+          items:
+            $ref: "#/components/schemas/Term"
+
+    Value:
+      description: |
+        Sum type over the numeric/tensor value kinds. Rust
+        source: `mathscape_core::value::Value`.
+      oneOf:
+        - $ref: "#/components/schemas/ValueNat"
+        - $ref: "#/components/schemas/ValueInt"
+        - $ref: "#/components/schemas/ValueFloat"
+        - $ref: "#/components/schemas/ValueTensor"
+        - $ref: "#/components/schemas/ValueFloatTensor"
+      discriminator:
+        propertyName: kind
+        mapping:
+          nat: "#/components/schemas/ValueNat"
+          int: "#/components/schemas/ValueInt"
+          float: "#/components/schemas/ValueFloat"
+          tensor: "#/components/schemas/ValueTensor"
+          floatTensor: "#/components/schemas/ValueFloatTensor"
+
+    ValueNat:
+      type: object
+      required: [kind, n]
+      properties:
+        kind:
+          type: string
+          enum: [nat]
+        n:
+          type: integer
+          format: int64
+          minimum: 0
+
+    ValueInt:
+      type: object
+      required: [kind, n]
+      properties:
+        kind:
+          type: string
+          enum: [int]
+        n:
+          type: integer
+          format: int64
+
+    ValueFloat:
+      type: object
+      required: [kind, f]
+      properties:
+        kind:
+          type: string
+          enum: [float]
+        f:
+          type: number
+          format: double
+
+    ValueTensor:
+      type: object
+      required: [kind, shape, data]
+      properties:
+        kind:
+          type: string
+          enum: [tensor]
+        shape:
+          type: array
+          items:
+            type: integer
+            format: int64
+            minimum: 1
+        data:
+          type: array
+          items:
+            type: integer
+            format: int64
+
+    ValueFloatTensor:
+      type: object
+      required: [kind, shape, data]
+      properties:
+        kind:
+          type: string
+          enum: [floatTensor]
+        shape:
+          type: array
+          items:
+            type: integer
+            format: int64
+            minimum: 1
+        data:
+          type: array
+          items:
+            type: number
+            format: double
+
+    # ── RULE + POLICY (library + model) ──────────────────────
+
+    RewriteRule:
+      type: object
+      required: [name, lhs, rhs]
+      properties:
+        name:
+          type: string
+          description: Stable identifier for the rule.
+        lhs:
+          $ref: "#/components/schemas/Term"
+        rhs:
+          $ref: "#/components/schemas/Term"
+
+    LinearPolicy:
+      type: object
+      required: [weights, bias, trainedSteps, generation]
+      properties:
+        weights:
+          type: array
+          items:
+            type: number
+            format: double
+          minItems: 9
+          maxItems: 9
+          description: |
+            LibraryFeatures::WIDTH weights. Order matches the
+            Rust feature vector; do not reorder without a
+            migration.
+        bias:
+          type: number
+          format: double
+        trainedSteps:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Monotonically increasing — policy
+            NEVER resets in streaming training.
+        generation:
+          type: integer
+          format: int64
+          minimum: 0
+
+    # ── CURRICULUM REPORT ────────────────────────────────────
+
+    CurriculumReport:
+      type: object
+      required: [total, perSubdomain, mastered, frontier]
+      properties:
+        total:
+          $ref: "#/components/schemas/BenchmarkReport"
+        perSubdomain:
+          type: object
+          additionalProperties:
+            $ref: "#/components/schemas/BenchmarkReport"
+          description: |
+            Keys: arithmetic-nat, arithmetic-int, symbolic-nat,
+            tensor-algebra, compound, generalization.
+        mastered:
+          type: array
+          items:
+            type: string
+          description: Subdomain names at 100%.
+        frontier:
+          type: array
+          items:
+            type: string
+          description: Subdomain names at 0% — next learning target.
+
+    BenchmarkReport:
+      type: object
+      required: [problemSetSize, solvedCount, solvedFraction]
+      properties:
+        problemSetSize:
+          type: integer
+          format: int64
+          minimum: 0
+        solvedCount:
+          type: integer
+          format: int64
+          minimum: 0
+        solvedFraction:
+          type: number
+          format: double
+          minimum: 0
+          maximum: 1
+        results:
+          type: array
+          items:
+            $ref: "#/components/schemas/ProblemResult"
+
+    ProblemResult:
+      type: object
+      required: [problemId, solved]
+      properties:
+        problemId:
+          type: string
+        solved:
+          type: boolean
+        actual:
+          $ref: "#/components/schemas/Term"
