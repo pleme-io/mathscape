@@ -39,6 +39,7 @@ pub mod promotion_gate;
 pub mod policy;
 pub mod primitives;
 pub mod reduction;
+pub mod rich_corpus;
 pub mod tensor;
 pub mod term;
 pub mod trajectory;
@@ -139,6 +140,7 @@ pub use orchestrator::{
     run_until_reduced, LayerEpochSnapshot, LayerTrajectory, MultiLayerReport,
     MultiLayerRunner, PromotionHook, PromotionOutcome,
 };
+pub use rich_corpus::RichCorpusGenerator;
 pub use reduction::{
     check_maximally_reduced, check_reduction, detect_subsumption_pairs,
     reduction_pressure, ReductionBarrier, ReductionPolicy, ReductionSummary,
