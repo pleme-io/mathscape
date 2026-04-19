@@ -108,8 +108,8 @@ pub use plasticity::{
 pub use streaming_policy::StreamingPolicyTrainer;
 pub use task::{
     as_math_tasks, run_benchmark as run_task_benchmark,
-    GenericBenchmarkConsumer, MathDomain, Task, TaskDomain, TaskReport,
-    TaskResult,
+    GenericBenchmarkConsumer, LanguageContext, LanguageDomain, MathDomain,
+    Task, TaskDomain, TaskReport, TaskResult,
 };
 pub use bettyfine::{bettyfine_library, standard_bettyfine_cardinality, OperatorSpec};
 pub use event::{Event, EventCategory, StatusAdvance};

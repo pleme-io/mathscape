@@ -273,6 +273,62 @@ pub fn as_math_tasks(
     problems.iter().map(Into::into).collect()
 }
 
+// ═════════════════════════════════════════════════════════════
+// Phase Z.4 (2026-04-19): LanguageDomain stub.
+//
+// The user's staged vision: "first get a model that is an
+// excellent mathematician and then teach it language and expand
+// from there." This is the type-scaffolding for the "then
+// language" step — a TaskDomain implementation over strings.
+//
+// Placeholder semantics for now: the solver is a simple
+// "dictionary lookup + concatenation" model. The REAL value is
+// that the streaming trainer, event hub, bandit probes, coach,
+// plasticity controller — every piece of infrastructure we've
+// built — will observe LanguageDomain benchmarks the same way
+// they observe MathDomain benchmarks. Same MapEvent shape, same
+// BenchmarkScored deltas, same training dynamics. Zero
+// additional plumbing.
+//
+// When the motor grows beyond math (e.g. learns token
+// substitution rules), plugging in a real NLP solver replaces
+// just `LanguageDomain::solve`. Everything else continues.
+// ═════════════════════════════════════════════════════════════
+
+/// The language domain: string → string transformations, with a
+/// dictionary as context.
+pub struct LanguageDomain;
+
+/// Placeholder context for the language domain — a dictionary
+/// of substitutions `input-phrase → output-phrase`. A real
+/// implementation would use a learned policy, a vocabulary,
+/// attention weights, etc.
+pub type LanguageContext = std::collections::BTreeMap<String, String>;
+
+impl TaskDomain for LanguageDomain {
+    type Input = String;
+    type Output = String;
+    type Context = LanguageContext;
+
+    fn name() -> &'static str {
+        "language"
+    }
+
+    fn solve(
+        ctx: &Self::Context,
+        input: &Self::Input,
+        _step_limit: usize,
+    ) -> Option<Self::Output> {
+        // Simple left-to-right substitution over the dictionary.
+        // This is a PLACEHOLDER — real NLP solving would use
+        // a tokenizer + learned transformation model.
+        Some(
+            ctx.iter()
+                .fold(input.clone(), |s, (k, v)| s.replace(k.as_str(), v)),
+        )
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -500,6 +556,69 @@ mod tests {
         // Per-consumer state is isolated.
         assert_eq!(math_consumer.runs(), 1);
         assert_eq!(sum_consumer.runs(), 1);
+    }
+
+    // ── Phase Z.4: LanguageDomain smoke tests ───────────────
+
+    #[test]
+    fn language_domain_name_is_language() {
+        assert_eq!(LanguageDomain::name(), "language");
+    }
+
+    #[test]
+    fn language_domain_solves_via_dictionary_context() {
+        let mut dict = LanguageContext::new();
+        dict.insert("cat".into(), "gato".into());
+        dict.insert("dog".into(), "perro".into());
+        let tasks = vec![
+            Task::<LanguageDomain> {
+                id: "translate-cat".into(),
+                description: "cat → gato".into(),
+                input: "my cat".into(),
+                expected: "my gato".into(),
+                step_limit: 0,
+            },
+            Task::<LanguageDomain> {
+                id: "translate-dog".into(),
+                description: "dog → perro".into(),
+                input: "the dog".into(),
+                expected: "the perro".into(),
+                step_limit: 0,
+            },
+        ];
+        let report: TaskReport<LanguageDomain> = run_benchmark(&tasks, &dict);
+        assert_eq!(report.solved_count, 2);
+        assert_eq!(report.solved_fraction(), 1.0);
+        assert_eq!(report.domain, "language");
+    }
+
+    #[test]
+    fn language_domain_integrates_with_generic_benchmark_consumer() {
+        use crate::mathscape_map::{BufferedConsumer, MapEvent};
+        use std::rc::Rc;
+
+        let mut dict = LanguageContext::new();
+        dict.insert("hello".into(), "hola".into());
+        let tasks = vec![Task::<LanguageDomain> {
+            id: "hola".into(),
+            description: "hello → hola".into(),
+            input: "hello world".into(),
+            expected: "hola world".into(),
+            step_limit: 0,
+        }];
+
+        let consumer = GenericBenchmarkConsumer::<LanguageDomain>::new(tasks);
+        let buffer = Rc::new(BufferedConsumer::new());
+
+        let _report = consumer.benchmark_now(&dict, &*buffer);
+
+        // The language benchmark emits BenchmarkScored — the
+        // SAME event type the trainer, coach, plasticity
+        // controller already consume for math benchmarks. Zero
+        // extra infrastructure needed.
+        let events = buffer.drain();
+        assert_eq!(events.len(), 1);
+        assert!(matches!(events[0], MapEvent::BenchmarkScored { .. }));
     }
 
     #[test]
