@@ -27,9 +27,13 @@
 
 mod common;
 
-use mathscape_compress::{derive_laws_with_subterm_au, validate_candidates};
+use mathscape_compress::{
+    derive_laws_with_subterm_au, extract::ExtractConfig, validate_candidates,
+    MetaPatternGenerator,
+};
 use mathscape_core::{
     builtin::{ADD, MUL},
+    epoch::{AcceptanceCertificate, Artifact, Generator},
     eval::RewriteRule,
     term::Term,
     value::Value,
@@ -76,6 +80,26 @@ fn count_distinct_shapes(rules: &[RewriteRule]) -> usize {
 fn matches_meta_head(t: &Term) -> bool {
     match t {
         Term::Apply(f, _) => matches!(**f, Term::Var(v) if v >= 100),
+        _ => false,
+    }
+}
+
+/// Does the rule's LHS look like a rank-2 meta-rule? I.e., outer
+/// head is a pattern var AND at least one arg is itself an Apply
+/// with a pattern-var head.
+fn is_rank2(t: &Term) -> bool {
+    match t {
+        Term::Apply(f, args) => {
+            let outer_is_meta = matches!(**f, Term::Var(v) if v >= 100);
+            let inner_has_meta = args.iter().any(|a| {
+                if let Term::Apply(inner_f, _) = a {
+                    matches!(**inner_f, Term::Var(v) if v >= 100)
+                } else {
+                    false
+                }
+            });
+            outer_is_meta && inner_has_meta
+        }
         _ => false,
     }
 }
@@ -157,6 +181,48 @@ fn phase_h_unblock_pipeline_runs_end_to_end() {
         );
     }
 
+    // ── Step 3: Phase H — run MetaPatternGenerator over the
+    //           validated library looking for rank-2 inception ──
+    let validated_artifacts: Vec<Artifact> = validated
+        .iter()
+        .enumerate()
+        .map(|(i, rule)| {
+            Artifact::seal(
+                rule.clone(),
+                0,
+                AcceptanceCertificate::trivial_conjecture(1.0 + i as f64),
+                Vec::new(),
+            )
+        })
+        .collect();
+    let mut meta_gen = MetaPatternGenerator::new(
+        ExtractConfig {
+            min_shared_size: 1,
+            min_matches: 2,
+            max_new_rules: 20,
+        },
+        30_000,
+    );
+    let rank2_candidates =
+        meta_gen.propose(0, &corpus, &validated_artifacts);
+    let rank2_count = rank2_candidates
+        .iter()
+        .filter(|c| is_rank2(&c.rule.lhs))
+        .count();
+    println!("\n── Phase H ── MetaPatternGenerator on validated library");
+    println!("  proposals : {}", rank2_candidates.len());
+    println!("  rank-2    : {rank2_count}");
+    for c in &rank2_candidates {
+        let marker = if is_rank2(&c.rule.lhs) {
+            " [RANK-2]"
+        } else if matches_meta_head(&c.rule.lhs) {
+            " [meta]"
+        } else {
+            ""
+        };
+        println!("    {} :: {} => {}{}", c.rule.name, c.rule.lhs, c.rule.rhs, marker);
+    }
+
     println!("\n  ── Pipeline end-to-end ran. ──");
     println!(
         "  Phase I surfaced {} candidates; Phase J accepted {};",
@@ -168,6 +234,27 @@ fn phase_h_unblock_pipeline_runs_end_to_end() {
         phase_i_shape_count, phase_j_shape_count
     );
     println!(
-        "  rank-2 inception is materially possible once shape-diversity > 1."
+        "  MetaPatternGenerator produced {} total proposals, {} rank-2.",
+        rank2_candidates.len(),
+        rank2_count
+    );
+    println!(
+        "  (rank-2 count > 0 confirms Phase H inception on this corpus.)"
+    );
+
+    // ── Rank-2 inception invariant ───────────────────────────────
+    // This is the payoff assertion of the session's directive arc.
+    // With Phase I surfacing nested shapes, Phase J rejecting
+    // over-general meta-heads, and the Phase H gate admitting
+    // multiple meta-rules as distinct equivalence classes, the
+    // MetaPatternGenerator CAN mint a rank-2 candidate across the
+    // flat/nested identity families on this corpus.
+    //
+    // Empirically verified 2026-04-18: rank2_count = 1 (S_30002,
+    // the nested-identity meta-rule abstracting both ?op and ?id).
+    assert!(
+        rank2_count >= 1,
+        "Phase H unblock must produce ≥1 rank-2 candidate from the \
+         Phase I+J-validated library (observed: {rank2_count})"
     );
 }

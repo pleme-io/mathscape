@@ -43,6 +43,15 @@ The machine:
   performance at runtime with ε-greedy exploration. All pieces
   Lisp-residential; meta-attestation is BLAKE3 over the chain of
   chain-attestations
+- **Rank-2 inception achieved** — Phase H landed 2026-04-18.
+  With Phase I surfacing shape-orthogonal candidates at subterm
+  positions, Phase J rejecting over-general meta-heads via
+  empirical validity checks, and the strict-subsumption gate
+  admitting distinct meta-equivalence classes, `MetaPatternGenerator`
+  mints the first rank-2 meta-rule:
+  `S_30002 :: (?op ?id (?op ?id ?x)) => S_30002(?op ?id ?x)` —
+  abstracting across both operator and nested-identity
+  structure. Pinned by `phase_h_unblock_pipeline_runs_end_to_end`
 
 ### Apex fingerprint
 
@@ -367,10 +376,54 @@ All Phase R + S + T invariants preserved. Phase U adds:
 
 Ranked by impact-per-effort. Each extension must preserve the lynchpin.
 
-### Phase H: meta-rule diversity + rank-2 inception — GATE LANDED, INCEPTION WAITING
+### Phase H: meta-rule diversity + rank-2 inception — LANDED 2026-04-18
 
-**Status: gate deployed 2026-04-18, rank-2 not yet surfacing —
-blocked on phase I or J.**
+**Status: UNBLOCKED + EMPIRICALLY VERIFIED.** Phase I (subterm-paired
+AU) surfaces shape-orthogonal candidates; Phase J (empirical validity
+on K Nat samples) filters the semantically-wrong ones; Phase H's
+strict-subsumption gate admits the rest as distinct meta-equivalence
+classes; `MetaPatternGenerator` on the validated library mints a
+rank-2 candidate that abstracts across shape families.
+
+**First rank-2 meta-rule observed** (via `phase_h_unblock` test on
+a diverse scalar identity corpus):
+
+```
+S_30002 :: (?op ?id (?op ?id ?x)) => S_30002(?op ?id ?x)
+```
+
+This abstracts BOTH the outer operator (?op ∈ {add, mul}) AND the
+nested-identity structure. The validated library it was derived
+from contained four concrete laws:
+
+  - `add(0, ?x) = ?x`  (flat add-identity)
+  - `mul(1, ?x) = ?x`  (flat mul-identity)
+  - `add(0, add(0, ?x)) = ?x`  (nested add-identity)
+  - `mul(1, mul(1, ?x)) = ?x`  (nested mul-identity)
+
+Running `MetaPatternGenerator` over those four artifacts produced
+2 proposals, 1 of them rank-2 (S_30002, the nested-identity
+meta-rule). This is the "inception" signal: a rule whose entire
+structure is composed of abstractions the machine itself developed.
+
+**What previously landed (2026-04-18 gate):**
+`reduction::detect_subsumption_pairs` enforces the
+irreducibility-aware gate: two meta-rules only subsume each other
+when one STRICTLY generalizes the other (not pattern-equivalent).
+Pinned by `rank2_inception_probe` at the original-pipeline level.
+
+**What landed today (2026-04-18 unblock):**
+Phase I's `paired_subterm_anti_unify` + Phase J's
+`validate_candidates` together surface the shape-diversity that
+MetaPatternGenerator needs. `phase_h_unblock_pipeline_runs_end_to_end`
+asserts `rank2_count ≥ 1` — the first Phase-H invariant.
+
+**Caveat**: Phase H via the Phase I+J pipeline requires hand-
+preparing the Artifact set (via `Artifact::seal` in the demo).
+Integrating this path into the default autonomous-traversal
+pipeline is future work — for now, the Phase H unblock is demoed
+via an explicit pipeline, not wired into the default extractor
+stack.
 
 **What landed.** `reduction::detect_subsumption_pairs` now includes
 an irreducibility-aware gate: two meta-rules only subsume each other
