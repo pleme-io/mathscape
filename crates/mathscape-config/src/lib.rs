@@ -18,8 +18,9 @@
 //!   MATHSCAPE_POPULATION__TARGET_SIZE=5000
 //!   MATHSCAPE_DATABASE__URL=postgres://...
 
-use figment::providers::{Env, Format, Serialized, Yaml};
-use figment::Figment;
+// Config loading goes through shikumi's ProviderChain — the pleme-io
+// standard. shikumi wraps figment behind a fluent API and owns the
+// figment dep on this crate's behalf.
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, RwLock};
 
@@ -175,17 +176,29 @@ impl Config {
 
 /// Load configuration with layered precedence:
 ///   defaults → YAML file → environment variables
-pub fn load() -> Result<Config, figment::Error> {
+///
+/// # Errors
+///
+/// Returns a shikumi error if the YAML file exists but is malformed
+/// or env var coercion fails.
+pub fn load() -> Result<Config, shikumi::ShikumiError> {
     let config_path =
         std::env::var("MATHSCAPE_CONFIG").unwrap_or_else(|_| "mathscape.yaml".into());
     load_from(&config_path)
 }
 
 /// Load configuration from a specific YAML path.
-pub fn load_from(yaml_path: &str) -> Result<Config, figment::Error> {
-    Figment::from(Serialized::defaults(Config::default()))
-        .merge(Yaml::file(yaml_path))
-        .merge(Env::prefixed("MATHSCAPE_").split("__"))
+///
+/// # Errors
+///
+/// Returns a shikumi error if the YAML file exists but is malformed
+/// or env var coercion fails. A missing YAML file is tolerated —
+/// defaults are returned.
+pub fn load_from(yaml_path: &str) -> Result<Config, shikumi::ShikumiError> {
+    shikumi::ProviderChain::new()
+        .with_defaults(&Config::default())
+        .with_file(std::path::Path::new(yaml_path))
+        .with_env("MATHSCAPE_")
         .extract()
 }
 
@@ -283,8 +296,12 @@ mod tests {
     }
 
     #[test]
-    fn figment_from_defaults() {
-        let config: Config = Figment::from(Serialized::defaults(Config::default()))
+    fn defaults_roundtrip_through_provider_chain() {
+        // Confirms shikumi's ProviderChain serializes + extracts defaults
+        // equivalently to a raw figment round-trip. No YAML file, no env
+        // vars — just the defaults layer.
+        let config: Config = shikumi::ProviderChain::new()
+            .with_defaults(&Config::default())
             .extract()
             .unwrap();
         assert_eq!(config.http.port, 8080);

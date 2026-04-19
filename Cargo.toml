@@ -54,8 +54,8 @@ sea-orm-migration = { version = "1" }
 # E-graph
 egg = "0.9"
 
-# Configuration
-figment = { version = "0.10", features = ["yaml", "env"] }
+# Configuration — shikumi owns config discovery + provider chain for
+# pleme-io. It wraps figment so individual crates don't have to.
 
 # Serialization
 bincode = "1"

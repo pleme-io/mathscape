@@ -4,10 +4,13 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Shared configuration: defaults → YAML → env vars (figment)"
+description = "Shared configuration: defaults → YAML → env vars (shikumi)"
 
 [dependencies]
-figment.workspace = true
+# shikumi provides the pleme-io standard config discovery + provider
+# chain. It wraps figment behind a fluent API; the defaults → YAML →
+# env layering for mathscape matches shikumi's ProviderChain exactly.
+shikumi = { git = "https://github.com/pleme-io/shikumi" }
 serde.workspace = true
 mathscape-reward.workspace = true
 mathscape-compress.workspace = true
