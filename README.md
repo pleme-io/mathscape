@@ -40,10 +40,22 @@ reachable territory for a seed is exhausted:
   and biases its picks toward empirical winners. Fully Lisp-residential
   (R32 spec, R33 scenario, R10 policy, U.1 observation), meta-loop
   attestation is BLAKE3 over the chain of chain-attestations.
+- **Phase V** (fix-point motor): the loop closes on itself.
+  `LearningObservation.staleness_score()` detects when the
+  environment has stopped producing novelty;
+  `SpecArchetype::AdaptiveDiet` mutates the DIET (routes through
+  `AdaptiveCorpusGenerator`, which reads library state and
+  synthesizes residue-inviting terms). Observed running:
+  default corpus saturates at 4 rules over 3 phases, motor fires
+  AdaptiveDiet on phase 3, library grows to 5 — a rule the
+  default corpus could not reach. The model reacts to its own
+  saturation by expanding its environment. Trained on bare math:
+  staleness, intervention, and reward are all pure functions of
+  the observation stream.
 
 See `docs/arch/autonomous-traversal.md` for the milestone doc,
-`docs/arch/self-tuning-meta-loop.md` for the Phase U design, and
-`docs/arch/landmarks.md` for the full canonical map (phases A–U).
+`docs/arch/self-tuning-meta-loop.md` for the Phase U+V frame, and
+`docs/arch/landmarks.md` for the full canonical map (phases A–V).
 
 ## Quickstart
 

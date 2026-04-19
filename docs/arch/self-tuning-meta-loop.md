@@ -4,10 +4,30 @@ The machine observes its own learning, leverages that observation to
 author its own next training recipe, and executes in complete
 linguistic isolation. The system sails itself.
 
-Status: **design frame, 2026-04-18.** Phase U. Built on R26
-(BootstrapCycle), R32 (Sexp-describable spec), R33 (ExperimentScenario
-chain), R34-R35 (wall-clock observability), R37/R39 (opt-in work
-elimination), and Phase I (subterm-paired AU unblocking meta-diversity).
+Status: **Phase V landed, 2026-04-18.** The motor runs end-to-end on a
+real derive-laws extractor. Built on R26 (BootstrapCycle), R32
+(Sexp-describable spec), R33 (ExperimentScenario chain), R34-R35
+(wall-clock observability), R37/R39 (opt-in work elimination),
+Phase I (subterm-paired AU), Phase J (empirical validity), Phase H
+(rank-2 inception), Phase U (meta-loop), and now **Phase V**
+(diet-as-action via `AdaptiveCorpusGenerator` +
+`LearningObservation.staleness_score()` +
+`SpecArchetype::AdaptiveDiet`).
+
+**Observed motor behavior** (pinned by `fix_point_motor_runs_and_visibly_mutates_diet`):
+
+```
+ phase  scenario                          archetype  lib  growth   δπ     stale
+   0    seed-default (default)            SEED        4     4     0.37   0.11
+   1    proposed-baseline (default)       BASE        4     0     0.02   0.91
+   2    proposed-extended-discovery       EXT         4     0     0.01   0.96
+   3    proposed-adaptive-diet (adaptive) DIET        5     1     0.44   0.09   ← MOTOR FIRED
+   4-9  proposed-adaptive-diet (adaptive) DIET        5     0     0.00   0.98
+```
+
+Phase 3 is the payoff: staleness crossed 0.6, proposer picked
+AdaptiveDiet, library grew to 5 rules. The 5th rule is one the
+default corpus cannot reach.
 
 ## The four directives
 

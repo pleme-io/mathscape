@@ -52,6 +52,21 @@ The machine:
   `S_30002 :: (?op ?id (?op ?id ?x)) => S_30002(?op ?id ?x)` —
   abstracting across both operator and nested-identity
   structure. Pinned by `phase_h_unblock_pipeline_runs_end_to_end`
+- **Fix-point motor active** — Phase V landed 2026-04-18. The
+  meta-loop now closes on itself: `LearningObservation.staleness_score()`
+  emits a scalar signal when a scenario produces no novelty and
+  the policy barely moves; `HeuristicProposer` reads the mean
+  staleness over the last 3 observations and, when it crosses
+  0.6, picks `SpecArchetype::AdaptiveDiet` — a DIET MUTATION
+  archetype that routes through `AdaptiveCorpusGenerator`
+  (promoted from test scaffolding to core). The adaptive corpus
+  reads current library state and synthesizes residue-inviting
+  terms the extractor hasn't seen. Pinned by
+  `fix_point_motor_runs_and_visibly_mutates_diet` — observed
+  trace: seed discovers 4 rules, two baseline/extended retries
+  produce 0 growth, staleness crosses threshold, AdaptiveDiet
+  fires, library grows to 5 on the first diet-mutation phase.
+  The 5th rule is a rule the default corpus could not reach.
 
 ### Apex fingerprint
 
@@ -325,6 +340,74 @@ Phase J (empirical validity) still needed to certify them.
 `subterm_au_surfaces_inner_pattern`): eval-fold collapses output
 structure so many subterm candidates fail the RHS-subset-LHS
 filter. Phase I surfaces; Phase J certifies.
+
+### Phase V: The fix-point motor (2026-04-18)
+
+The meta-loop closes. Signal → detection → intervention →
+observation → signal ... with the intervention vocabulary now
+including environment mutation (diet), not just model-parameter
+mutation. This is the architectural move the session's directive
+arc was circling: "the need for a diet and its associated signals
+should cause the model to learn the environment, observe why the
+signal happened and adjust it and keep going — that's the
+fix-point model behavior."
+
+| Landmark | Closes |
+|---|---|
+| **V.1 Staleness signal** on `LearningObservation` | intrinsic signal detecting "the environment has stopped producing novelty" — growth=0 AND policy barely moving. Scalar in [0,1]. Deterministic, Sexp-bridgeable |
+| **V.2 `AdaptiveCorpusGenerator`** in core | promoted from `tests/common/experiment.rs` scaffolding to first-class `CorpusGenerator` impl. Reads library state; synthesizes shelled terms whose outer op is non-reducible and whose children are substrate-rule instantiations. Post-reduction residue has NEW STRUCTURE the library hasn't seen |
+| **V.3 `SpecArchetype::AdaptiveDiet`** | fifth archetype in the proposer's vocabulary. Routes through `corpus_generator = "adaptive"`; the `execute_spec_core` now resolves this name |
+| **V.4 `HeuristicProposer` staleness branch** | mean staleness over last 3 observations; when ≥ 0.6, picks AdaptiveDiet BEFORE the other branches — staleness is highest-priority signal |
+| **V.5 `fix_point_motor` running demo** | end-to-end pinned: seed → default corpus saturates at 4 rules → two retries produce 0 growth → staleness crosses threshold → AdaptiveDiet fires → library grows to 5 rules. The 5th rule is unreachable via the default corpus. Pinned by `fix_point_motor_runs_and_visibly_mutates_diet` + `fix_point_motor_is_deterministic` |
+
+**Phase V headline findings:**
+
+- **The motor works on a real derive-laws extractor**, not just the
+  null case. The observed trace shows staleness climbing 0.11 →
+  0.91 → 0.96 over three phases, triggering AdaptiveDiet at phase 3,
+  which produces library growth and policy movement. The machine
+  genuinely reacts to its own saturation signal.
+- **Diet mutation produces rules that the default diet cannot**.
+  The 5th rule observed in the motor trace is empirical proof that
+  environment mutation is not cosmetic — it expands what the
+  machine can discover. Intervention at the corpus level reaches
+  structural territory the training-recipe tweaks can't.
+- **Trained on bare math**. The staleness signal is a pure function
+  of observation fields (`made_any_progress`, `trained_policy_delta_norm`).
+  The intervention choice is a function of observation history. The
+  reward is the delta in observation after intervention. No
+  external labels, no human-curated corpora — the machine's own
+  mathematical trajectory is the training signal.
+
+**Kernel invariant status after Phase V:**
+All Phase R + S + T + U + I + J + H invariants preserved. Phase V adds:
+- **Staleness determinism**: `staleness_score()` is a pure function
+  of observation fields; two identical observations → identical
+  staleness.
+- **Motor determinism**: same seed scenario + same proposer + same
+  executor → identical meta-attestation + identical scenario-name
+  sequence. Pinned by `fix_point_motor_is_deterministic`.
+- **Novelty invariant**: `fix_point_motor_runs_and_visibly_mutates_diet`
+  asserts ≥1 AdaptiveDiet phase AND ≥1 rule total AND
+  max_staleness ≥ 0.5 — a regression test for the closed loop.
+
+**What Phase V unlocks for future arcs:**
+
+- **Corpus archetypes as first-class expansion target**. Today
+  there's one diet mutation (`AdaptiveDiet`). The architecture
+  makes adding more trivial: `SymbolicPreservingDiet`,
+  `EquivalenceClassGrouping`, `InverseOperatorInjection`. Each
+  opens a new region of mathscape the machine can now reach.
+- **The adaptive proposer can learn archetype effectiveness per
+  staleness level**. `AdaptiveProposer` tracks per-archetype
+  stats. A future pass can condition those stats on the
+  observation state, giving the proposer a learned
+  "when-am-I-stuck" model.
+- **WASM/linguistic isolation (U.5) stays ready**. Everything
+  Phase V added is a Lisp value or a trait seam. The motor's
+  full trajectory is a sequence of Sexp values; shipping it
+  into a WASI module is still the signature the arc has been
+  preparing.
 
 ### Phase U: Self-tuning meta-loop (2026-04-18)
 
