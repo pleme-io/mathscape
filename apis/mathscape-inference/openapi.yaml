@@ -229,18 +229,27 @@ components:
 
     Term:
       description: |
-        Recursive term tree. Sum type over Var, Number, Apply.
-        The Rust source is `mathscape_core::term::Term`.
+        Recursive term tree. Rust source:
+        `mathscape_core::term::Term`. Six variants — Var,
+        Number, Apply (hot path); Point, Fn, Symbol
+        (internal / advanced). The API losslessly round-trips
+        every kind the kernel produces.
       oneOf:
         - $ref: "#/components/schemas/TermVar"
         - $ref: "#/components/schemas/TermNumber"
         - $ref: "#/components/schemas/TermApply"
+        - $ref: "#/components/schemas/TermPoint"
+        - $ref: "#/components/schemas/TermFn"
+        - $ref: "#/components/schemas/TermSymbol"
       discriminator:
         propertyName: kind
         mapping:
           var: "#/components/schemas/TermVar"
           number: "#/components/schemas/TermNumber"
           apply: "#/components/schemas/TermApply"
+          point: "#/components/schemas/TermPoint"
+          fn: "#/components/schemas/TermFn"
+          symbol: "#/components/schemas/TermSymbol"
 
     TermVar:
       type: object
@@ -277,6 +286,50 @@ components:
           enum: [apply]
         head:
           $ref: "#/components/schemas/Term"
+        args:
+          type: array
+          items:
+            $ref: "#/components/schemas/Term"
+
+    TermPoint:
+      type: object
+      required: [kind, id]
+      properties:
+        kind:
+          type: string
+          enum: [point]
+        id:
+          type: integer
+          format: int64
+          minimum: 0
+
+    TermFn:
+      type: object
+      required: [kind, params, body]
+      properties:
+        kind:
+          type: string
+          enum: [fn]
+        params:
+          type: array
+          items:
+            type: integer
+            format: int32
+            minimum: 0
+        body:
+          $ref: "#/components/schemas/Term"
+
+    TermSymbol:
+      type: object
+      required: [kind, symbolId, args]
+      properties:
+        kind:
+          type: string
+          enum: [symbol]
+        symbolId:
+          type: integer
+          format: int32
+          minimum: 0
         args:
           type: array
           items:

@@ -725,6 +725,106 @@ the design.**
 Test pin: `perpetual_improvement_fixed_point_demo` in
 `crates/mathscape-core/tests/perpetual_loop.rs`.
 
+### Phase X: The Mathematician's Curriculum (2026-04-19)
+
+The measurement tool that defines *"excellent mathematician"*
+for this substrate. 32 problems across 6 subdomains:
+arithmetic-nat, arithmetic-int, symbolic-nat, tensor-algebra,
+compound, generalization. Per-subdomain scoring so we know
+WHICH kinds of mathematics the machine has mastered.
+
+**Observed baseline (real motor, 10 phases):**
+
+| metric | value |
+|---|---|
+| baseline (empty library) | 18/32 (56%) |
+| after motor | 28/32 (88%) ← Δ +31.2% |
+| **mastered** | compound, generalization, symbolic-nat, tensor-algebra |
+| **arithmetic-nat** | 5/5 → 3/5 (REGRESSED — discovered rules interfere with kernel folding) |
+| **arithmetic-int** | 4/5 → 3/5 (REGRESSED — same cause) |
+
+Critical finding revealed by the curriculum: the motor's
+discovered rules CAN match before the kernel's constant-folding
+fires, terminating at the wrong shape. The curriculum surfaces
+the issue that a coarse `solved_fraction` benchmark hides. Next
+research move: audit rule-vs-kernel priority ordering.
+
+Test pin:
+`crates/mathscape-axiom-bridge/tests/excellent_mathematician.rs`
+
+### Phase Y.0: LiveInferenceHandle — query while training (2026-04-19)
+
+`LiveInferenceHandle` bundles the shared live library and the
+live streaming trainer into one non-blocking query API. Methods:
+
+- `infer(term, step_limit) -> EvalResult`
+- `current_competency() -> CurriculumReport`
+- `policy_snapshot() -> LinearPolicy`
+- `library_snapshot() -> Vec<RewriteRule>`
+- `library_size() -> usize`
+
+Each call acquires a brief RefCell borrow, reads, releases. The
+motor continues writing between calls. Dashboard-friendly,
+Lisp-morphable, and ready for the W.7 async swap (RefCell →
+RwLock, Rc → Arc) without any public-API change.
+
+Test pin: `crates/mathscape-core/src/inference.rs`
+
+### Phase Y.1: OpenAPI spec + normalized forge-gen pipeline (2026-04-19)
+
+`apis/mathscape-inference/openapi.yaml` — 3.0.3, 5 paths, 23
+schemas — is the canonical single source of truth for every
+transport surface. Sekkei → takumi → forge-gen renders REST,
+gRPC, GraphQL, MCP, SDKs, schemas, docs, completions from one
+spec. No hand-rolled API code, no drift.
+
+- Every schema via `$ref` (zero duplication)
+- `oneOf` + `discriminator` for Term/Value/EvalResult (zero-cost
+  deserialization via serde tagged enums)
+- Operation IDs mirror Rust method names for clean generation
+- Lisp-authorable via `(defmathscapeservice …)` — the Lisp form
+  is the human interface, OpenAPI YAML is the machine-readable
+  intermediate
+
+Doc pin: `apis/mathscape-inference/README.md` — full pipeline
+command staging.
+
+### Phase Y.2: mathscape-inference-api crate (2026-04-19)
+
+The generated-shape crate hand-written ahead of the forge-gen
+invocation, with types that match `openapi.yaml` field-for-
+field. Contents:
+
+- `TermDto` / `ValueDto` — 6-variant Term + 5-variant Value with
+  `#[serde(tag = "kind")]` matching OpenAPI discriminators
+- `RewriteRuleDto`, `LinearPolicyDto`, `InferRequest`,
+  `EvalResult`, `CurriculumReportDto`, `BenchmarkReportDto`,
+  `ProblemResultDto`
+- Bidirectional `From` conversions between core types and DTOs
+  — lossless round-trip for every Term variant including
+  Point / Fn / Symbol
+- `InferenceService` trait — 5 methods, one per OpenAPI
+  operation, single interface all transport backends route
+  through
+- `HandleAdapter` — default implementation backed by
+  `LiveInferenceHandle`
+
+Test pins (11 pass):
+- `term_dto_serde_uses_kind_discriminator` — JSON output matches
+  OpenAPI `kind` shape
+- `term_dto_round_trips_core_term`
+- `value_dto_covers_all_five_variants`
+- `eval_result_serializes_with_status_discriminator`
+- `full_roundtrip_via_json_over_wire` — end-to-end client→server
+  simulation: InferRequest → JSON → server → EvalResult → JSON →
+  client, with the add-id rule actually firing mid-pipeline
+- 6 more adapter tests covering every `InferenceService` method
+
+This is the typed substrate. The REST server, gRPC server,
+GraphQL server, MCP server, and SDKs all consume this crate
+for their shared types + trait. Whether we hand-roll the next
+servers or invoke forge-gen, they'll build on this foundation.
+
 ### Phase W.11: deep proof with real motor (2026-04-19)
 
 The perpetual-improvement loop driven by GENUINE mathematical

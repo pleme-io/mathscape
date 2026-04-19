@@ -2043,6 +2043,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "mathscape-inference-api"
+version = "0.1.0"
+dependencies = [
+ "mathscape-core",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "mathscape-mcp"
 version = "0.1.0"
 dependencies = [

@@ -120,10 +120,32 @@ reachable territory for a seed is exhausted:
     subscriber. The full perpetual loop runs end-to-end in one
     subscription (`tests/perpetual_loop.rs`).
 
+- **Phase X** (Mathematician's Curriculum): 32 problems across
+  6 subdomains — arithmetic-nat, arithmetic-int, symbolic-nat,
+  tensor-algebra, compound, generalization — with per-subdomain
+  scoring. Observed real-motor result: 56% → 88% (Δ +31.2%), 4
+  subdomain masteries, 2 regressions surfacing rule-vs-kernel
+  priority issue the coarse benchmark hid.
+- **Phase Y.0** (LiveInferenceHandle): query the running model
+  without freezing the stream. `infer`, `current_competency`,
+  `policy_snapshot`, `library_snapshot`, `library_size` — all
+  non-blocking, dashboard-friendly, Lisp-morphable.
+- **Phase Y.1** (OpenAPI spec + normalized pipeline):
+  `apis/mathscape-inference/openapi.yaml` — 3.0.3, 5 paths, 23
+  schemas — single source of truth for REST, gRPC, GraphQL, MCP,
+  SDKs, docs, completions. Sekkei → takumi → forge-gen renders
+  every transport.
+- **Phase Y.2** (mathscape-inference-api crate): typed DTOs
+  matching the spec field-for-field, `InferenceService` trait
+  all backends route through, `HandleAdapter` default impl
+  wrapping `LiveInferenceHandle`. JSON-over-wire full round-trip
+  tested (11/11).
+
 See `docs/arch/autonomous-traversal.md` for the milestone doc,
 `docs/arch/self-tuning-meta-loop.md` for the Phase U+V+W frame,
+`docs/arch/perpetual-improvement.md` for the fixed-point synthesis,
 and `docs/arch/landmarks.md` for the full canonical map
-(phases A–W).
+(phases A–Y).
 
 ## Quickstart
 
