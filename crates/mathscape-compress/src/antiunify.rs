@@ -168,12 +168,27 @@ pub fn paired_anti_unify(
     let (in_a, in_b) = inputs;
     let (out_a, out_b) = outputs;
 
+    // R38.3: four separate `max_var_id` traversals were a noticeable
+    // fraction of paired AU time on small terms. Use a bounded
+    // traversal that stops as soon as it finds a var at/above the
+    // floor; if no such var exists anywhere in the inputs/outputs,
+    // we skip allocating next_var above `floor`. Default corpora
+    // don't use pattern vars ≥ 100 (AU allocates those) so the
+    // bounded check short-circuits on the first leaf.
     let floor = 200u32;
-    let max_in = max_var_id(in_a)
-        .max(max_var_id(in_b))
-        .max(max_var_id(out_a))
-        .max(max_var_id(out_b));
-    let mut next_var = floor.max(max_in.saturating_add(1));
+    let needs_bump = exceeds_or_equals_floor(in_a, floor)
+        || exceeds_or_equals_floor(in_b, floor)
+        || exceeds_or_equals_floor(out_a, floor)
+        || exceeds_or_equals_floor(out_b, floor);
+    let mut next_var = if needs_bump {
+        let max_in = max_var_id(in_a)
+            .max(max_var_id(in_b))
+            .max(max_var_id(out_a))
+            .max(max_var_id(out_b));
+        max_in.saturating_add(1)
+    } else {
+        floor
+    };
     let mut var_pairs: HashMap<(TermKey, TermKey), u32> = HashMap::new();
     let mut shared_in = 0;
     let mut var_count_in = 0;
@@ -270,6 +285,25 @@ fn all_pattern_vars_in(t: &Term, sorted_allowed: &[u32]) -> bool {
             args.iter().all(|a| all_pattern_vars_in(a, sorted_allowed))
         }
         Term::Point(_) | Term::Number(_) => true,
+    }
+}
+
+/// R38.3: does any `Var(v)` in `t` have `v >= floor`? Early-exits
+/// on the first hit. Used by `paired_anti_unify` to avoid the full
+/// `max_var_id` traversal when the answer is "no, every var is
+/// below floor" (which is the common case for concrete corpora).
+fn exceeds_or_equals_floor(t: &Term, floor: u32) -> bool {
+    match t {
+        Term::Var(v) => *v >= floor,
+        Term::Apply(head, args) => {
+            exceeds_or_equals_floor(head, floor)
+                || args.iter().any(|a| exceeds_or_equals_floor(a, floor))
+        }
+        Term::Fn(_, body) => exceeds_or_equals_floor(body, floor),
+        Term::Symbol(_, args) => {
+            args.iter().any(|a| exceeds_or_equals_floor(a, floor))
+        }
+        Term::Point(_) | Term::Number(_) => false,
     }
 }
 
