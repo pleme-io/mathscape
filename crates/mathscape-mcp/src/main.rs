@@ -583,6 +583,45 @@ impl MathscapeMcp {
         }
     }
 
+    #[tool(description = "Run the Mathematician's Curriculum against the current live library. Returns a per-subdomain competency report (arithmetic-nat, arithmetic-int, symbolic-nat, tensor-algebra, compound, generalization). This is Phase X — live inference of the trained model's mathematical competency.")]
+    fn curriculum_score(&self, #[tool(aggr)] _req: EmptyRequest) -> String {
+        let library = {
+            let s = self.state.read().unwrap();
+            s.library.clone()
+        };
+        let curriculum = mathscape_core::math_problem::mathematician_curriculum();
+        let report = mathscape_core::math_problem::run_curriculum(
+            &curriculum,
+            &library,
+        );
+        let per_subdomain: serde_json::Value = report
+            .per_subdomain
+            .iter()
+            .map(|(k, v)| {
+                (
+                    (*k).to_string(),
+                    serde_json::json!({
+                        "solved": v.solved_count,
+                        "total": v.problem_set_size,
+                        "fraction": v.solved_fraction(),
+                    }),
+                )
+            })
+            .collect::<serde_json::Map<_, _>>()
+            .into();
+        serde_json::to_string_pretty(&serde_json::json!({
+            "total": {
+                "solved": report.total.solved_count,
+                "total":  report.total.problem_set_size,
+                "fraction": report.total.solved_fraction(),
+            },
+            "per_subdomain": per_subdomain,
+            "mastered": report.mastered(),
+            "frontier": report.frontier(),
+        }))
+        .unwrap()
+    }
+
     #[tool(description = "List the known-math catalog of recognizable mathematical properties")]
     fn list_catalog(&self, #[tool(aggr)] _req: EmptyRequest) -> String {
         let props: Vec<serde_json::Value> = catalog::catalog()
