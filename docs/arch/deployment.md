@@ -44,11 +44,13 @@ Built with `pkgs.dockerTools.buildLayeredImage` (Nix-native, no Dockerfile):
 
 ```
 deploy/charts/mathscape/
-  Chart.yaml                 depends on pleme-lib ~0.4.0
-  values.yaml                StatefulSet defaults
+  Chart.yaml                 depends on pleme-lib >=0.52.0 (vmRule, vmPodScrape)
+  values.yaml                StatefulSet defaults; engine.enabled, stream.*
   templates/
     _helpers.tpl             delegates to pleme-lib
-    statefulset.yaml         StatefulSet with volumeClaimTemplates
+    statefulset.yaml         engine StatefulSet with volumeClaimTemplates
+    stream.yaml              the stream writer's own StatefulSet + VMRule,
+                             VMPodScrape and MemoryBand (each opt-in)
     service.yaml             ClusterIP service (HTTP + metrics)
     serviceaccount.yaml      pleme-lib.serviceaccount
     servicemonitor.yaml      Prometheus ServiceMonitor
@@ -59,6 +61,8 @@ deploy/charts/mathscape/
     statefulset_test.yaml    helm-unittest: StatefulSet assertions
     service_test.yaml        helm-unittest: Service assertions
     pvc_test.yaml            helm-unittest: PVC assertions
+    stream_test.yaml         helm-unittest: every stream value and refusal
+    engine_gate_test.yaml    helm-unittest: engine.enabled: false renders no engine
 ```
 
 ### Key Design Decisions
@@ -83,6 +87,39 @@ Resize as needed. PostgreSQL is external (CNPG operator or managed).
 **Database**: PostgreSQL via CNPG (CloudNativePG) operator or external
 managed Postgres. `DATABASE_URL` is injected via Secret. Migrations
 run as an init container or pre-install Job using `mathscape-db migrate`.
+
+## Stream writer (`stream.enabled`)
+
+`mathscape-stream` is the one writer of the canonical model
+([stream-training-infra.md](stream-training-infra.md)). It is its own
+single-replica StatefulSet, `<fullname>-stream`, with its own selector
+(`app.kubernetes.io/name: mathscape-stream`), so it never joins the
+engine's Services. `engine.enabled: false` renders the writer alone.
+
+| Value | Rule |
+|---|---|
+| `stream.seed` | Required, a non-negative integer. No seed fails the render; the binary also refuses a seed that differs from HEAD's. |
+| `stream.storage.kind` | `claimTemplate` (a 2Gi PVC at `/data`) or `hostPath` (a host directory mounted at itself, for a node whose pods are host processes). |
+| `stream.dataDir` | Must lie under the mount, or the render fails: HEAD outside the volume would not survive a restart. |
+| `stream.health` | The binary serves `/healthz`, `/readyz` (503 until HEAD is open) and `/metrics` on `health.port` (9473); startup, liveness and readiness probe it. |
+| `stream.resources` | One core requested and limited (the epoch loop is single-threaded); 3Gi request and 16Gi limit, sized for the default mechanism, which reached 12.3 GiB at 40 minutes ([the slice, measured](stream-training-infra.md#on-ryns-engenho-2026-10-15)). |
+| `stream.terminationGracePeriodSeconds` | 10. Writes are temp-then-rename, so a SIGKILL only replays the epochs since HEAD. |
+| `stream.alerts`, `stream.scrape`, `stream.breathe` | VMRule (Down, Stalled, SnapshotStale, Plateau), VMPodScrape, MemoryBand on the writer's StatefulSet. Off by default; on for a cluster with VictoriaMetrics and breathe. |
+
+**On ryn's engenho.** ryn runs pods as native host processes from Nix
+closures, so there is no image to push: `pleme.mathscape.stream`
+(`nix/modules/pleme/darwin/mathscape-stream.nix`) renders this chart with
+`image.repository = nix:<mathscape-stream closure>`, `command: []`,
+`storage.kind: hostPath` under `~/.local/share/mathscape`, and loopback
+health, and the `v0.1.8` mechanism profile (2.7 GiB flat, where the
+default reached 12.3 GiB), through substrate's `mkHelmRender`, into
+`/etc/engenho/manifests.d/mathscape-stream.yaml`. engenho's
+node-manifests driver applies and prunes it; `nix run .#rebuild` is the
+deploy. The alert layer and breathe stay off there because neither
+VictoriaMetrics nor breathe's CRDs run on that cluster (the same as the
+pangea stack and the llm server beside it); the one-core limit is not
+enforced either (no cgroups on darwin): the single-threaded loop bounds
+CPU and the mechanism profile bounds memory.
 
 ## Kubernetes Manifest (FluxCD)
 

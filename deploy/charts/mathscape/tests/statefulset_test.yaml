@@ -212,3 +212,21 @@ tests:
     asserts:
       - isNull:
           path: spec.volumeClaimTemplates
+
+  - it: should leave the engine container alone once the writer has its own StatefulSet
+    set:
+      stream.enabled: true
+      stream.seed: "42"
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: MATHSCAPE_STREAM__SEED
+          any: true
+
+  - it: should render no engine when engine.enabled is false
+    set:
+      engine.enabled: false
+    asserts:
+      - hasDocuments:
+          count: 0

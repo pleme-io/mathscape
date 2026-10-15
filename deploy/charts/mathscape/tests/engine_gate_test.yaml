@@ -1,0 +1,20 @@
+suite: engine gate tests
+templates:
+  - templates/serviceaccount.yaml
+  - templates/servicemonitor.yaml
+  - templates/networkpolicy.yaml
+  - templates/pdb.yaml
+tests:
+  - it: renders the engine's ServiceAccount by default
+    template: templates/serviceaccount.yaml
+    asserts:
+      - isKind:
+          of: ServiceAccount
+
+  - it: renders nothing of the engine when it is off
+    set:
+      engine.enabled: false
+      pdb.enabled: true
+    asserts:
+      - hasDocuments:
+          count: 0

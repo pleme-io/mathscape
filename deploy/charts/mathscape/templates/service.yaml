@@ -1,3 +1,4 @@
+{{- if (.Values.engine).enabled }}
 {{/* Headless service for StatefulSet pod DNS */}}
 apiVersion: v1
 kind: Service
@@ -21,3 +22,4 @@ spec:
 ---
 {{/* Regular ClusterIP service for HTTP access */}}
 {{- include "pleme-lib.service" . }}
+{{- end }}

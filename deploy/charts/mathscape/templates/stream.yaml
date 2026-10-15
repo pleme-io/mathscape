@@ -1,0 +1,180 @@
+{{- $s := .Values.stream | default dict }}
+{{- if $s.enabled }}
+{{- $seed := $s.seed | toString }}
+{{- if or (eq $seed "") (not (regexMatch "^[0-9]+$" $seed)) }}
+{{- fail (printf "stream.enabled requires stream.seed, a non-negative integer the stream is grown from (got %q); the stream never seeds itself" $seed) }}
+{{- end }}
+{{- $storage := $s.storage | default dict }}
+{{- $kind := $storage.kind | default "claimTemplate" }}
+{{- if not (has $kind (list "claimTemplate" "hostPath")) }}
+{{- fail (printf "stream.storage.kind must be claimTemplate or hostPath (got %q)" $kind) }}
+{{- end }}
+{{- $mount := $storage.mountPath | default "/data" }}
+{{- if eq $kind "hostPath" }}
+{{- if not $storage.path }}
+{{- fail "stream.storage.kind hostPath requires stream.storage.path, the host directory mounted at itself" }}
+{{- end }}
+{{- if not (isAbs $storage.path) }}
+{{- fail (printf "stream.storage.path must be absolute (got %q)" $storage.path) }}
+{{- end }}
+{{- $mount = $storage.path }}
+{{- end }}
+{{- $dataDir := $s.dataDir | default "/data/stream" }}
+{{- if not (or (eq $dataDir $mount) (hasPrefix (printf "%s/" (trimSuffix "/" $mount)) $dataDir)) }}
+{{- fail (printf "stream.dataDir %q must lie under the storage mount %q, or HEAD would not survive a restart" $dataDir $mount) }}
+{{- end }}
+{{- $health := $s.health | default dict }}
+{{- $port := $health.port | default 9473 | int }}
+{{- $base := printf "%s-stream" (include "pleme-lib.name" .) }}
+{{- $full := printf "%s-stream" (include "pleme-lib.fullname" .) | trunc 63 | trimSuffix "-" }}
+{{- $image := $s.image | default dict }}
+{{- $imageValues := ternary (dict "repository" $image.repository "tag" $image.tag "pullPolicy" .Values.image.pullPolicy) .Values.image (not (empty $image.repository)) }}
+{{- $alerts := $s.alerts | default dict }}
+{{- $rules := list }}
+{{- if $alerts.enabled }}
+{{- $sel := printf "namespace=\"%s\",seed=\"%s\"" .Release.Namespace $seed }}
+{{- $rules = list
+      (dict "alert" "MathscapeStreamDown" "expr" (printf "absent(mathscape_stream_up{%s}) or mathscape_stream_up{%s} == 0" $sel $sel) "for" "10m" "labels" (dict "severity" "warning") "annotations" (dict "summary" (printf "mathscape stream %s is not reporting" $seed) "description" "The writer's /metrics is absent or reports it has not opened HEAD."))
+      (dict "alert" "MathscapeStreamStalled" "expr" (printf "time() - mathscape_stream_last_epoch_timestamp_seconds{%s} > %d and mathscape_stream_last_epoch_timestamp_seconds{%s} > 0" $sel (mul ($alerts.stalledMinutes | default 15 | int) 60) $sel) "for" "5m" "labels" (dict "severity" "warning") "annotations" (dict "summary" (printf "mathscape stream %s completed no epoch in %v minutes" $seed ($alerts.stalledMinutes | default 15)) "description" "The epoch loop is alive but not advancing."))
+      (dict "alert" "MathscapeStreamSnapshotStale" "expr" (printf "time() - mathscape_stream_last_snapshot_timestamp_seconds{%s} > %d and mathscape_stream_last_snapshot_timestamp_seconds{%s} > 0" $sel (mul ($alerts.snapshotStaleMinutes | default 120 | int) 60) $sel) "for" "10m" "labels" (dict "severity" "warning") "annotations" (dict "summary" (printf "mathscape stream %s has not moved HEAD in %v minutes" $seed ($alerts.snapshotStaleMinutes | default 120)) "description" "A restart now would replay every epoch since the last snapshot."))
+      (dict "alert" "MathscapeStreamPlateau" "expr" (printf "time() - mathscape_stream_last_certified_timestamp_seconds{%s} > %d and mathscape_stream_last_certified_timestamp_seconds{%s} > 0" $sel (mul ($alerts.plateauHours | default 6 | int) 3600) $sel) "for" "15m" "labels" (dict "severity" "info") "annotations" (dict "summary" (printf "mathscape stream %s certified nothing in %v hours" $seed ($alerts.plateauHours | default 6)) "description" "Discovery has plateaued: the mechanism, not compute, is the limit."))
+}}
+{{- end }}
+{{- $scrape := $s.scrape | default dict }}
+{{- $podScrapes := dict }}
+{{- if $scrape.enabled }}
+{{- $podScrapes = dict "metrics" (dict "enabled" true "selector" (dict "matchLabels" (dict "app.kubernetes.io/name" $base "app.kubernetes.io/instance" .Release.Name)) "podMetricsEndpoints" (list (dict "port" "health" "path" "/metrics" "interval" ($scrape.interval | default "30s")))) }}
+{{- end }}
+{{- $breathe := deepCopy ($s.breathe | default dict) }}
+{{- $_ := set $breathe "targetRef" (dict "apiVersion" "apps/v1" "kind" "StatefulSet" "name" $full) }}
+{{- $vals := merge (dict "nameOverride" $base "fullnameOverride" $full "image" $imageValues "breathe" $breathe "vm" (dict "rules" (dict "enabled" (not (empty $rules)) "groups" (list (dict "name" (printf "%s.rules" $full) "rules" $rules))) "podScrapes" $podScrapes)) (deepCopy .Values) }}
+{{- $ctx := dict "Values" $vals "Chart" .Chart "Release" .Release "Capabilities" .Capabilities "Template" .Template "Files" .Files }}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ $full }}
+  namespace: {{ include "pleme-lib.namespace" $ctx }}
+  labels:
+    {{- include "pleme-lib.labels" $ctx | nindent 4 }}
+    app.kubernetes.io/component: stream
+spec:
+  serviceName: {{ $full }}
+  replicas: 1
+  podManagementPolicy: OrderedReady
+  updateStrategy:
+    type: RollingUpdate
+  selector:
+    matchLabels:
+      {{- include "pleme-lib.selectorLabels" $ctx | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "pleme-lib.selectorLabels" $ctx | nindent 8 }}
+        app.kubernetes.io/component: stream
+      annotations:
+        mathscape.pleme.io/seed: {{ $seed | quote }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      automountServiceAccountToken: false
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- include "pleme-lib.podSecurityContext" $ctx | nindent 8 }}
+      terminationGracePeriodSeconds: {{ $s.terminationGracePeriodSeconds | default 10 }}
+      containers:
+        - name: stream
+          image: {{ include "pleme-lib.image" $ctx }}
+          imagePullPolicy: {{ $imageValues.pullPolicy | default "IfNotPresent" }}
+          {{- with $s.command }}
+          command:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          ports:
+            - name: health
+              containerPort: {{ $port }}
+              protocol: TCP
+          env:
+            - name: RUST_LOG
+              value: {{ $s.rustLog | default "info,egg=warn" | quote }}
+            - name: NO_COLOR
+              value: "1"
+            - name: MATHSCAPE_STREAM__SEED
+              value: {{ $seed | quote }}
+            - name: MATHSCAPE_STREAM__DATA_DIR
+              value: {{ $dataDir | quote }}
+            - name: MATHSCAPE_STREAM__HEALTH_ADDR
+              value: {{ printf "%s:%d" ($health.bindAddress | default "0.0.0.0") $port | quote }}
+            {{- with $s.untilEpoch }}
+            - name: MATHSCAPE_STREAM__UNTIL_EPOCH
+              value: {{ . | toString | quote }}
+            {{- end }}
+            {{- range $k, $v := $s.config }}
+            - name: {{ printf "MATHSCAPE_STREAM__%s" (upper $k) }}
+              value: {{ $v | toString | quote }}
+            {{- end }}
+          {{- with $s.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          securityContext:
+            {{- include "pleme-lib.containerSecurityContext" $ctx | nindent 12 }}
+          startupProbe:
+            httpGet:
+              path: /readyz
+              port: health
+            periodSeconds: {{ $health.startupPeriod | default 5 }}
+            failureThreshold: {{ $health.startupFailureThreshold | default 60 }}
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: health
+            periodSeconds: {{ $health.livenessPeriod | default 20 }}
+            timeoutSeconds: 3
+            failureThreshold: {{ $health.livenessFailureThreshold | default 3 }}
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: health
+            periodSeconds: {{ $health.readinessPeriod | default 10 }}
+            timeoutSeconds: 3
+          volumeMounts:
+            - name: model
+              mountPath: {{ $mount }}
+      {{- if eq $kind "hostPath" }}
+      volumes:
+        - name: model
+          hostPath:
+            path: {{ $storage.path }}
+            type: DirectoryOrCreate
+      {{- end }}
+      {{- with $s.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+  {{- if eq $kind "claimTemplate" }}
+  volumeClaimTemplates:
+    - metadata:
+        name: model
+        labels:
+          {{- include "pleme-lib.selectorLabels" $ctx | nindent 10 }}
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        {{- with $storage.storageClass }}
+        storageClassName: {{ . }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ $storage.size | default "2Gi" }}
+  {{- end }}
+{{- with (include "pleme-lib.vmRule" $ctx) }}
+---
+{{ . }}
+{{- end }}
+{{- include "pleme-lib.vmPodScrape" $ctx }}
+{{- include "pleme-lib.breatheBand" $ctx }}
+{{- end }}

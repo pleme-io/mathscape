@@ -1,5 +1,6 @@
-use mathscape_stream::{EpochReport, MechanismEvent, Writer};
+use mathscape_stream::{EpochReport, Gauges, Health, MechanismEvent, Writer};
 use std::process::ExitCode;
+use std::sync::Arc;
 use std::time::Instant;
 use tracing::{error, info};
 
@@ -22,6 +23,18 @@ fn main() -> ExitCode {
         error!("no `stream` section: set stream.seed in mathscape.yaml (or MATHSCAPE_STREAM__SEED); the stream never seeds itself from entropy");
         return ExitCode::from(2);
     };
+    let gauges = Arc::new(Gauges::new(stream.seed));
+    let _health = match stream.health_addr.as_deref().map(|addr| Health::serve(addr, Arc::clone(&gauges)).map(|h| (addr, h))) {
+        None => None,
+        Some(Ok((addr, h))) => {
+            info!(addr, bound = %h.local_addr(), "health and metrics");
+            Some(h)
+        }
+        Some(Err(e)) => {
+            error!("health: {e}");
+            return ExitCode::from(1);
+        }
+    };
     let mut writer = match Writer::open(stream) {
         Ok(w) => w,
         Err(e) => {
@@ -29,6 +42,7 @@ fn main() -> ExitCode {
             return ExitCode::from(1);
         }
     };
+    gauges.opened(writer.epoch(), writer.library().len(), writer.resumed_from().is_some());
     match writer.resumed_from() {
         Some(h) => info!(head = %h.to_hex(), epoch = writer.epoch(), library = writer.library().len(), "resumed from HEAD"),
         None => info!(seed = writer.config().seed, "fresh stream from seed"),
@@ -39,6 +53,7 @@ fn main() -> ExitCode {
     let mut first_steady: Option<Instant> = None;
     let mut mutations = Vec::new();
     let result = writer.run(|r: &EpochReport| {
+        gauges.observe(r);
         certified += r.certified;
         if r.epoch > 0 {
             steady += r.certified;

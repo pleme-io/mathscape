@@ -1,1 +1,3 @@
+{{- if (.Values.engine).enabled }}
 {{- include "pleme-lib.networkpolicy" . }}
+{{- end }}

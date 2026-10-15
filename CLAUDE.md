@@ -1139,7 +1139,7 @@ See [docs/arch/service.md](docs/arch/service.md) for full details.
 | `mathscape-mcp` | stdio (MCP protocol) | Local Claude Code agent interaction |
 | `mathscape-cli` | Terminal REPL | Interactive human exploration |
 | `mathscape-db` | CLI | Database migrations, status, verify, reset |
-| `mathscape-stream` | CLI, `stream:` config | The one-writer stream: seed in, `objects/` + `HEAD` + `deltas.lisp` out, kill-9 safe |
+| `mathscape-stream` | CLI, `stream:` config; `/healthz` `/readyz` `/metrics` on `stream.health_addr` | The one-writer stream: seed in, `objects/` + `HEAD` + `deltas.lisp` out, kill-9 safe. Deployed by the chart's `stream.enabled` (its own StatefulSet); on ryn's engenho by nix `pleme.mathscape.stream` |
 
 The service binary auto-starts the engine loop and runs epochs
 continuously. All state persists to `/data/` (redb + SQLite).

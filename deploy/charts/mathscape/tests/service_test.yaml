@@ -83,3 +83,10 @@ tests:
       - equal:
           path: metadata.name
           value: mathscape-headless
+
+  - it: should render no Services when the engine is off
+    set:
+      engine.enabled: false
+    asserts:
+      - hasDocuments:
+          count: 0

@@ -64,14 +64,93 @@ env:
         name: mathscape-db
         key: DATABASE_URL
 
-# -- Stream writer (mathscape-stream). Rendered only when seed is set; pair with command: ["/bin/mathscape-stream"]
+# -- The engine (mathscape-service) StatefulSet, its Services, ServiceMonitor, NetworkPolicy and PDB
+engine:
+  # -- Render the engine; off leaves only what other blocks enable (e.g. the stream writer alone)
+  enabled: true
+
+# -- Stream writer (mathscape-stream), the one writer of the canonical model.
+# With enabled: true it is its own single-replica StatefulSet (<fullname>-stream).
+# With enabled: false and a seed, the seed env is injected into the engine container instead (pair with command: ["/bin/mathscape-stream"]).
 stream:
-  # -- Seed of the one model, as a string (a stream never changes seed)
+  # -- Render the dedicated stream StatefulSet; requires a seed
+  enabled: false
+  # -- Seed of the one model, as a string (a stream never changes seed; there is no default)
   seed: ""
-  # -- Where objects/, HEAD and deltas.lisp live (on the PVC)
+  # -- Where objects/, HEAD and deltas.lisp live; must lie under the storage mount
   dataDir: /data/stream
   # -- Epoch to stop at; empty runs without a bound
   untilEpoch: ""
+  # -- Image for the writer; empty repository uses image.*
+  image:
+    repository: ""
+    tag: ""
+  # -- Container command; [] lets the runtime infer it (a Nix closure whose bin/ holds one executable)
+  command: ["/bin/mathscape-stream"]
+  # -- RUST_LOG for the writer
+  rustLog: "info,egg=warn"
+  # -- Further stream settings as MATHSCAPE_STREAM__<KEY> env, e.g. {SNAPSHOT_EVERY: "8"}
+  config: {}
+  # -- Health and metrics endpoint (/healthz, /readyz, /metrics)
+  health:
+    # -- Port the writer serves on; also the probe and scrape port
+    port: 9473
+    # -- Address it binds; 127.0.0.1 on a node whose pods are host processes
+    bindAddress: "0.0.0.0"
+    livenessPeriod: 20
+    livenessFailureThreshold: 3
+    readinessPeriod: 10
+    # -- Seconds the writer may take to open HEAD before liveness applies
+    startupFailureThreshold: 60
+    startupPeriod: 5
+  # -- Where the model lives
+  storage:
+    # -- claimTemplate (a PVC per replica) or hostPath (a host directory mounted at itself)
+    kind: claimTemplate
+    # -- Mount path for claimTemplate; ignored for hostPath, which mounts path at itself
+    mountPath: /data
+    # -- PVC size for claimTemplate
+    size: 2Gi
+    # -- Storage class for claimTemplate (empty uses the cluster default)
+    storageClass: ""
+    # -- Host directory for hostPath; required for that kind, and dataDir must lie under it
+    path: ""
+  # -- One core: the epoch loop is single-threaded (measured 0.93-0.97 of a core). Memory follows the frontier, not time
+  # (seed 7, 2026-10-15): the default mechanism reached 0.43Gi at 20 min and 12.3Gi at 40 (frontier 21,296 equations,
+  # not yet flat); mechanism v0.1.8 (graveyard: mutation, trial_scale: fixed, trial_stop_after: 0, drive_motor: false)
+  # holds 2.6Gi from 20 to 40 min (frontier 8,083). The limit is the default's 12.3Gi plus ~30%; past 40 min is unmeasured.
+  resources:
+    requests:
+      cpu: 1000m
+      memory: 3Gi
+    limits:
+      cpu: 1000m
+      memory: 16Gi
+  # -- SIGTERM to SIGKILL; writes are atomic, so a kill only replays epochs since HEAD
+  terminationGracePeriodSeconds: 10
+  # -- Node selector for the writer
+  nodeSelector: {}
+  # -- Alert rules (VMRule) for the writer
+  alerts:
+    enabled: false
+    # -- Minutes with no completed epoch before MathscapeStreamStalled
+    stalledMinutes: 15
+    # -- Minutes HEAD may stay unmoved before MathscapeStreamSnapshotStale
+    snapshotStaleMinutes: 120
+    # -- Hours with no certification before MathscapeStreamPlateau (info)
+    plateauHours: 6
+  # -- VMPodScrape of the writer's /metrics
+  scrape:
+    enabled: false
+    interval: 30s
+  # -- breathe bands on the writer's StatefulSet (pleme-lib.breatheBand); memory only, CPU stays pinned
+  breathe:
+    enabled: false
+    memory:
+      floor: 3Gi
+      ceiling: 16Gi
+    cpu:
+      enabled: false
 
 # -- Environment variables from ConfigMaps/Secrets
 envFrom: []

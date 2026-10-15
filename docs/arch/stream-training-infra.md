@@ -3,7 +3,8 @@
 **Status:** step 1 built 2026-10-15 (`crates/mathscape-stream`, see
 [Built](#built-2026-10-15)); the first-epoch saturation it exposed is
 broken by ML4.2 (see [Saturation](#saturation-broken-then-the-second-plateau-2026-10-15));
-steps 2–4 remain. The "today" table below was
+step 3 is declared for ryn's engenho (see [On ryn's engenho](#on-ryns-engenho-2026-10-15));
+steps 2 and 4 remain. The "today" table below was
 measured 2026-10-14, before step 1.
 
 ## Where the machine actually is
@@ -271,6 +272,65 @@ measured limits bound it:
   and memoizing entailment verdicts would make a rebuild from 0 cheap.
   Neither is built.
 
+## On ryn's engenho (2026-10-15)
+
+**Where it runs.** ryn's engenho runs pods as native host processes
+from Nix closures (`kubeletBackend: native`), so the writer ships as the
+`mathscape-stream` closure, not an image: no registry, no push, no spend.
+nix `pleme.mathscape.stream` renders this repo's chart (`engine.enabled:
+false`, `stream.enabled: true`, seed 7) with substrate's `mkHelmRender`
+into `/etc/engenho/manifests.d/mathscape-stream.yaml`; engenho's
+node-manifests driver applies it and prunes it when the declaration
+goes. The model lives in `~/.local/share/mathscape/stream` (a hostPath
+mounted at itself, inside ryn's `hostPathAllowlist`). Chart values and
+refusals: [deployment.md](deployment.md#stream-writer-streamenabled).
+
+**Health surface.** `stream.health_addr` serves `/healthz`, `/readyz`
+(503 until HEAD is open) and `/metrics` (epoch, library rules,
+certified/rejected/candidate counters, mechanism mutations and
+saturations, frontier cursor and size, and the timestamps of the last
+epoch, snapshot and certification). The chart probes it and, where
+VictoriaMetrics runs, scrapes it and alerts on Down, Stalled,
+SnapshotStale and Plateau.
+
+**The slice, measured** (this Mac, release, seed 7, one process per
+run, `/usr/bin/time -l`; CPU is user+sys over wall):
+
+| code, mechanism | run | epochs | CPU | max RSS | frontier |
+|---|---|---|---|---|---|
+| 0.1.8, default | 5 min | 568 | 0.93 core | 337 MiB | 5,024 |
+| 0.1.8, default | 10 min | 780 | 0.95 core | 1.0 GiB | 7,038 |
+| 0.1.8, default | 20 min | ~990 | 0.96 core | 2.6 GiB | 8,083 |
+| 0.1.8, default | 40 min | 1,346 | 0.94 core | 2.6 GiB | 8,083 |
+| 0.1.9, default | 20 min | 1,155 | 0.96 core | 0.43 GiB | 19,184 |
+| 0.1.9, default | 40 min | 1,670 | 0.97 core | **12.3 GiB** | 21,296 |
+| 0.1.9, `v0.1.8` profile | 20 min | 1,001 | 0.96 core | 2.6 GiB | 8,083 |
+| 0.1.9, `v0.1.8` profile | 40 min | 1,389 | 0.97 core | 2.7 GiB | 8,083 |
+
+CPU is one core whatever the mechanism. Memory follows the frontier,
+not time: at 8,083 equations it is flat at ~2.6 GiB; the 0.1.9
+default's opened size-6 frontier took it from 0.43 to 12.3 GiB between
+minutes 20 and 40, not flat. Both mechanisms reach the same library in
+40 minutes (188 and 186 rules). The chart's defaults are sized for the
+default mechanism: 1 core, 3Gi request, 16Gi limit (the measured 12.3
+GiB plus ~30%); whether it flattens past 40 minutes is not measured.
+
+**ryn runs the `v0.1.8` profile** (`pleme.mathscape.stream.mechanism`,
+which sets `mechanism.graveyard: mutation`, `trial_scale: fixed`,
+`trial_stop_after: 0`, `drive_motor: false`): a darwin engenho has no
+cgroups, so no limit is enforced there, and the profile is the bound
+that holds. That is 1 of ryn's 14 cores and ~2.7 of its 48 GiB. The
+alert layer and breathe bands are off there, like the pangea stack and
+the llm server beside it, because neither VictoriaMetrics nor
+breathe's CRDs run on that cluster; `/metrics` is the observation
+surface until they do. Moving ryn to the default mechanism waits on
+its memory being bounded.
+
+**The 0.1.8 20-minute run, scraped once a minute from `/metrics`:** library 76 at
+minute 1, 136 at 5, 161 at 9, 186 at 14, 188 at 18, then flat;
+22 mechanism mutations. That is the second plateau above, reproduced
+through the new surface.
+
 ## Build order
 
 Donated compute and the commit ledger the stream grows into: [model-ledger.md](model-ledger.md).
@@ -281,7 +341,9 @@ Donated compute and the commit ledger the stream grows into: [model-ledger.md](m
    Built 2026-10-15.
 2. Scout mode of the same binary: `--seed --scenario`, emits
    `(epoch-delta …)` on stdout or to the writer's socket.
-3. Run on rio under engenho or systemd; measure certified-invariants/hour
-   and $/invariant.
+3. ~~Run under engenho~~ Declared for ryn's engenho 2026-10-15
+   (`pleme.mathscape.stream`, seed 7, `v0.1.8` mechanism): one writer,
+   one core, ~2.7 GiB, $0. Measure certified-invariants/hour from its `/metrics` once it is
+   running; rio stays the scout box for step 2.
 4. Only when rio is saturated: the spot scout tier and an S3 object backend
    through arch-synthesizer's spot suite.

@@ -85,6 +85,8 @@ pub struct StreamConfig {
     pub frontier: StreamFrontier,
     #[serde(default)]
     pub mechanism: StreamMechanism,
+    #[serde(default)]
+    pub health_addr: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -192,6 +194,7 @@ impl StreamConfig {
             novelty: StreamNovelty::default(),
             frontier: StreamFrontier::default(),
             mechanism: StreamMechanism::default(),
+            health_addr: None,
         }
     }
 }
@@ -508,6 +511,7 @@ mod tests {
         assert_eq!(s.data_dir, "/data/stream");
         assert_eq!(s.snapshot_every, 4);
         assert_eq!(s.clock, StreamClock::Logical);
+        assert_eq!(s.health_addr, None);
         let _ = std::fs::remove_file(p);
     }
 
@@ -526,6 +530,7 @@ mod tests {
         unsafe {
             std::env::set_var("MSCFGSTREAMTEST_STREAM__SEED", "9");
             std::env::set_var("MSCFGSTREAMTEST_STREAM__DATA_DIR", "/data/stream");
+            std::env::set_var("MSCFGSTREAMTEST_STREAM__HEALTH_ADDR", "127.0.0.1:9473");
         }
         let c: Config = shikumi::ProviderChain::new()
             .with_defaults(&Config::default())
@@ -535,9 +540,11 @@ mod tests {
         unsafe {
             std::env::remove_var("MSCFGSTREAMTEST_STREAM__SEED");
             std::env::remove_var("MSCFGSTREAMTEST_STREAM__DATA_DIR");
+            std::env::remove_var("MSCFGSTREAMTEST_STREAM__HEALTH_ADDR");
         }
         let s = c.stream.unwrap();
         assert_eq!((s.seed, s.data_dir.as_str()), (9, "/data/stream"));
+        assert_eq!(s.health_addr.as_deref(), Some("127.0.0.1:9473"));
     }
 
     #[test]
