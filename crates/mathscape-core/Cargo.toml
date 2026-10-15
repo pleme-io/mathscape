@@ -16,5 +16,5 @@ bincode.workspace = true
 tatara-lisp.workspace = true
 
 [dev-dependencies]
-mathscape-compress.workspace = true
-mathscape-reward.workspace = true
+mathscape-compress = { path = "../mathscape-compress" }
+mathscape-reward = { path = "../mathscape-reward" }

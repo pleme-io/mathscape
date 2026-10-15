@@ -8,11 +8,11 @@ description = "Mathscape ↔ axiom-forge handoff — gates 6 and 7 of the realiz
 
 [dependencies]
 mathscape-core.workspace = true
-axiom-forge = { git = "https://github.com/pleme-io/axiom-forge" }
+axiom-forge = "0.1"
 
 [dev-dependencies]
-mathscape-core = { workspace = true, features = ["test-helpers"] }
-mathscape-compress.workspace = true
-mathscape-proof.workspace = true
-mathscape-reward.workspace = true
+mathscape-core = { path = "../mathscape-core", features = ["test-helpers"] }
+mathscape-compress = { path = "../mathscape-compress" }
+mathscape-proof = { path = "../mathscape-proof" }
+mathscape-reward = { path = "../mathscape-reward" }
 rayon = { workspace = true }

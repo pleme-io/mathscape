@@ -19,5 +19,5 @@ mathscape-compress.workspace = true
 tatara-lisp.workspace = true
 
 [dev-dependencies]
-mathscape-core = { workspace = true, features = ["test-helpers"] }
-mathscape-compress.workspace = true
+mathscape-core = { path = "../mathscape-core", features = ["test-helpers"] }
+mathscape-compress = { path = "../mathscape-compress" }

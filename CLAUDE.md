@@ -1,6 +1,6 @@
 # Mathscape
 
-pending-platform-mediated: mathscape, mathscape-history — renamed and created by hand 2026-10-15; the org catalog cannot express a rename without a destroy (pangea-architectures org.yaml, genkan entry). Clear once the reconciler has adopted both.
+pending-platform-mediated: mathscape, axiom-forge, pleme-linker and their -history repos — renamed and created by hand 2026-10-15 to open mathscape's whole closure with fresh history; the org catalog cannot express a rename without a destroy (pangea-architectures org.yaml, genkan entry). Clear once the reconciler has adopted all six.
 
 > **★★★ CSE / Knowable Construction.** This repo operates under
 > **Constructive Substrate Engineering** — canonical specification at

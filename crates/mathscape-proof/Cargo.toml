@@ -19,4 +19,4 @@ serde.workspace = true
 tatara-lisp.workspace = true
 
 [dev-dependencies]
-mathscape-core = { workspace = true, features = ["test-helpers"] }
+mathscape-core = { path = "../mathscape-core", features = ["test-helpers"] }
