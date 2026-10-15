@@ -20,6 +20,7 @@ members = [
     "crates/mathscape-axiom-bridge",
     "crates/mathscape-inference-api",
     "crates/mathscape-acquisition",
+    "crates/mathscape-stream",
 ]
 
 [workspace.package]
@@ -45,6 +46,7 @@ mathscape-api = { path = "crates/mathscape-api", version = "0.1.6" }
 mathscape-inference-api = { path = "crates/mathscape-inference-api", version = "0.1.6" }
 mathscape-acquisition = { path = "crates/mathscape-acquisition", version = "0.1.6" }
 mathscape-axiom-bridge = { path = "crates/mathscape-axiom-bridge", version = "0.1.6" }
+mathscape-stream = { path = "crates/mathscape-stream", version = "0.1.6" }
 
 # tatara-lisp — the canonical homoiconic Sexp substrate (crates.io)
 tatara-lisp = "0.3.3"

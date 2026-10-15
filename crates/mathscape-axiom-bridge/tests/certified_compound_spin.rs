@@ -21,185 +21,20 @@
 
 mod common;
 
-use mathscape_compress::{
-    derive_laws_validated, is_empirically_valid,
-};
+use mathscape_compress::{Motor, Extractor};
+use mathscape_compress::is_empirically_valid;
 use mathscape_core::{
     bootstrap::{
-        BootstrapCycle, BootstrapCycleSpec, CanonicalDeduper,
-        DefaultCorpusGenerator, DefaultModelUpdater, ExperimentOutcome,
-        ExperimentScenario, LawExtractor, PhaseOutcome, SpecExecutionError,
+        BootstrapCycleSpec,
+        ExperimentScenario,
     },
     eval::RewriteRule,
-    hash::TermRef,
     mathscape_map::{BufferedConsumer, MapSnapshot, MathscapeMap},
     meta_loop::{
-        HeuristicProposer, MetaLoop, MetaLoopConfig, ScenarioExecutor,
+        HeuristicProposer, MetaLoop, MetaLoopConfig,
     },
-    policy::LinearPolicy,
-    term::Term,
-    AdaptiveCorpusGenerator, MapEvent,
+    policy::LinearPolicy, MapEvent,
 };
-use std::cell::RefCell;
-
-// ── Validated extractor: Phase I + Phase J in one call ─────────
-
-struct ValidatedExtractor {
-    step_limit: usize,
-    min_support: usize,
-    subterm_depth: usize,
-    k_samples: usize,
-    seed: u64,
-    _stats: RefCell<Vec<mathscape_compress::LawGenStats>>,
-}
-
-impl ValidatedExtractor {
-    fn new(
-        step_limit: usize,
-        min_support: usize,
-        subterm_depth: usize,
-        k_samples: usize,
-        seed: u64,
-    ) -> Self {
-        Self {
-            step_limit,
-            min_support,
-            subterm_depth,
-            k_samples,
-            seed,
-            _stats: RefCell::new(Vec::new()),
-        }
-    }
-}
-
-impl LawExtractor for ValidatedExtractor {
-    fn extract(
-        &self,
-        corpus: &[Term],
-        library: &[RewriteRule],
-    ) -> Vec<RewriteRule> {
-        let mut next_id: mathscape_core::term::SymbolId =
-            (library.len() + 1) as u32;
-        let (laws, stats) = derive_laws_validated(
-            corpus,
-            library,
-            self.step_limit,
-            self.min_support,
-            self.subterm_depth,
-            self.k_samples,
-            self.seed,
-            &mut next_id,
-        );
-        self._stats.borrow_mut().push(stats);
-        laws
-    }
-}
-
-struct CertifiedMotorExecutor {
-    seed: u64,
-}
-
-impl CertifiedMotorExecutor {
-    fn new(seed: u64) -> Self {
-        Self { seed }
-    }
-}
-
-impl ScenarioExecutor for CertifiedMotorExecutor {
-    fn execute(
-        &self,
-        scenario: &ExperimentScenario,
-    ) -> Result<ExperimentOutcome, SpecExecutionError> {
-        let mut phases = Vec::new();
-        let mut carry_lib = scenario
-            .phases
-            .first()
-            .map(|p| p.seed_library.clone())
-            .unwrap_or_default();
-        let mut carry_pol = scenario
-            .phases
-            .first()
-            .map(|p| p.seed_policy.clone())
-            .unwrap_or_else(LinearPolicy::tensor_seeking_prior);
-        for (idx, base_spec) in scenario.phases.iter().enumerate() {
-            let mut spec = base_spec.clone();
-            if idx > 0 {
-                spec.seed_library = carry_lib.clone();
-                spec.seed_policy = carry_pol.clone();
-            }
-            let outcome = run_spec_certified(&spec, self.seed)?;
-            carry_lib = outcome.final_library.clone();
-            carry_pol = outcome.final_policy.clone();
-            phases.push(PhaseOutcome {
-                phase_index: idx,
-                spec_used: spec,
-                cycle_outcome: outcome,
-            });
-        }
-        let concat: Vec<u8> = phases
-            .iter()
-            .flat_map(|p| p.cycle_outcome.attestation.as_bytes().to_vec())
-            .collect();
-        Ok(ExperimentOutcome {
-            phases,
-            chain_attestation: TermRef::from_bytes(&concat),
-            scenario_total_ns: 0,
-        })
-    }
-}
-
-fn run_spec_certified(
-    spec: &BootstrapCycleSpec,
-    seed: u64,
-) -> Result<mathscape_core::bootstrap::BootstrapOutcome, SpecExecutionError> {
-    let n = spec.n_iterations;
-    // Phase V.certified: validated extractor routes through
-    // derive_laws_validated (Phase I subterm AU + Phase J empirical).
-    let extractor = ValidatedExtractor::new(300, 2, 2, 8, 0);
-    let seed_lib = spec.seed_library.clone();
-    let seed_pol = spec.seed_policy.clone();
-    let outcome = match spec.corpus_generator.as_str() {
-        "default" => {
-            let cycle = BootstrapCycle::new(
-                DefaultCorpusGenerator,
-                extractor,
-                DefaultModelUpdater::default(),
-                n,
-            );
-            if let Some(w) = spec.early_stop_after_stable {
-                cycle.run_until_stable(seed_lib, seed_pol, &CanonicalDeduper, w)
-            } else {
-                cycle.run_with_dedup(seed_lib, seed_pol, &CanonicalDeduper)
-            }
-        }
-        "adaptive" => {
-            let corpus = AdaptiveCorpusGenerator {
-                seed,
-                ..AdaptiveCorpusGenerator::default()
-            };
-            let cycle = BootstrapCycle::new(
-                corpus,
-                extractor,
-                DefaultModelUpdater::default(),
-                n,
-            );
-            if let Some(w) = spec.early_stop_after_stable {
-                cycle.run_until_stable(seed_lib, seed_pol, &CanonicalDeduper, w)
-            } else {
-                cycle.run_with_dedup(seed_lib, seed_pol, &CanonicalDeduper)
-            }
-        }
-        _ => {
-            let mini = ExperimentScenario {
-                name: "fallback".into(),
-                phases: vec![spec.clone()],
-            };
-            let inner = mathscape_core::bootstrap::execute_scenario_core(&mini)?;
-            return Ok(inner.phases.into_iter().next().unwrap().cycle_outcome);
-        }
-    };
-    Ok(outcome)
-}
 
 fn run_certified_motor(
     seed: u64,
@@ -207,7 +42,7 @@ fn run_certified_motor(
     max_phases: usize,
 ) -> mathscape_core::meta_loop::MetaLoopOutcome {
     let loop_ = MetaLoop::new(
-        CertifiedMotorExecutor::new(seed),
+        Motor::seeded(seed).with_extractor(Extractor::validated(0)),
         HeuristicProposer::with_extractor("derived-laws"),
         MetaLoopConfig {
             max_phases,

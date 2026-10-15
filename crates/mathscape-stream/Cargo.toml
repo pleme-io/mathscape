@@ -1,0 +1,21 @@
+[package]
+name = "mathscape-stream"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "The one-writer stream: grows the canonical model, persists it as content-addressed snapshots behind a HEAD, resumes from HEAD"
+
+[[bin]]
+name = "mathscape-stream"
+path = "src/main.rs"
+
+[dependencies]
+mathscape-core.workspace = true
+mathscape-compress.workspace = true
+mathscape-proof.workspace = true
+mathscape-config.workspace = true
+tatara-lisp.workspace = true
+blake3.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true

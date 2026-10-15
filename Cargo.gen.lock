@@ -1,13 +1,13 @@
 {
   "schema_version": 2,
-  "cargo_lock_sha256": "a75f5ab0f32002fecf778533db39516b29fb823819b3a04c5a0271e33a80dd76",
+  "cargo_lock_sha256": "35b94e5ae34adc2cf0ac7e47b067c73b33ec1c941a368094a68d119fe516712d",
   "manifest_sha256": {
-    "Cargo.toml": "b230046c17a8561d32654ded53a1d6ff00548abfdfd8a9d432016a6a9cca04dc",
+    "Cargo.toml": "e08a87e8a0a6d2c366139eb1ba80139337fa4775a4904c6494488356895d669d",
     "crates/mathscape-acquisition/Cargo.toml": "5d9543090fad1cbb511b4d75b6b09bd1dd248359b9ad306ac98c1f827ca4afa7",
     "crates/mathscape-api/Cargo.toml": "180c3457b4fafa02d541a32144bfbca98163a7261e6999658802f0c20ab8c3a7",
     "crates/mathscape-axiom-bridge/Cargo.toml": "9ebe51c3c47013d46002b269d966b39def44a4d68dcd435eee5d949e3a7c26ee",
     "crates/mathscape-cli/Cargo.toml": "67da4a30890eabff4ed2338879b46fc741922c1483222201cc775795280d391a",
-    "crates/mathscape-compress/Cargo.toml": "dbcf1b8566175ff62bdc3c263479aa37d64ffd8e0494d42a9b16da6f45808f7a",
+    "crates/mathscape-compress/Cargo.toml": "b6cd139b1608cf84d468c92ecc8f9b9e421b6788ab35efe9b97fcfe25653fcda",
     "crates/mathscape-config/Cargo.toml": "867291ae226f899fb90a26b7f084fc4bd3f409af9d20351af1973b2c22ea0563",
     "crates/mathscape-core/Cargo.toml": "a9260052ef16704e40978dfaeccf5af68312575f689fd50cdab0a2ff277961dd",
     "crates/mathscape-db/Cargo.toml": "a11339fa01d5a9ef3953d6a4a732aae02797cbf0c45dcee04a2566567459e204",
@@ -21,7 +21,8 @@
     "crates/mathscape-proof/Cargo.toml": "9ed490fd52cb235266a447b38894ed06c7c5d127a59c0cfe9db31ad6056971ea",
     "crates/mathscape-reward/Cargo.toml": "650feef9ebf53d48632ba1d8573a4e3c803e9b59ada22853356c3c3585d3f98e",
     "crates/mathscape-service/Cargo.toml": "83ea40901eae6068883b1db4b4630f64023f22965bd1084bbd4fd012f9bbc45a",
-    "crates/mathscape-store/Cargo.toml": "f1326ed0eeec105a53a11ade2100aae713eca4acf073900786ec85e6a318f32a"
+    "crates/mathscape-store/Cargo.toml": "f1326ed0eeec105a53a11ade2100aae713eca4acf073900786ec85e6a318f32a",
+    "crates/mathscape-stream/Cargo.toml": "0c0c9d184372eac344c0b7cdeec2e8d51c2ccebc9629db9f410338fcc345d107"
   },
   "target_resolves": {
     "base": {
@@ -6941,6 +6942,18 @@
             "optional": false,
             "target": null,
             "tree": "target"
+          },
+          {
+            "name": "serde",
+            "package_key": "serde-1.0.228",
+            "kind": "normal",
+            "features": [
+              "derive"
+            ],
+            "uses_default_features": true,
+            "optional": false,
+            "target": null,
+            "tree": "target"
           }
         ],
         "build_dependencies": [],
@@ -7986,6 +7999,95 @@
             "package_key": "tracing-0.1.44",
             "kind": "normal",
             "features": [],
+            "uses_default_features": true,
+            "optional": false,
+            "target": null,
+            "tree": "target"
+          }
+        ],
+        "build_dependencies": [],
+        "features": []
+      },
+      "mathscape-stream-0.1.6": {
+        "runtime_dependencies": [
+          {
+            "name": "blake3",
+            "package_key": "blake3-1.8.3",
+            "kind": "normal",
+            "features": [],
+            "uses_default_features": true,
+            "optional": false,
+            "target": null,
+            "tree": "target"
+          },
+          {
+            "name": "mathscape_compress",
+            "package_key": "mathscape-compress-0.1.6",
+            "kind": "normal",
+            "features": [],
+            "uses_default_features": true,
+            "optional": false,
+            "target": null,
+            "tree": "target"
+          },
+          {
+            "name": "mathscape_config",
+            "package_key": "mathscape-config-0.1.6",
+            "kind": "normal",
+            "features": [],
+            "uses_default_features": true,
+            "optional": false,
+            "target": null,
+            "tree": "target"
+          },
+          {
+            "name": "mathscape_core",
+            "package_key": "mathscape-core-0.1.6",
+            "kind": "normal",
+            "features": [],
+            "uses_default_features": true,
+            "optional": false,
+            "target": null,
+            "tree": "target"
+          },
+          {
+            "name": "mathscape_proof",
+            "package_key": "mathscape-proof-0.1.6",
+            "kind": "normal",
+            "features": [],
+            "uses_default_features": true,
+            "optional": false,
+            "target": null,
+            "tree": "target"
+          },
+          {
+            "name": "tatara_lisp",
+            "package_key": "tatara-lisp-0.3.4",
+            "kind": "normal",
+            "features": [],
+            "uses_default_features": true,
+            "optional": false,
+            "target": null,
+            "tree": "target"
+          },
+          {
+            "name": "tracing",
+            "package_key": "tracing-0.1.44",
+            "kind": "normal",
+            "features": [],
+            "uses_default_features": true,
+            "optional": false,
+            "target": null,
+            "tree": "target"
+          },
+          {
+            "name": "tracing_subscriber",
+            "package_key": "tracing-subscriber-0.3.22",
+            "kind": "normal",
+            "features": [
+              "env-filter",
+              "json"
+            ],
             "uses_default_features": true,
             "optional": false,
             "target": null,
@@ -21353,6 +21455,19 @@
         "name": "mathscape_store",
         "path": "src/lib.rs"
       }
+    },
+    "mathscape-stream-0.1.6": {
+      "edition": "2024",
+      "lib_target": {
+        "name": "mathscape_stream",
+        "path": "src/lib.rs"
+      },
+      "binaries": [
+        {
+          "name": "mathscape-stream",
+          "path": "src/main.rs"
+        }
+      ]
     },
     "md-5-0.10.6": {
       "edition": "2018",

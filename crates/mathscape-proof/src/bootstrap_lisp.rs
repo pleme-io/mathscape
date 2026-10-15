@@ -151,11 +151,7 @@ pub fn rule_from_sexp(sexp: &Sexp) -> Option<RewriteRule> {
     })
 }
 
-/// Minimalist Term<->Sexp. Covers the subset that rules use in
-/// practice — Apply, Var, Number(Nat/Int), Symbol. Does NOT handle
-/// Fn or Point (not expected in rule shapes) and Tensor/
-/// FloatTensor (large; bincode-persist them separately if you
-/// really need Lisp round-trip of tensor-data-laden rules).
+/// Term<->Sexp for every `Term` variant; `term_from_sexp` inverts it.
 pub fn term_to_sexp(t: &Term) -> Sexp {
     use mathscape_core::value::Value;
     match t {
@@ -175,13 +171,16 @@ pub fn term_to_sexp(t: &Term) -> Sexp {
             Sexp::symbol("float"),
             Sexp::float(f64::from_bits(*bits)),
         ]),
-        Term::Number(Value::Tensor { .. })
-        | Term::Number(Value::FloatTensor { .. }) => {
-            // Tensors in rule position are rare; emit an opaque
-            // marker. Callers who need tensor round-trip should
-            // bincode-persist these rules separately.
-            Sexp::symbol("tensor-opaque")
-        }
+        Term::Number(Value::Tensor { shape, data }) => Sexp::List(vec![
+            Sexp::symbol("tensor"),
+            ints("shape", shape.iter().map(|&d| d as i64)),
+            ints("data", data.iter().copied()),
+        ]),
+        Term::Number(Value::FloatTensor { shape, data }) => Sexp::List(vec![
+            Sexp::symbol("float-tensor"),
+            ints("shape", shape.iter().map(|&d| d as i64)),
+            ints("bits", data.iter().map(|&b| b as i64)),
+        ]),
         Term::Point(p) => Sexp::List(vec![
             Sexp::symbol("point"),
             Sexp::int(*p as i64),
@@ -203,8 +202,26 @@ pub fn term_to_sexp(t: &Term) -> Sexp {
             }
             Sexp::List(items)
         }
-        Term::Fn(_, _) => Sexp::symbol("fn-opaque"),
+        Term::Fn(params, body) => Sexp::List(vec![
+            Sexp::symbol("fn"),
+            ints("params", params.iter().map(|&p| i64::from(p))),
+            term_to_sexp(body),
+        ]),
     }
+}
+
+fn ints(tag: &str, xs: impl Iterator<Item = i64>) -> Sexp {
+    let mut items = vec![Sexp::symbol(tag)];
+    items.extend(xs.map(Sexp::int));
+    Sexp::List(items)
+}
+
+fn ints_of(tag: &str, s: &Sexp) -> Option<Vec<i64>> {
+    let items = s.as_list()?;
+    if items.first()?.as_symbol()? != tag {
+        return None;
+    }
+    items[1..].iter().map(int_val).collect()
 }
 
 pub fn term_from_sexp(sexp: &Sexp) -> Option<Term> {
@@ -239,6 +256,20 @@ pub fn term_from_sexp(sexp: &Sexp) -> Option<Term> {
             Value::from_f64(f).map(Term::Number)
         }
         "point" => Some(Term::Point(int_val(&items[1])? as u64)),
+        "tensor" => {
+            let shape = ints_of("shape", items.get(1)?)?.into_iter().map(usize::try_from).collect::<Result<Vec<_>, _>>().ok()?;
+            let data = ints_of("data", items.get(2)?)?;
+            Value::tensor(shape, data).map(Term::Number)
+        }
+        "float-tensor" => {
+            let shape = ints_of("shape", items.get(1)?)?.into_iter().map(usize::try_from).collect::<Result<Vec<_>, _>>().ok()?;
+            let data: Vec<u64> = ints_of("bits", items.get(2)?)?.into_iter().map(|b| b as u64).collect();
+            (data.len() == shape.iter().product::<usize>()).then_some(Term::Number(Value::FloatTensor { shape, data }))
+        }
+        "fn" => {
+            let params = ints_of("params", items.get(1)?)?.into_iter().map(u32::try_from).collect::<Result<Vec<_>, _>>().ok()?;
+            Some(Term::Fn(params, Box::new(term_from_sexp(items.get(2)?)?)))
+        }
         "apply" => {
             if items.len() < 2 {
                 return None;
@@ -518,6 +549,26 @@ fn hex_nibble(b: u8) -> Option<u8> {
 mod tests {
     use super::*;
     use mathscape_core::policy::LinearPolicy;
+
+    #[test]
+    fn every_term_variant_round_trips_including_tensors_and_functions() {
+        use mathscape_core::value::Value;
+        let terms = [
+            Term::Number(Value::tensor(vec![2], vec![0, -3]).unwrap()),
+            Term::Number(Value::float_tensor(vec![1, 2], vec![0.5, -1.25]).unwrap()),
+            Term::Apply(
+                Box::new(Term::Var(20)),
+                vec![Term::Number(Value::tensor(vec![2], vec![1, 1]).unwrap()), Term::Var(200)],
+            ),
+            Term::Fn(vec![100, 101], Box::new(Term::Var(101))),
+            Term::Number(Value::Nat(u64::MAX)),
+        ];
+        for t in terms {
+            let text = term_to_sexp(&t).to_string();
+            let back = tatara_lisp::reader::read(&text).ok().and_then(|f| f.first().and_then(term_from_sexp));
+            assert_eq!(back.as_ref(), Some(&t), "{text}");
+        }
+    }
 
     #[test]
     fn default_m0_spec_roundtrips_via_sexp() {

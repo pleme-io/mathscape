@@ -9,163 +9,16 @@
 
 mod common;
 
-use mathscape_compress::derive_laws_from_corpus_instrumented;
+use mathscape_compress::Motor;
 use mathscape_core::{
     bootstrap::{
-        execute_scenario_core, BootstrapCycle, BootstrapCycleSpec,
-        CanonicalDeduper, DefaultCorpusGenerator, DefaultModelUpdater,
-        ExperimentOutcome, ExperimentScenario, LawExtractor, PhaseOutcome,
-        SpecExecutionError,
+        BootstrapCycleSpec, ExperimentScenario,
     },
-    eval::RewriteRule,
-    hash::TermRef,
     meta_loop::{
-        HeuristicProposer, MetaLoop, MetaLoopConfig, ScenarioExecutor,
+        HeuristicProposer, MetaLoop, MetaLoopConfig,
     },
     policy::LinearPolicy,
-    term::Term,
-    AdaptiveCorpusGenerator,
 };
-use std::cell::RefCell;
-
-/// Custom derived-laws extractor (same shape as other tests').
-struct DerivedLawsExtractor {
-    step_limit: usize,
-    min_support: usize,
-    stats: RefCell<Vec<mathscape_compress::LawGenStats>>,
-}
-
-impl DerivedLawsExtractor {
-    fn new(step_limit: usize, min_support: usize) -> Self {
-        Self {
-            step_limit,
-            min_support,
-            stats: RefCell::new(Vec::new()),
-        }
-    }
-}
-
-impl LawExtractor for DerivedLawsExtractor {
-    fn extract(
-        &self,
-        corpus: &[Term],
-        library: &[RewriteRule],
-    ) -> Vec<RewriteRule> {
-        let mut next_id: mathscape_core::term::SymbolId =
-            (library.len() + 1) as u32;
-        let (laws, stats) = derive_laws_from_corpus_instrumented(
-            corpus,
-            library,
-            self.step_limit,
-            self.min_support,
-            &mut next_id,
-        );
-        self.stats.borrow_mut().push(stats);
-        laws
-    }
-}
-
-/// Real executor: routes scenarios through a BootstrapCycle with
-/// the derive-laws extractor, honoring corpus_generator names
-/// ("default" and "adaptive") and early_stop_after_stable. This
-/// is the motor — observe what scenarios the proposer picks AND
-/// what their outcomes are.
-struct MotorExecutor;
-
-impl ScenarioExecutor for MotorExecutor {
-    fn execute(
-        &self,
-        scenario: &ExperimentScenario,
-    ) -> Result<ExperimentOutcome, SpecExecutionError> {
-        let mut phases = Vec::new();
-        let mut carry_lib = scenario
-            .phases
-            .first()
-            .map(|p| p.seed_library.clone())
-            .unwrap_or_default();
-        let mut carry_pol = scenario
-            .phases
-            .first()
-            .map(|p| p.seed_policy.clone())
-            .unwrap_or_else(LinearPolicy::tensor_seeking_prior);
-        for (idx, base_spec) in scenario.phases.iter().enumerate() {
-            let mut spec = base_spec.clone();
-            if idx > 0 {
-                spec.seed_library = carry_lib.clone();
-                spec.seed_policy = carry_pol.clone();
-            }
-            let outcome = run_spec_with_real_extractor(&spec)?;
-            carry_lib = outcome.final_library.clone();
-            carry_pol = outcome.final_policy.clone();
-            phases.push(PhaseOutcome {
-                phase_index: idx,
-                spec_used: spec,
-                cycle_outcome: outcome,
-            });
-        }
-        let concat: Vec<u8> = phases
-            .iter()
-            .flat_map(|p| p.cycle_outcome.attestation.as_bytes().to_vec())
-            .collect();
-        let chain_attestation = TermRef::from_bytes(&concat);
-        Ok(ExperimentOutcome {
-            phases,
-            chain_attestation,
-            scenario_total_ns: 0,
-        })
-    }
-}
-
-fn run_spec_with_real_extractor(
-    spec: &BootstrapCycleSpec,
-) -> Result<mathscape_core::bootstrap::BootstrapOutcome, SpecExecutionError> {
-    let n = spec.n_iterations;
-    let extractor = DerivedLawsExtractor::new(300, 2);
-    let seed_lib = spec.seed_library.clone();
-    let seed_pol = spec.seed_policy.clone();
-
-    let outcome = match spec.corpus_generator.as_str() {
-        "default" => {
-            let cycle = BootstrapCycle::new(
-                DefaultCorpusGenerator,
-                extractor,
-                DefaultModelUpdater::default(),
-                n,
-            );
-            if let Some(w) = spec.early_stop_after_stable {
-                cycle.run_until_stable(seed_lib, seed_pol, &CanonicalDeduper, w)
-            } else {
-                cycle.run_with_dedup(seed_lib, seed_pol, &CanonicalDeduper)
-            }
-        }
-        "adaptive" => {
-            // Phase V: the diet-mutation target. Uses the new
-            // AdaptiveCorpusGenerator which reads library state
-            // and synthesizes residue-inviting terms.
-            let cycle = BootstrapCycle::new(
-                AdaptiveCorpusGenerator::default(),
-                extractor,
-                DefaultModelUpdater::default(),
-                n,
-            );
-            if let Some(w) = spec.early_stop_after_stable {
-                cycle.run_until_stable(seed_lib, seed_pol, &CanonicalDeduper, w)
-            } else {
-                cycle.run_with_dedup(seed_lib, seed_pol, &CanonicalDeduper)
-            }
-        }
-        _ => {
-            // Fallback: delegate to the core executor for null etc.
-            let mini = ExperimentScenario {
-                name: "fallback".into(),
-                phases: vec![spec.clone()],
-            };
-            let inner = execute_scenario_core(&mini)?;
-            return Ok(inner.phases.into_iter().next().unwrap().cycle_outcome);
-        }
-    };
-    Ok(outcome)
-}
 
 fn scenario_label_for(record: &mathscape_core::meta_loop::MetaPhaseRecord) -> String {
     let s = &record.scenario;
@@ -179,7 +32,7 @@ fn fix_point_motor_runs_and_visibly_mutates_diet() {
     println!("╚══════════════════════════════════════════════════════╝");
 
     let loop_ = MetaLoop::new(
-        MotorExecutor,
+        Motor::default(),
         HeuristicProposer::with_extractor("derived-laws"),
         MetaLoopConfig {
             max_phases: 10,
@@ -316,7 +169,7 @@ fn fix_point_motor_runs_and_visibly_mutates_diet() {
 fn fix_point_motor_is_deterministic() {
     let build_loop = || {
         MetaLoop::new(
-            MotorExecutor,
+            Motor::default(),
             HeuristicProposer::with_extractor("derived-laws"),
             MetaLoopConfig {
                 max_phases: 6,

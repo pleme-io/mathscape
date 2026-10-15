@@ -390,6 +390,10 @@ impl StreamingPolicyTrainer {
         self.anchor_set.get()
     }
 
+    pub fn anchor_bias(&self) -> f64 {
+        self.anchor_bias.get()
+    }
+
     /// Phase W.2: snapshot the anchor weights (zeros if never
     /// anchored).
     pub fn anchor_snapshot(

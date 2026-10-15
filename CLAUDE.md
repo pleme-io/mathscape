@@ -1106,7 +1106,7 @@ capability.
 | `mathscape-migration` | SeaORM database migrations for PostgreSQL schema lifecycle |
 | `mathscape-db` | Database management CLI: migrate, rollback, status, verify, reset |
 | `mathscape-proof` | Proof construction, verification status tracking, proof composition, Lean 4 export |
-| `mathscape-compress` | Anti-unification, e-graph integration (`egg`), library extraction, rewriting |
+| `mathscape-compress` | Anti-unification, e-graph integration (`egg`), library extraction, rewriting; the `Motor` (the one `ScenarioExecutor`, seeded, with its `Extractor`) |
 | `mathscape-evolve` | Genetic operators, population management, tournament selection |
 | `mathscape-reward` | Description length, compression ratio, novelty scoring, meta-compression, combined fitness |
 | `mathscape-policy` | Optional RL policy network for guided mutation (Phase 7+) |
@@ -1114,13 +1114,14 @@ capability.
 | `mathscape-mcp` | MCP server (stdio transport) — observe-only tools for agent interaction, `Arc<Engine>` read boundary |
 | `mathscape-service` | Long-running HTTP service — engine loop + health/metrics + read-only query API for K8s deployment |
 | `mathscape-discovery` | Discovery mining: epoch analysis, known-math pattern matching, representation data for React UI |
+| `mathscape-stream` | The one writer: grows the canonical model epoch by epoch (motor → certification → trainer), persists content-addressed snapshots behind `HEAD`, resumes from `HEAD`; see `docs/arch/stream-training-infra.md` |
 
 ## Service Mode
 
 Mathscape runs as a long-running service for unattended operation.
 See [docs/arch/service.md](docs/arch/service.md) for full details.
 
-**Three binaries, one engine:**
+**Five binaries, one engine:**
 
 | Binary | Transport | Use case |
 |---|---|---|
@@ -1128,6 +1129,7 @@ See [docs/arch/service.md](docs/arch/service.md) for full details.
 | `mathscape-mcp` | stdio (MCP protocol) | Local Claude Code agent interaction |
 | `mathscape-cli` | Terminal REPL | Interactive human exploration |
 | `mathscape-db` | CLI | Database migrations, status, verify, reset |
+| `mathscape-stream` | CLI, `stream:` config | The one-writer stream: seed in, `objects/` + `HEAD` + `deltas.lisp` out, kill-9 safe |
 
 The service binary auto-starts the engine loop and runs epochs
 continuously. All state persists to `/data/` (redb + SQLite).
@@ -1304,6 +1306,9 @@ nix run .#release              # push multi-arch image to GHCR
 
 # MCP
 nix run .#mcp                  # start MCP server (stdio transport)
+
+# Stream (the one writer; resumes from HEAD)
+MATHSCAPE_STREAM__SEED=42 MATHSCAPE_STREAM__UNTIL_EPOCH=1000 nix run .#stream
 
 # Helm
 nix run .#lint:mathscape       # lint chart

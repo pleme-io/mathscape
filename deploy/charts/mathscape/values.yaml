@@ -54,15 +54,24 @@ service:
 env:
   - name: RUST_LOG
     value: "info,mathscape=debug"
-  - name: DATA_DIR
-    value: "/data"
+  - name: MATHSCAPE_PERSISTENT_PATH
+    value: "/data/registry.redb"
   - name: LOG_FORMAT
     value: "json"
-  - name: DATABASE_URL
+  - name: MATHSCAPE_DATABASE__URL
     valueFrom:
       secretKeyRef:
         name: mathscape-db
         key: DATABASE_URL
+
+# -- Stream writer (mathscape-stream). Rendered only when seed is set; pair with command: ["/bin/mathscape-stream"]
+stream:
+  # -- Seed of the one model, as a string (a stream never changes seed)
+  seed: ""
+  # -- Where objects/, HEAD and deltas.lisp live (on the PVC)
+  dataDir: /data/stream
+  # -- Epoch to stop at; empty runs without a bound
+  untilEpoch: ""
 
 # -- Environment variables from ConfigMaps/Secrets
 envFrom: []

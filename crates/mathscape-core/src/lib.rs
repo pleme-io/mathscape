@@ -84,7 +84,7 @@ pub use bootstrap::{
     SubsumptionDeduper,
 };
 pub use certification::{
-    run_certification_step, CertificationLevel, CertificationStepReport,
+    rule_content_hash, run_certification_step, CertificationLevel, CertificationStepReport,
     CertificationVerdict, CertifiedRule, Certifier, CertifyingConsumer,
     DefaultCertifier,
 };
@@ -128,7 +128,7 @@ pub use model_testing::{
 };
 pub use snapshot::{
     analyze_snapshot, attach_analysis, deep_analyze, fork_from_snapshot,
-    format_analysis, snapshot_handle, trainer_from_snapshot, trainer_snapshot,
+    format_analysis, snapshot_handle, snapshot_handle_at, trainer_from_snapshot, trainer_snapshot,
     ModelAnalysis, ModelSnapshot, SnapshotError, TrainerSnapshot,
     SNAPSHOT_VERSION,
 };

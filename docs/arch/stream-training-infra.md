@@ -1,7 +1,8 @@
 # Stream-training infrastructure — destination and path
 
-**Status:** design, 2026-10-14. Nothing here is built yet; every "today" fact
-below was measured on that date (file:line evidence inline).
+**Status:** step 1 built 2026-10-15 (`crates/mathscape-stream`, see
+[Built](#built-2026-10-15)); steps 2–4 remain. The "today" table below was
+measured 2026-10-14, before step 1.
 
 ## Where the machine actually is
 
@@ -67,11 +68,59 @@ Because scouts are stateless and the object layout is the same on disk and in
 S3, rio-first is not a detour: the AWS tier adds scouts and swaps the object
 backend, nothing else.
 
+## Built (2026-10-15)
+
+- **The motor is a library.** `mathscape_compress::Motor` (+ `Extractor`,
+  `UnknownCorpus`) replaced thirteen hand-copied `ScenarioExecutor`s in
+  `mathscape-axiom-bridge/tests`; their unknown-corpus behaviours (refuse,
+  fall back to core, skip) are the three `UnknownCorpus` values.
+  `first_model.rs` keeps its own executor: it dispatches on the extractor
+  name, a different shape.
+- **`mathscape-stream`** (lib + bin). Config is the `stream:` section of
+  `mathscape-config` (`seed` required, no entropy; env
+  `MATHSCAPE_STREAM__*`). Each epoch is a scout step
+  (`Writer::discover`: the motor seeded by `epoch_seed(seed, epoch)`) then
+  a writer step (`Writer::apply`: `CoreGrew` through
+  `CertifyingConsumer<DefaultCertifier>` into the `EventHub` the
+  `StreamingPolicyTrainer` listens on). Certified rules join the library;
+  rejected ones become tombstones, never retried. A changed epoch is an
+  `(epoch-delta …)` line in `deltas.lisp` and a content-addressed object.
+- **State on disk.** `objects/{h[0:2]}/{h[2:]}` (snapshots under their
+  content hash, deltas under the hash of their bytes), `HEAD` (hex), each
+  written temp-then-rename with fsync. A snapshot is taken every
+  `snapshot_every` certified deltas, every `checkpoint_epochs` epochs, and
+  at the budget (`until_epoch`). Snapshot metadata carries seed, next
+  epoch, parent HEAD and tombstones, so `Writer::open` resumes exactly.
+- **Replay-stable.** `snapshot_handle_at` takes the clock; the stream's
+  default `clock: logical` stamps the epoch, so the same seed and config
+  give the same hash chain, and a writer killed mid-run converges on the
+  uninterrupted chain after resume (`tests/stream.rs`). `clock: wall`
+  keeps the old behaviour.
+- **Fixed on the way:** `TrainerSnapshot.anchor_bias` was always 0 (now
+  read from the trainer), and the term S-expression codec emitted
+  `tensor-opaque` / `fn-opaque`, so a tensor rule's `rule-certified`
+  event did not read back; both now round-trip.
+- **Chart:** env now names what the binaries read
+  (`MATHSCAPE_PERSISTENT_PATH`, `MATHSCAPE_DATABASE__URL`); `stream.seed`
+  renders the writer's env, run with `command: ["/bin/mathscape-stream"]`
+  (the engine image now carries the binary).
+
+**First measurement (this Mac, 14 cores, release, seed 2026, defaults):**
+20,000 epochs (plus 62 replayed) in 45.7 s of wall time across a SIGKILL
+at epoch 7,678 and a resume from HEAD at epoch 7,616. 2 certified invariants, both in epoch
+0; 189 rejected candidates tombstoned; zero certified after epoch 0. So
+certified invariants per hour is ~158 over this run and **0 at steady
+state**: with this motor configuration discovery saturates in one epoch.
+The bottleneck is the motor (corpus and extractor), not compute; buying
+spot capacity now would buy more sterile epochs. ML4's mechanism mutation
+is the lever.
+
 ## Build order
 
-1. `mathscape-stream` binary: explicit seed in config, the writer loop
+1. ~~`mathscape-stream` binary: explicit seed in config, the writer loop
    (EventHub → trainer → certification → snapshot every K), `HEAD` file,
-   resume from `HEAD` on start. Fix the chart to the env the binary reads.
+   resume from `HEAD` on start. Fix the chart to the env the binary reads.~~
+   Built 2026-10-15.
 2. Scout mode of the same binary: `--seed --scenario`, emits
    `(epoch-delta …)` on stdout or to the writer's socket.
 3. Run on rio under engenho or systemd; measure certified-invariants/hour

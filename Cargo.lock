@@ -2102,6 +2102,7 @@ version = "0.1.6"
 dependencies = [
  "egg",
  "mathscape-core",
+ "serde",
 ]
 
 [[package]]
@@ -2282,6 +2283,20 @@ dependencies = [
  "thiserror 1.0.69",
  "tokio",
  "tracing",
+]
+
+[[package]]
+name = "mathscape-stream"
+version = "0.1.6"
+dependencies = [
+ "blake3",
+ "mathscape-compress",
+ "mathscape-config",
+ "mathscape-core",
+ "mathscape-proof",
+ "tatara-lisp",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]

@@ -135,7 +135,7 @@ impl CertifiedRule {
     }
 }
 
-pub(crate) fn rule_content_hash(rule: &RewriteRule) -> TermRef {
+pub fn rule_content_hash(rule: &RewriteRule) -> TermRef {
     let bytes =
         bincode::serialize(&(&rule.lhs, &rule.rhs)).expect("serializable");
     TermRef::from_bytes(&bytes)

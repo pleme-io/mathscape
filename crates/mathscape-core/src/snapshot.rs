@@ -221,11 +221,7 @@ pub fn trainer_snapshot(
         phantom_gradient_accum: trainer.phantom_gradients(),
         fisher_information: trainer.fisher_snapshot(),
         anchor_weights: trainer.anchor_snapshot(),
-        // Anchor bias isn't exposed by the trainer yet — snapshot
-        // a best-effort 0.0; a future bump of the API can expose
-        // it directly. This loses anchor_bias across
-        // save/restore, a minor fidelity issue.
-        anchor_bias: 0.0,
+        anchor_bias: trainer.anchor_bias(),
         anchor_set: trainer.has_anchor(),
         ewc_lambda: trainer.ewc_lambda(),
         benchmark_history: trainer.benchmark_history(),
@@ -264,6 +260,14 @@ pub fn trainer_from_snapshot(
 
 /// Snapshot a full live handle.
 pub fn snapshot_handle(handle: &LiveInferenceHandle) -> ModelSnapshot {
+    let created_at_epoch_secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    snapshot_handle_at(handle, created_at_epoch_secs)
+}
+
+pub fn snapshot_handle_at(handle: &LiveInferenceHandle, created_at_epoch_secs: u64) -> ModelSnapshot {
     let library = handle.library_snapshot();
     // We don't have a direct reference to the trainer here, but
     // the handle exposes policy_snapshot and trainer-related
@@ -271,10 +275,6 @@ pub fn snapshot_handle(handle: &LiveInferenceHandle) -> ModelSnapshot {
     // access to the trainer — so we take it via the handle's
     // internal reference (provided via a dedicated accessor).
     let trainer = handle.trainer_snapshot();
-    let created_at_epoch_secs = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or(0);
     let mut snap = ModelSnapshot {
         version: SNAPSHOT_VERSION,
         created_at_epoch_secs,
@@ -667,6 +667,31 @@ mod tests {
         assert!(snap.trainer.policy.trained_steps > 0);
         assert_eq!(snap.version, SNAPSHOT_VERSION);
         assert_ne!(snap.content_hash, [0u8; 32]);
+    }
+
+    #[test]
+    fn an_anchored_trainer_survives_snapshot_and_restore_with_its_anchor_bias() {
+        let (lib, trainer, handle) = make_live_model();
+        lib.borrow_mut().push(add_id());
+        trainer.on_event(&MapEvent::rule_certified(add_id(), 96));
+        trainer.anchor_current_weights();
+        let bias = trainer.anchor_bias();
+        assert_ne!(bias, 0.0);
+        let snap = snapshot_handle(&handle);
+        let restored = trainer_from_snapshot(&snap.trainer);
+        assert_eq!(restored.anchor_bias().to_bits(), bias.to_bits());
+    }
+
+    #[test]
+    fn a_snapshot_taken_at_a_given_clock_hashes_the_same_whenever_it_is_taken() {
+        let (lib, trainer, handle) = make_live_model();
+        lib.borrow_mut().push(add_id());
+        trainer.on_event(&MapEvent::rule_certified(add_id(), 96));
+        let a = snapshot_handle_at(&handle, 7);
+        std::thread::sleep(std::time::Duration::from_millis(1100));
+        let b = snapshot_handle_at(&handle, 7);
+        assert_eq!(a.content_hash, b.content_hash);
+        assert_ne!(a.content_hash, snapshot_handle_at(&handle, 8).content_hash);
     }
 
     #[test]

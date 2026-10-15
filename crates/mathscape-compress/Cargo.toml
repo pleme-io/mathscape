@@ -9,6 +9,7 @@ description = "Anti-unification, e-graph integration (egg), library extraction"
 [dependencies]
 mathscape-core.workspace = true
 egg.workspace = true
+serde.workspace = true
 
 [dev-dependencies]
 mathscape-core = { path = "../mathscape-core", features = ["test-helpers"] }

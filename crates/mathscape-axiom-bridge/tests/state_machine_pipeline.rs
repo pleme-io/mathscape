@@ -26,180 +26,23 @@
 
 mod common;
 
-use mathscape_compress::derive_laws_validated;
+use mathscape_compress::{Motor, Extractor, UnknownCorpus};
 use mathscape_core::{
     bootstrap::{
-        BootstrapCycle, BootstrapCycleSpec, CanonicalDeduper,
-        DefaultCorpusGenerator, DefaultModelUpdater, ExperimentOutcome,
-        ExperimentScenario, LawExtractor, PhaseOutcome, SpecExecutionError,
+        BootstrapCycleSpec,
+        ExperimentScenario,
     },
     certification::{
         run_certification_step, CertificationLevel, CertifiedRule,
         DefaultCertifier,
     },
     eval::RewriteRule,
-    hash::TermRef,
     mathscape_map::{BufferedConsumer, MapSnapshot, MathscapeMap},
     meta_loop::{
-        HeuristicProposer, MetaLoop, MetaLoopConfig, ScenarioExecutor,
+        HeuristicProposer, MetaLoop, MetaLoopConfig,
     },
     policy::LinearPolicy,
-    term::Term,
-    AdaptiveCorpusGenerator,
 };
-use std::cell::RefCell;
-
-// ── Validated extractor (same as Phase V.certified) ─────────
-
-struct ValidatedExtractor {
-    step_limit: usize,
-    min_support: usize,
-    subterm_depth: usize,
-    k_samples: usize,
-    seed: u64,
-    _stats: RefCell<Vec<mathscape_compress::LawGenStats>>,
-}
-
-impl ValidatedExtractor {
-    fn new(
-        step_limit: usize,
-        min_support: usize,
-        subterm_depth: usize,
-        k_samples: usize,
-        seed: u64,
-    ) -> Self {
-        Self {
-            step_limit,
-            min_support,
-            subterm_depth,
-            k_samples,
-            seed,
-            _stats: RefCell::new(Vec::new()),
-        }
-    }
-}
-
-impl LawExtractor for ValidatedExtractor {
-    fn extract(
-        &self,
-        corpus: &[Term],
-        library: &[RewriteRule],
-    ) -> Vec<RewriteRule> {
-        let mut next_id: mathscape_core::term::SymbolId =
-            (library.len() + 1) as u32;
-        let (laws, stats) = derive_laws_validated(
-            corpus,
-            library,
-            self.step_limit,
-            self.min_support,
-            self.subterm_depth,
-            self.k_samples,
-            self.seed,
-            &mut next_id,
-        );
-        self._stats.borrow_mut().push(stats);
-        laws
-    }
-}
-
-struct SeededExecutor {
-    seed: u64,
-}
-
-impl ScenarioExecutor for SeededExecutor {
-    fn execute(
-        &self,
-        scenario: &ExperimentScenario,
-    ) -> Result<ExperimentOutcome, SpecExecutionError> {
-        let mut phases = Vec::new();
-        let mut carry_lib = scenario
-            .phases
-            .first()
-            .map(|p| p.seed_library.clone())
-            .unwrap_or_default();
-        let mut carry_pol = scenario
-            .phases
-            .first()
-            .map(|p| p.seed_policy.clone())
-            .unwrap_or_else(LinearPolicy::tensor_seeking_prior);
-        for (idx, base_spec) in scenario.phases.iter().enumerate() {
-            let mut spec = base_spec.clone();
-            if idx > 0 {
-                spec.seed_library = carry_lib.clone();
-                spec.seed_policy = carry_pol.clone();
-            }
-            let n = spec.n_iterations;
-            let extractor = ValidatedExtractor::new(300, 2, 2, 8, self.seed);
-            let outcome = match spec.corpus_generator.as_str() {
-                "default" => {
-                    let cycle = BootstrapCycle::new(
-                        DefaultCorpusGenerator,
-                        extractor,
-                        DefaultModelUpdater::default(),
-                        n,
-                    );
-                    if let Some(w) = spec.early_stop_after_stable {
-                        cycle.run_until_stable(
-                            spec.seed_library.clone(),
-                            spec.seed_policy.clone(),
-                            &CanonicalDeduper,
-                            w,
-                        )
-                    } else {
-                        cycle.run_with_dedup(
-                            spec.seed_library.clone(),
-                            spec.seed_policy.clone(),
-                            &CanonicalDeduper,
-                        )
-                    }
-                }
-                "adaptive" => {
-                    let corpus = AdaptiveCorpusGenerator {
-                        seed: self.seed,
-                        ..AdaptiveCorpusGenerator::default()
-                    };
-                    let cycle = BootstrapCycle::new(
-                        corpus,
-                        extractor,
-                        DefaultModelUpdater::default(),
-                        n,
-                    );
-                    if let Some(w) = spec.early_stop_after_stable {
-                        cycle.run_until_stable(
-                            spec.seed_library.clone(),
-                            spec.seed_policy.clone(),
-                            &CanonicalDeduper,
-                            w,
-                        )
-                    } else {
-                        cycle.run_with_dedup(
-                            spec.seed_library.clone(),
-                            spec.seed_policy.clone(),
-                            &CanonicalDeduper,
-                        )
-                    }
-                }
-                _ => continue,
-            };
-            carry_lib = outcome.final_library.clone();
-            carry_pol = outcome.final_policy.clone();
-            phases.push(PhaseOutcome {
-                phase_index: idx,
-                spec_used: spec,
-                cycle_outcome: outcome,
-            });
-        }
-        let concat: Vec<u8> = phases
-            .iter()
-            .flat_map(|p| p.cycle_outcome.attestation.as_bytes().to_vec())
-            .collect();
-        Ok(ExperimentOutcome {
-            phases,
-            chain_attestation: TermRef::from_bytes(&concat),
-            scenario_total_ns: 0,
-        })
-    }
-}
 
 fn run_motor(
     seed: u64,
@@ -207,7 +50,7 @@ fn run_motor(
     max_phases: usize,
 ) -> mathscape_core::meta_loop::MetaLoopOutcome {
     let loop_ = MetaLoop::new(
-        SeededExecutor { seed },
+        Motor::seeded(seed).with_extractor(Extractor::validated(seed)).on_unknown_corpus(UnknownCorpus::Skip),
         HeuristicProposer::with_extractor("derived-laws"),
         MetaLoopConfig {
             max_phases,

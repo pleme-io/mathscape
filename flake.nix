@@ -142,6 +142,7 @@
       cli = mkMathscape {pname = "mathscape-cli";};
       mcp = mkMathscape {pname = "mathscape-mcp";};
       db = mkMathscape {pname = "mathscape-db";};
+      stream = mkMathscape {pname = "mathscape-stream";};
 
       # ── Frontend build (substrate mkViteBuild pattern) ──────────────
       webBuild = import "${substrate}/lib/build/web/build.nix" {inherit pkgs;};
@@ -160,6 +161,7 @@
         imgPkgs = import nixpkgs {system = imgSystem;};
         imgService = mkTargetBin imgSystem "mathscape-service";
         imgDb = mkTargetBin imgSystem "mathscape-db";
+        imgStream = mkTargetBin imgSystem "mathscape-stream";
         dockerHelpers = import "${substrate}/lib/docker-helpers.nix";
         hardened = import "${substrate}/lib/build/oci/hardened-base.nix" {pkgs = imgPkgs;};
         # /data mount point stub — the StatefulSet's PVC mounts over this at
@@ -178,7 +180,7 @@
           entrypoint = ["${imgService}/bin/mathscape-service"];
           env = [
             "RUST_LOG=info,mathscape=debug"
-            "DATA_DIR=/data"
+            "MATHSCAPE_PERSISTENT_PATH=/data/registry.redb"
             "LOG_FORMAT=json"
             (dockerHelpers.mkSslEnv imgPkgs)
           ];
@@ -199,7 +201,7 @@
           # Carried over from the old `contents` list beyond cacert+binary:
           # mathscape-db (bundled for ops/exec use), busybox+coreutils (shell
           # tools), and the /data mount-point stub.
-          extraContents = [imgDb imgPkgs.busybox imgPkgs.coreutils dataDirStub];
+          extraContents = [imgDb imgStream imgPkgs.busybox imgPkgs.coreutils dataDirStub];
         };
 
       # ── Web Docker image (Linux only) ───────────────────────────────
@@ -261,6 +263,7 @@
           mathscape-cli = cli;
           mathscape-mcp = mcp;
           mathscape-db = db;
+          mathscape-stream = stream;
           mathscape-frontend = frontend;
         }
         // lib.optionalAttrs (builtins.elem system linuxSystems) {
@@ -286,6 +289,10 @@
           db = {
             type = "app";
             program = "${db}/bin/mathscape-db";
+          };
+          stream = {
+            type = "app";
+            program = "${stream}/bin/mathscape-stream";
           };
 
           # ── Local development ──────────────────────────────────────────
@@ -393,6 +400,7 @@
         mathscape-service = self.packages.${final.stdenv.hostPlatform.system}.mathscape-service;
         mathscape-cli = self.packages.${final.stdenv.hostPlatform.system}.mathscape-cli;
         mathscape-mcp = self.packages.${final.stdenv.hostPlatform.system}.mathscape-mcp;
+        mathscape-stream = self.packages.${final.stdenv.hostPlatform.system}.mathscape-stream;
       };
 
       # ── Home Manager module ─────────────────────────────────────────

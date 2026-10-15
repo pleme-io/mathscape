@@ -43,6 +43,93 @@ pub struct Config {
     pub store: StoreConfig,
     /// Logging level.
     pub log_level: String,
+    #[serde(default)]
+    pub stream: Option<StreamConfig>,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum StreamClock {
+    #[default]
+    Logical,
+    Wall,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StreamConfig {
+    pub seed: u64,
+    #[serde(default = "default_stream_data_dir")]
+    pub data_dir: String,
+    #[serde(default = "default_snapshot_every")]
+    pub snapshot_every: u64,
+    #[serde(default = "default_checkpoint_epochs")]
+    pub checkpoint_epochs: u64,
+    #[serde(default)]
+    pub until_epoch: Option<u64>,
+    #[serde(default = "default_phases_per_epoch")]
+    pub phases_per_epoch: usize,
+    #[serde(default = "default_iterations")]
+    pub iterations: usize,
+    #[serde(default = "default_adaptive_every")]
+    pub adaptive_every: u64,
+    #[serde(default = "default_learning_rate")]
+    pub learning_rate: f64,
+    #[serde(default = "default_extractor")]
+    pub extractor: mathscape_compress::Extractor,
+    #[serde(default)]
+    pub clock: StreamClock,
+}
+
+impl StreamConfig {
+    #[must_use]
+    pub fn seeded(seed: u64, data_dir: impl Into<String>) -> Self {
+        Self {
+            seed,
+            data_dir: data_dir.into(),
+            snapshot_every: default_snapshot_every(),
+            checkpoint_epochs: default_checkpoint_epochs(),
+            until_epoch: None,
+            phases_per_epoch: default_phases_per_epoch(),
+            iterations: default_iterations(),
+            adaptive_every: default_adaptive_every(),
+            learning_rate: default_learning_rate(),
+            extractor: default_extractor(),
+            clock: StreamClock::default(),
+        }
+    }
+}
+
+fn default_stream_data_dir() -> String {
+    "./data/stream".into()
+}
+
+fn default_snapshot_every() -> u64 {
+    4
+}
+
+fn default_checkpoint_epochs() -> u64 {
+    64
+}
+
+fn default_phases_per_epoch() -> usize {
+    2
+}
+
+fn default_iterations() -> usize {
+    5
+}
+
+fn default_adaptive_every() -> u64 {
+    1
+}
+
+fn default_learning_rate() -> f64 {
+    0.1
+}
+
+fn default_extractor() -> mathscape_compress::Extractor {
+    mathscape_compress::Extractor::derived_laws()
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -141,6 +228,7 @@ impl Default for Config {
                 path: "./data/expressions.redb".into(),
             },
             log_level: "info,mathscape=debug".into(),
+            stream: None,
         }
     }
 }
@@ -306,6 +394,54 @@ mod tests {
             .unwrap();
         assert_eq!(config.http.port, 8080);
         assert_eq!(config.database.url, "postgres://localhost/mathscape");
+    }
+
+    fn yaml(name: &str, body: &str) -> std::path::PathBuf {
+        let p = std::env::temp_dir().join(format!("mathscape-config-{name}-{}.yaml", std::process::id()));
+        std::fs::write(&p, body).unwrap();
+        p
+    }
+
+    #[test]
+    fn a_stream_section_loads_with_its_defaults_and_absent_means_none() {
+        assert!(Config::default().stream.is_none());
+        let p = yaml("stream-ok", "stream:\n  seed: 42\n  data_dir: /data/stream\n");
+        let c = load_from(p.to_str().unwrap()).unwrap();
+        let s = c.stream.unwrap();
+        assert_eq!(s.seed, 42);
+        assert_eq!(s.data_dir, "/data/stream");
+        assert_eq!(s.snapshot_every, 4);
+        assert_eq!(s.clock, StreamClock::Logical);
+        let _ = std::fs::remove_file(p);
+    }
+
+    #[test]
+    fn a_stream_section_without_a_seed_or_with_an_unknown_key_is_refused() {
+        let p = yaml("stream-noseed", "stream:\n  data_dir: /data/stream\n");
+        assert!(load_from(p.to_str().unwrap()).is_err());
+        let q = yaml("stream-typo", "stream:\n  seed: 1\n  snapshot_evry: 3\n");
+        assert!(load_from(q.to_str().unwrap()).is_err());
+        let _ = std::fs::remove_file(p);
+        let _ = std::fs::remove_file(q);
+    }
+
+    #[test]
+    fn the_stream_section_is_reachable_from_the_environment() {
+        unsafe {
+            std::env::set_var("MSCFGSTREAMTEST_STREAM__SEED", "9");
+            std::env::set_var("MSCFGSTREAMTEST_STREAM__DATA_DIR", "/data/stream");
+        }
+        let c: Config = shikumi::ProviderChain::new()
+            .with_defaults(&Config::default())
+            .with_env("MSCFGSTREAMTEST_")
+            .extract()
+            .unwrap();
+        unsafe {
+            std::env::remove_var("MSCFGSTREAMTEST_STREAM__SEED");
+            std::env::remove_var("MSCFGSTREAMTEST_STREAM__DATA_DIR");
+        }
+        let s = c.stream.unwrap();
+        assert_eq!((s.seed, s.data_dir.as_str()), (9, "/data/stream"));
     }
 
     #[test]

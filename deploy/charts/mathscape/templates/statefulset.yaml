@@ -51,7 +51,7 @@ spec:
           ports:
             {{- toYaml . | nindent 12 }}
           {{- end }}
-          {{- if or (.Values.downwardApi).enabled (gt (len (.Values.env | default list)) 0) }}
+          {{- if or (.Values.downwardApi).enabled (gt (len (.Values.env | default list)) 0) ((.Values.stream).seed) }}
           env:
             {{- if (.Values.downwardApi).enabled }}
             - name: POD_NAME
@@ -69,6 +69,18 @@ spec:
             {{- end }}
             {{- with .Values.env }}
             {{- toYaml . | nindent 12 }}
+            {{- end }}
+            {{- with .Values.stream }}
+            {{- if .seed }}
+            - name: MATHSCAPE_STREAM__SEED
+              value: {{ .seed | toString | quote }}
+            - name: MATHSCAPE_STREAM__DATA_DIR
+              value: {{ .dataDir | quote }}
+            {{- if .untilEpoch }}
+            - name: MATHSCAPE_STREAM__UNTIL_EPOCH
+              value: {{ .untilEpoch | toString | quote }}
+            {{- end }}
+            {{- end }}
             {{- end }}
           {{- end }}
           {{- with .Values.envFrom }}

@@ -144,8 +144,54 @@ tests:
       - contains:
           path: spec.template.spec.containers[0].env
           content:
+            name: MATHSCAPE_PERSISTENT_PATH
+            value: "/data/registry.redb"
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: MATHSCAPE_DATABASE__URL
+            valueFrom:
+              secretKeyRef:
+                name: mathscape-db
+                key: DATABASE_URL
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
             name: DATA_DIR
             value: "/data"
+
+  - it: should not render stream env without a seed
+    asserts:
+      - notContains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: MATHSCAPE_STREAM__DATA_DIR
+            value: "/data/stream"
+
+  - it: should render the stream writer env the binary reads when a seed is set
+    set:
+      stream.seed: "42"
+      stream.untilEpoch: 1000
+      command: ["/bin/mathscape-stream"]
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: MATHSCAPE_STREAM__SEED
+            value: "42"
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: MATHSCAPE_STREAM__DATA_DIR
+            value: "/data/stream"
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: MATHSCAPE_STREAM__UNTIL_EPOCH
+            value: "1000"
+      - equal:
+          path: spec.template.spec.containers[0].command
+          value: ["/bin/mathscape-stream"]
       - contains:
           path: spec.template.spec.containers[0].env
           content:
