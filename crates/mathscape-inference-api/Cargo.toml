@@ -1,0 +1,12 @@
+[package]
+name = "mathscape-inference-api"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Typed API surface for mathscape live inference (mirrors apis/mathscape-inference/openapi.yaml)"
+
+[dependencies]
+mathscape-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true

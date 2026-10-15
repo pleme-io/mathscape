@@ -1,0 +1,115 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/mathscape-core",
+    "crates/mathscape-store",
+    "crates/mathscape-compress",
+    "crates/mathscape-evolve",
+    "crates/mathscape-reward",
+    "crates/mathscape-proof",
+    "crates/mathscape-policy",
+    "crates/mathscape-cli",
+    "crates/mathscape-mcp",
+    "crates/mathscape-service",
+    "crates/mathscape-db",
+    "crates/mathscape-migration",
+    "crates/mathscape-discovery",
+    "crates/mathscape-config",
+    "crates/mathscape-entity",
+    "crates/mathscape-api",
+    "crates/mathscape-axiom-bridge",
+    "crates/mathscape-inference-api",
+    "crates/mathscape-acquisition",
+]
+
+[workspace.package]
+version = "0.1.4"
+edition = "2024"
+license = "MIT"
+repository = "https://github.com/pleme-io/mathscape"
+
+[workspace.dependencies]
+# Internal crates
+mathscape-core = { path = "crates/mathscape-core", version = "0.1.4" }
+mathscape-store = { path = "crates/mathscape-store", version = "0.1.4" }
+mathscape-compress = { path = "crates/mathscape-compress", version = "0.1.4" }
+mathscape-evolve = { path = "crates/mathscape-evolve", version = "0.1.4" }
+mathscape-reward = { path = "crates/mathscape-reward", version = "0.1.4" }
+mathscape-proof = { path = "crates/mathscape-proof", version = "0.1.4" }
+mathscape-policy = { path = "crates/mathscape-policy", version = "0.1.4" }
+mathscape-migration = { path = "crates/mathscape-migration", version = "0.1.4" }
+mathscape-discovery = { path = "crates/mathscape-discovery", version = "0.1.4" }
+mathscape-config = { path = "crates/mathscape-config", version = "0.1.4" }
+mathscape-entity = { path = "crates/mathscape-entity", version = "0.1.4" }
+mathscape-api = { path = "crates/mathscape-api", version = "0.1.4" }
+mathscape-inference-api = { path = "crates/mathscape-inference-api", version = "0.1.4" }
+mathscape-acquisition = { path = "crates/mathscape-acquisition", version = "0.1.4" }
+mathscape-axiom-bridge = { path = "crates/mathscape-axiom-bridge", version = "0.1.4" }
+
+# tatara-lisp — the canonical homoiconic Sexp substrate (crates.io)
+tatara-lisp = "0.3.3"
+
+# Hashing
+blake3 = "1"
+
+# Storage — redb for content-addressed expressions, PostgreSQL for metadata
+redb = "2"
+sea-orm = { version = "1", features = ["sqlx-postgres", "runtime-tokio-rustls", "macros"] }
+sea-orm-migration = { version = "1" }
+
+# E-graph
+egg = "0.9"
+
+# Configuration — shikumi owns config discovery + provider chain for
+# pleme-io. It wraps figment so individual crates don't have to.
+
+# Serialization
+bincode = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Async + HTTP (service binary)
+tokio = { version = "1", features = ["full"] }
+axum = "0.8"
+
+# MCP
+rmcp = { version = "0.1", features = ["server", "transport-io"] }
+schemars = "0.8"
+
+# GraphQL
+async-graphql = "7"
+async-graphql-axum = "7"
+
+# Tower middleware
+tower = { version = "0.4", features = ["full"] }
+
+# gRPC
+tonic = "0.12"
+prost = "0.13"
+prost-types = "0.13"
+
+# gRPC build
+tonic-build = "0.12"
+prost-build = "0.13"
+
+# Time
+chrono = { version = "0.4", features = ["serde"] }
+
+# Parallelism — used by discovery campaigns that sweep 10k+ probes
+rayon = "1"
+
+# Async trait
+async-trait = "0.1"
+
+# CLI
+clap = { version = "4", features = ["derive"] }
+
+# Streaming
+tokio-stream = "0.1"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
+# RNG
+rand = "0.8"

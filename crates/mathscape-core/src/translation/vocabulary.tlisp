@@ -1,0 +1,464 @@
+(defoperator :name "zero" :render (constant "0") :carrier "\\mathbb{N}"
+  :math-name "Zero"
+  :axiom "0 \\in \\mathbb{N}")
+(defoperator :name "succ" :render (function "S") :carrier "\\mathbb{N}"
+  :math-name "Successor"
+  :axiom "S : \\mathbb{N} \\to \\mathbb{N},\\quad S(n) \\neq 0,\\quad S(m) = S(n) \\Rightarrow m = n")
+(defoperator :name "add" :render (infix "+" 1) :carrier "\\mathbb{N}"
+  :math-name "Addition on the naturals"
+  :axiom "a + 0 = a,\\quad a + S(b) = S(a + b)")
+(defoperator :name "mul" :render (infix "\\cdot" 2) :carrier "\\mathbb{N}"
+  :math-name "Multiplication on the naturals"
+  :axiom "a \\cdot 0 = 0,\\quad a \\cdot S(b) = a \\cdot b + a")
+
+(defoperator :name "int_zero" :render (constant "0") :carrier "\\mathbb{Z}"
+  :math-name "Integer zero"
+  :axiom "0 \\in \\mathbb{Z}")
+(defoperator :name "int_succ" :render (function "S") :carrier "\\mathbb{Z}"
+  :math-name "Integer successor"
+  :axiom "S : \\mathbb{Z} \\to \\mathbb{Z},\\quad S(n) = n + 1 \\text{ (bijective)}")
+(defoperator :name "int_add" :render (infix "+" 1) :carrier "\\mathbb{Z}"
+  :math-name "Integer addition"
+  :axiom "(\\mathbb{Z}, +, 0) \\text{ is an abelian group}")
+(defoperator :name "int_mul" :render (infix "\\cdot" 2) :carrier "\\mathbb{Z}"
+  :math-name "Integer multiplication"
+  :axiom "(\\mathbb{Z}, +, \\cdot, 0, 1) \\text{ is a commutative ring}")
+(defoperator :name "neg" :render (prefix "-") :carrier "\\mathbb{Z}"
+  :math-name "Additive inverse"
+  :axiom "a + (-a) = 0")
+
+(defoperator :name "tensor_add" :render (infix "+" 1) :carrier "\\mathbb{Z}^{n_1 \\times \\cdots \\times n_k}"
+  :math-name "Tensor addition"
+  :axiom "(A + B)_{i} = A_{i} + B_{i}")
+(defoperator :name "tensor_mul" :render (infix "\\odot" 2) :carrier "\\mathbb{Z}^{n_1 \\times \\cdots \\times n_k}"
+  :math-name "Hadamard (element-wise) product"
+  :axiom "(A \\odot B)_{i} = A_{i} B_{i}")
+(defoperator :name "tensor_sum" :render (function "\\Sigma") :carrier "\\mathbb{Z}^{n_1 \\times \\cdots \\times n_k} \\to \\mathbb{Z}"
+  :math-name "Total contraction (sum of entries)"
+  :axiom "\\Sigma(A) = \\textstyle\\sum_{i} A_{i}")
+(defoperator :name "tensor_dot" :render (bracket "\\langle " ", " " \\rangle") :carrier "\\mathbb{Z}^{n} \\times \\mathbb{Z}^{n} \\to \\mathbb{Z}"
+  :math-name "Inner product"
+  :axiom "\\langle a, b \\rangle = \\textstyle\\sum_{i} a_{i} b_{i}")
+(defoperator :name "tensor_neg" :render (prefix "-") :carrier "\\mathbb{Z}^{n_1 \\times \\cdots \\times n_k}"
+  :math-name "Tensor negation"
+  :axiom "(-A)_{i} = -A_{i}")
+(defoperator :name "tensor_scale" :render (infix "\\cdot" 2) :carrier "\\mathbb{Z} \\times \\mathbb{Z}^{n_1 \\times \\cdots \\times n_k}"
+  :math-name "Scalar multiplication"
+  :axiom "(c \\cdot A)_{i} = c\\,A_{i}")
+(defoperator :name "tensor_matmul" :render (infix "\\," 3) :carrier "\\mathbb{Z}^{m \\times n} \\times \\mathbb{Z}^{n \\times p} \\to \\mathbb{Z}^{m \\times p}"
+  :math-name "Matrix product"
+  :axiom "(AB)_{ij} = \\textstyle\\sum_{k} A_{ik} B_{kj}")
+(defoperator :name "tensor_transpose" :render (postfix "^{\\top}") :carrier "\\mathbb{Z}^{m \\times n} \\to \\mathbb{Z}^{n \\times m}"
+  :math-name "Transpose"
+  :axiom "(A^{\\top})_{ij} = A_{ji}")
+(defoperator :name "tensor_reshape" :render (function "\\operatorname{reshape}") :carrier "\\mathbb{Z}^{n_1 \\times \\cdots \\times n_k}"
+  :math-name "Reshape (row-major reindexing)"
+  :axiom "\\operatorname{reshape}(A, s)_{\\phi(i)} = A_{i},\\ \\textstyle\\prod s = \\prod \\operatorname{shape}(A)")
+
+(defoperator :name "float_zero" :render (constant "0.0") :carrier "\\mathbb{F}_{64}"
+  :math-name "Floating-point zero"
+  :axiom "0.0 \\in \\mathbb{F}_{64}")
+(defoperator :name "float_add" :render (infix "+" 1) :carrier "\\mathbb{F}_{64}"
+  :math-name "Floating-point addition (rounded)"
+  :axiom "a \\oplus b = \\operatorname{round}(a + b)")
+(defoperator :name "float_mul" :render (infix "\\cdot" 2) :carrier "\\mathbb{F}_{64}"
+  :math-name "Floating-point multiplication (rounded)"
+  :axiom "a \\otimes b = \\operatorname{round}(a b)")
+(defoperator :name "float_neg" :render (prefix "-") :carrier "\\mathbb{F}_{64}"
+  :math-name "Floating-point negation"
+  :axiom "-(a) \\text{ flips the sign bit (exact)}")
+(defoperator :name "float_div" :render (frac) :carrier "\\mathbb{F}_{64}"
+  :math-name "Floating-point division (rounded)"
+  :axiom "a \\oslash b = \\operatorname{round}(a / b),\\ b \\neq 0")
+(defoperator :name "float_from_int" :render (function "\\iota") :carrier "\\mathbb{Z} \\to \\mathbb{F}_{64}"
+  :math-name "Integer-to-float embedding"
+  :axiom "\\iota(n) = \\operatorname{round}(n)")
+(defoperator :name "float_sub" :render (infix "-" 1) :carrier "\\mathbb{F}_{64}"
+  :math-name "Floating-point subtraction (rounded)"
+  :axiom "a \\ominus b = \\operatorname{round}(a - b)")
+
+(defoperator :name "ft_add" :render (infix "+" 1) :carrier "\\mathbb{F}_{64}^{n_1 \\times \\cdots \\times n_k}"
+  :math-name "Real tensor addition"
+  :axiom "(A + B)_{i} = A_{i} \\oplus B_{i}")
+(defoperator :name "ft_mul" :render (infix "\\odot" 2) :carrier "\\mathbb{F}_{64}^{n_1 \\times \\cdots \\times n_k}"
+  :math-name "Real Hadamard product"
+  :axiom "(A \\odot B)_{i} = A_{i} \\otimes B_{i}")
+(defoperator :name "ft_neg" :render (prefix "-") :carrier "\\mathbb{F}_{64}^{n_1 \\times \\cdots \\times n_k}"
+  :math-name "Real tensor negation"
+  :axiom "(-A)_{i} = -A_{i}")
+(defoperator :name "ft_sum" :render (function "\\Sigma") :carrier "\\mathbb{F}_{64}^{n_1 \\times \\cdots \\times n_k} \\to \\mathbb{F}_{64}"
+  :math-name "Real total contraction"
+  :axiom "\\Sigma(A) = \\textstyle\\bigoplus_{i} A_{i}")
+(defoperator :name "ft_dot" :render (bracket "\\langle " ", " " \\rangle") :carrier "\\mathbb{F}_{64}^{n} \\times \\mathbb{F}_{64}^{n} \\to \\mathbb{F}_{64}"
+  :math-name "Real inner product"
+  :axiom "\\langle a, b \\rangle = \\textstyle\\bigoplus_{i} a_{i} \\otimes b_{i}")
+(defoperator :name "ft_scale" :render (infix "\\cdot" 2) :carrier "\\mathbb{F}_{64} \\times \\mathbb{F}_{64}^{n_1 \\times \\cdots \\times n_k}"
+  :math-name "Real scalar multiplication"
+  :axiom "(c \\cdot A)_{i} = c \\otimes A_{i}")
+(defoperator :name "ft_sub" :render (infix "-" 1) :carrier "\\mathbb{F}_{64}^{n_1 \\times \\cdots \\times n_k}"
+  :math-name "Real tensor subtraction"
+  :axiom "(A - B)_{i} = A_{i} \\ominus B_{i}")
+(defoperator :name "ft_matmul" :render (infix "\\," 3) :carrier "\\mathbb{F}_{64}^{m \\times n} \\times \\mathbb{F}_{64}^{n \\times p} \\to \\mathbb{F}_{64}^{m \\times p}"
+  :math-name "Real matrix product"
+  :axiom "(AB)_{ij} = \\textstyle\\bigoplus_{k} A_{ik} \\otimes B_{kj}")
+
+(definvariant :id "add-identity" :property "identity-element"
+  :canonical-name "Additive Identity"
+  :math-domain "Peano Arithmetic"
+  :latex "a + 0 = a"
+  :semantic-meaning "Zero is the two-sided unit of addition: adding nothing changes nothing."
+  :internal-repr (=> (add ?a 0) ?a))
+(definvariant :id "mul-identity" :property "identity-element"
+  :canonical-name "Multiplicative Identity"
+  :math-domain "Peano Arithmetic"
+  :latex "a \\cdot 1 = a"
+  :semantic-meaning "One is the two-sided unit of multiplication."
+  :internal-repr (=> (mul ?a 1) ?a))
+(definvariant :id "mul-zero" :property "absorbing-element"
+  :canonical-name "Multiplication by Zero (Annihilation)"
+  :math-domain "Peano Arithmetic"
+  :latex "a \\cdot 0 = 0"
+  :semantic-meaning "Zero is absorbing for multiplication: any product with zero collapses to zero."
+  :internal-repr (=> (mul ?a 0) 0))
+(definvariant :id "add-commutativity" :property "commutativity"
+  :canonical-name "Commutativity of Addition"
+  :math-domain "Peano Arithmetic"
+  :latex "a + b = b + a"
+  :semantic-meaning "The order of summands does not affect the sum."
+  :internal-repr (=> (add ?a ?b) (add ?b ?a)))
+(definvariant :id "mul-commutativity" :property "commutativity"
+  :canonical-name "Commutativity of Multiplication"
+  :math-domain "Peano Arithmetic"
+  :latex "a \\cdot b = b \\cdot a"
+  :semantic-meaning "The order of factors does not affect the product."
+  :internal-repr (=> (mul ?a ?b) (mul ?b ?a)))
+(definvariant :id "add-associativity" :property "associativity"
+  :canonical-name "Associativity of Addition"
+  :math-domain "Peano Arithmetic"
+  :latex "(a + b) + c = a + (b + c)"
+  :semantic-meaning "Grouping of summands does not affect the sum."
+  :internal-repr (=> (add (add ?a ?b) ?c) (add ?a (add ?b ?c))))
+(definvariant :id "mul-associativity" :property "associativity"
+  :canonical-name "Associativity of Multiplication"
+  :math-domain "Peano Arithmetic"
+  :latex "(a \\cdot b) \\cdot c = a \\cdot (b \\cdot c)"
+  :semantic-meaning "Grouping of factors does not affect the product."
+  :internal-repr (=> (mul (mul ?a ?b) ?c) (mul ?a (mul ?b ?c))))
+(definvariant :id "distributivity-mul-add" :property "distributivity"
+  :canonical-name "Distributivity of Multiplication over Addition"
+  :math-domain "Peano Arithmetic"
+  :latex "a \\cdot (b + c) = a \\cdot b + a \\cdot c"
+  :semantic-meaning "Multiplication is linear in each argument over addition: the bilinearity that makes (ℕ,+,·) a semiring and is the first rank-2 tensor shape (R8)."
+  :internal-repr (=> (mul ?a (add ?b ?c)) (add (mul ?a ?b) (mul ?a ?c))))
+(definvariant :id "add-succ" :property "recursion-step"
+  :canonical-name "Recursive Definition of Addition (Grassmann)"
+  :math-domain "Peano Arithmetic"
+  :latex "a + S(b) = S(a + b)"
+  :semantic-meaning "Addition is defined by primitive recursion on the second argument."
+  :internal-repr (=> (add ?a (succ ?b)) (succ (add ?a ?b))))
+(definvariant :id "mul-succ" :property "recursion-step"
+  :canonical-name "Recursive Definition of Multiplication"
+  :math-domain "Peano Arithmetic"
+  :latex "a \\cdot S(b) = a \\cdot b + a"
+  :semantic-meaning "Multiplication is iterated addition, defined by primitive recursion."
+  :internal-repr (=> (mul ?a (succ ?b)) (add (mul ?a ?b) ?a)))
+(definvariant :id "succ-as-add-one" :property "definitional-unfolding"
+  :canonical-name "Successor as Addition of One"
+  :math-domain "Peano Arithmetic"
+  :latex "S(a) = a + 1"
+  :semantic-meaning "The successor function is addition of the unit."
+  :internal-repr (=> (succ ?a) (add ?a 1)))
+
+(definvariant :id "int-add-identity" :property "identity-element"
+  :canonical-name "Additive Identity in ℤ"
+  :math-domain "Ring Theory (ℤ)"
+  :latex "a + 0 = a"
+  :semantic-meaning "Zero is the unit of integer addition."
+  :internal-repr (=> (int_add ?a i0) ?a))
+(definvariant :id "int-mul-identity" :property "identity-element"
+  :canonical-name "Multiplicative Identity in ℤ"
+  :math-domain "Ring Theory (ℤ)"
+  :latex "a \\cdot 1 = a"
+  :semantic-meaning "One is the unit of integer multiplication."
+  :internal-repr (=> (int_mul ?a i1) ?a))
+(definvariant :id "int-mul-zero" :property "absorbing-element"
+  :canonical-name "Annihilation by Zero in ℤ"
+  :math-domain "Ring Theory (ℤ)"
+  :latex "a \\cdot 0 = 0"
+  :semantic-meaning "In any ring the additive identity absorbs multiplication."
+  :internal-repr (=> (int_mul ?a i0) i0))
+(definvariant :id "additive-inverse" :property "inverse-element"
+  :canonical-name "Additive Inverse"
+  :math-domain "Group Theory (ℤ, +)"
+  :latex "a + (-a) = 0"
+  :semantic-meaning "Every integer has an additive inverse, making (ℤ,+) a group."
+  :internal-repr (=> (int_add ?a (neg ?a)) i0))
+(definvariant :id "double-negation" :property "involution"
+  :canonical-name "Double Negation"
+  :math-domain "Group Theory (ℤ, +)"
+  :latex "-(-a) = a"
+  :semantic-meaning "Negation is an involution: the inverse of the inverse is the element."
+  :internal-repr (=> (neg (neg ?a)) ?a))
+(definvariant :id "neg-additive" :property "homomorphism"
+  :canonical-name "Negation is an Additive Homomorphism"
+  :math-domain "Group Theory (ℤ, +)"
+  :latex "-(a + b) = (-a) + (-b)"
+  :semantic-meaning "Negation distributes over addition; it is an automorphism of the abelian group (ℤ,+)."
+  :internal-repr (=> (neg (int_add ?a ?b)) (int_add (neg ?a) (neg ?b))))
+(definvariant :id "neg-zero" :property "fixed-point"
+  :canonical-name "Negation Fixes Zero"
+  :math-domain "Group Theory (ℤ, +)"
+  :latex "-0 = 0"
+  :semantic-meaning "The identity is its own inverse."
+  :internal-repr (=> (neg i0) i0))
+(definvariant :id "int-distributivity" :property "distributivity"
+  :canonical-name "Distributivity in ℤ"
+  :math-domain "Ring Theory (ℤ)"
+  :latex "a \\cdot (b + c) = a \\cdot b + a \\cdot c"
+  :semantic-meaning "Integer multiplication is bilinear over addition."
+  :internal-repr (=> (int_mul ?a (int_add ?b ?c)) (int_add (int_mul ?a ?b) (int_mul ?a ?c))))
+(definvariant :id "neg-mul-left" :property "sign-rule"
+  :canonical-name "Sign Rule for Products"
+  :math-domain "Ring Theory (ℤ)"
+  :latex "-(a \\cdot b) = (-a) \\cdot b"
+  :semantic-meaning "Negation commutes with multiplication: the ring sign rule."
+  :internal-repr (=> (neg (int_mul ?a ?b)) (int_mul (neg ?a) ?b)))
+
+(definvariant :id "transpose-involution" :property "involution"
+  :canonical-name "Transpose is an Involution"
+  :math-domain "Linear Algebra"
+  :latex "(A^{\\top})^{\\top} = A"
+  :semantic-meaning "Transposing twice restores the matrix."
+  :internal-repr (=> (tensor_transpose (tensor_transpose ?a)) ?a))
+(definvariant :id "transpose-of-product" :property "anti-homomorphism"
+  :canonical-name "Transpose of a Product"
+  :math-domain "Linear Algebra"
+  :latex "(AB)^{\\top} = B^{\\top} A^{\\top}"
+  :semantic-meaning "Transpose reverses the order of matrix multiplication: an anti-automorphism of the matrix ring."
+  :internal-repr (=> (tensor_transpose (tensor_matmul ?a ?b)) (tensor_matmul (tensor_transpose ?b) (tensor_transpose ?a))))
+(definvariant :id "transpose-additive" :property "homomorphism"
+  :canonical-name "Linearity of Transpose"
+  :math-domain "Linear Algebra"
+  :latex "(A + B)^{\\top} = A^{\\top} + B^{\\top}"
+  :semantic-meaning "Transpose is a linear map on matrices."
+  :internal-repr (=> (tensor_transpose (tensor_add ?a ?b)) (tensor_add (tensor_transpose ?a) (tensor_transpose ?b))))
+(definvariant :id "matmul-associativity" :property "associativity"
+  :canonical-name "Associativity of Matrix Multiplication"
+  :math-domain "Linear Algebra"
+  :latex "(AB)C = A(BC)"
+  :semantic-meaning "Composition of linear maps is associative."
+  :internal-repr (=> (tensor_matmul (tensor_matmul ?a ?b) ?c) (tensor_matmul ?a (tensor_matmul ?b ?c))))
+(definvariant :id "matmul-bilinearity" :property "distributivity"
+  :canonical-name "Bilinearity of Matrix Multiplication"
+  :math-domain "Multilinear Algebra"
+  :latex "A(B + C) = AB + AC"
+  :semantic-meaning "Matrix multiplication is a bilinear map, i.e. a rank-2 tensor contraction."
+  :internal-repr (=> (tensor_matmul ?a (tensor_add ?b ?c)) (tensor_add (tensor_matmul ?a ?b) (tensor_matmul ?a ?c)))
+  :internal-repr (=> (tensor_matmul (tensor_add ?a ?b) ?c) (tensor_add (tensor_matmul ?a ?c) (tensor_matmul ?b ?c))))
+(definvariant :id "scale-linearity" :property "distributivity"
+  :canonical-name "Linearity of Scalar Multiplication"
+  :math-domain "Linear Algebra (module axioms)"
+  :latex "c \\cdot (A + B) = c \\cdot A + c \\cdot B"
+  :semantic-meaning "Scaling distributes over tensor addition: a module axiom."
+  :internal-repr (=> (tensor_scale ?c (tensor_add ?a ?b)) (tensor_add (tensor_scale ?c ?a) (tensor_scale ?c ?b))))
+(definvariant :id "contraction-linearity" :property "homomorphism"
+  :canonical-name "Linearity of Total Contraction"
+  :math-domain "Multilinear Algebra"
+  :latex "\\Sigma(A + B) = \\Sigma(A) + \\Sigma(B)"
+  :semantic-meaning "Summing entries is a linear functional."
+  :internal-repr (=> (tensor_sum (tensor_add ?a ?b)) (int_add (tensor_sum ?a) (tensor_sum ?b))))
+(definvariant :id "inner-product-symmetry" :property "commutativity"
+  :canonical-name "Symmetry of the Inner Product"
+  :math-domain "Bilinear Forms"
+  :latex "\\langle a, b \\rangle = \\langle b, a \\rangle"
+  :semantic-meaning "The standard inner product is a symmetric bilinear form."
+  :internal-repr (=> (tensor_dot ?a ?b) (tensor_dot ?b ?a)))
+(definvariant :id "tensor-double-negation" :property "involution"
+  :canonical-name "Double Negation of Tensors"
+  :math-domain "Linear Algebra"
+  :latex "-(-A) = A"
+  :semantic-meaning "Tensor negation is an involution."
+  :internal-repr (=> (tensor_neg (tensor_neg ?a)) ?a))
+
+(definvariant :id "float-add-identity" :property "identity-element"
+  :canonical-name "Additive Identity in Floating Point"
+  :math-domain "Numerical Analysis (IEEE 754)"
+  :latex "a + 0.0 = a"
+  :semantic-meaning "Adding zero is exact in IEEE 754 for every finite a except the sign of -0.0."
+  :internal-repr (=> (float_add ?a 0.0) ?a))
+(definvariant :id "float-mul-identity" :property "identity-element"
+  :canonical-name "Multiplicative Identity in Floating Point"
+  :math-domain "Numerical Analysis (IEEE 754)"
+  :latex "a \\cdot 1.0 = a"
+  :semantic-meaning "Multiplying by one is exact in IEEE 754."
+  :internal-repr (=> (float_mul ?a 1.0) ?a))
+(definvariant :id "float-self-subtraction" :property "inverse-element"
+  :canonical-name "Self-Subtraction Yields Zero"
+  :math-domain "Numerical Analysis (IEEE 754)"
+  :latex "a - a = 0.0"
+  :semantic-meaning "Subtracting a finite float from itself is exactly zero."
+  :internal-repr (=> (float_sub ?a ?a) 0.0))
+(definvariant :id "float-double-negation" :property "involution"
+  :canonical-name "Double Negation in Floating Point"
+  :math-domain "Numerical Analysis (IEEE 754)"
+  :latex "-(-a) = a"
+  :semantic-meaning "Sign-bit negation is an exact involution."
+  :internal-repr (=> (float_neg (float_neg ?a)) ?a))
+
+(definvariant :id "commutativity" :property "commutativity"
+  :canonical-name "Commutativity"
+  :math-domain "Abstract Algebra (commutative magma)"
+  :latex "a \\ast b = b \\ast a"
+  :semantic-meaning "The binary operation is symmetric in its arguments."
+  :internal-repr (=> (?f ?a ?b) (?f ?b ?a)))
+(definvariant :id "associativity" :property "associativity"
+  :canonical-name "Associativity"
+  :math-domain "Abstract Algebra (semigroup)"
+  :latex "(a \\ast b) \\ast c = a \\ast (b \\ast c)"
+  :semantic-meaning "Grouping does not matter; the operation defines a semigroup."
+  :internal-repr (=> (?f (?f ?a ?b) ?c) (?f ?a (?f ?b ?c))))
+(definvariant :id "identity-element" :property "identity-element"
+  :canonical-name "Identity Element (Unit Law)"
+  :math-domain "Abstract Algebra (monoid)"
+  :latex "a \\ast e = a"
+  :semantic-meaning "A constant leaves every element unchanged under the operation."
+  :internal-repr (=> (?f ?a (const ?e)) ?a)
+  :internal-repr (=> (?f (const ?e) ?a) ?a))
+(definvariant :id "absorbing-element" :property "absorbing-element"
+  :canonical-name "Absorbing Element (Annihilator)"
+  :math-domain "Abstract Algebra (semigroup with zero)"
+  :latex "a \\ast z = z"
+  :semantic-meaning "A constant swallows every element under the operation."
+  :internal-repr (=> (?f ?a (const ?z)) (const ?z))
+  :internal-repr (=> (?f (const ?z) ?a) (const ?z)))
+(definvariant :id "idempotence" :property "idempotence"
+  :canonical-name "Idempotence"
+  :math-domain "Abstract Algebra (band)"
+  :latex "a \\ast a = a"
+  :semantic-meaning "Combining an element with itself returns it."
+  :internal-repr (=> (?f ?a ?a) ?a))
+(definvariant :id "involution" :property "involution"
+  :canonical-name "Involution"
+  :math-domain "Abstract Algebra"
+  :latex "f(f(a)) = a"
+  :semantic-meaning "The unary map is its own inverse."
+  :internal-repr (=> (?f (?f ?a)) ?a))
+(definvariant :id "unary-idempotence" :property "unary-idempotence"
+  :canonical-name "Idempotent Map (Projection / Closure Operator)"
+  :math-domain "Order Theory / Linear Algebra"
+  :latex "f(f(a)) = f(a)"
+  :semantic-meaning "Applying the map twice equals applying it once."
+  :internal-repr (=> (?f (?f ?a)) (?f ?a)))
+(definvariant :id "inverse-element" :property "inverse-element"
+  :canonical-name "Inverse Element"
+  :math-domain "Group Theory"
+  :latex "a \\ast a^{-1} = e"
+  :semantic-meaning "Each element combined with its image under the inverse map yields the identity."
+  :internal-repr (=> (?f ?a (?g ?a)) (const ?e))
+  :internal-repr (=> (?f (?g ?a) ?a) (const ?e)))
+(definvariant :id "distributivity" :property "distributivity"
+  :canonical-name "Distributivity"
+  :math-domain "Abstract Algebra (ring-like structures)"
+  :latex "a \\ast (b \\circ c) = (a \\ast b) \\circ (a \\ast c)"
+  :semantic-meaning "One operation distributes over another; the multilinear shape behind semirings and tensors."
+  :internal-repr (=> (?f ?a (?g ?b ?c)) (?g (?f ?a ?b) (?f ?a ?c)))
+  :internal-repr (=> (?f (?g ?a ?b) ?c) (?g (?f ?a ?c) (?f ?b ?c))))
+(definvariant :id "absorption" :property "absorption"
+  :canonical-name "Absorption Law"
+  :math-domain "Lattice Theory"
+  :latex "a \\ast (a \\circ b) = a"
+  :semantic-meaning "One operation absorbs the other, the defining law of a lattice."
+  :internal-repr (=> (?f ?a (?g ?a ?b)) ?a))
+(definvariant :id "homomorphism" :property "homomorphism"
+  :canonical-name "Homomorphism"
+  :math-domain "Universal Algebra"
+  :latex "h(a \\ast b) = h(a) \\ast h(b)"
+  :semantic-meaning "The unary map preserves the binary operation."
+  :internal-repr (=> (?h (?f ?a ?b)) (?f (?h ?a) (?h ?b))))
+(definvariant :id "anti-homomorphism" :property "anti-homomorphism"
+  :canonical-name "Anti-Homomorphism"
+  :math-domain "Universal Algebra"
+  :latex "h(a \\ast b) = h(b) \\ast h(a)"
+  :semantic-meaning "The unary map preserves the operation while reversing argument order."
+  :internal-repr (=> (?h (?f ?a ?b)) (?f (?h ?b) (?h ?a))))
+(definvariant :id "fixed-point" :property "fixed-point"
+  :canonical-name "Fixed Point"
+  :math-domain "Dynamical Systems / Algebra"
+  :latex "f(e) = e"
+  :semantic-meaning "A constant is left unchanged by the unary map."
+  :internal-repr (=> (?f (const ?e)) (const ?e)))
+(definvariant :id "left-projection" :property "projection"
+  :canonical-name "Projection Law (Left-Zero Band)"
+  :math-domain "Semigroup Theory"
+  :latex "a \\ast b = a"
+  :semantic-meaning "The operation ignores one argument entirely."
+  :internal-repr (=> (?f ?a ?b) ?a))
+
+(defstructure :id "abelian-group" :name "Abelian group" :arity 1
+  :requires (associativity commutativity identity-element inverse-element))
+(defstructure :id "group" :name "Group" :arity 1
+  :requires (associativity identity-element inverse-element))
+(defstructure :id "commutative-monoid" :name "Commutative monoid" :arity 1
+  :requires (associativity commutativity identity-element))
+(defstructure :id "monoid" :name "Monoid" :arity 1
+  :requires (associativity identity-element))
+(defstructure :id "semilattice" :name "Semilattice" :arity 1
+  :requires (associativity commutativity idempotence))
+(defstructure :id "band" :name "Band (idempotent semigroup)" :arity 1
+  :requires (associativity idempotence))
+(defstructure :id "commutative-semigroup" :name "Commutative semigroup" :arity 1
+  :requires (associativity commutativity))
+(defstructure :id "semigroup" :name "Semigroup" :arity 1
+  :requires (associativity))
+(defstructure :id "commutative-magma" :name "Commutative magma" :arity 1
+  :requires (commutativity))
+
+(defstructure :id "commutative-ring" :name "Commutative ring" :arity 2
+  :additive (associativity commutativity identity-element inverse-element)
+  :multiplicative (associativity commutativity identity-element)
+  :joint (distributivity))
+(defstructure :id "ring" :name "Ring" :arity 2
+  :additive (associativity commutativity identity-element inverse-element)
+  :multiplicative (associativity identity-element)
+  :joint (distributivity))
+(defstructure :id "commutative-semiring" :name "Commutative semiring" :arity 2
+  :additive (associativity commutativity identity-element)
+  :multiplicative (associativity commutativity identity-element)
+  :joint (distributivity))
+(defstructure :id "semiring" :name "Semiring" :arity 2
+  :additive (associativity commutativity identity-element)
+  :multiplicative (associativity identity-element)
+  :joint (distributivity))
+(defstructure :id "lattice" :name "Lattice" :arity 2
+  :additive (associativity commutativity idempotence)
+  :multiplicative (associativity commutativity idempotence)
+  :joint (absorption))
+
+(defprocedure :id "derivative-constant" :layer "R14"
+  :canonical-name "Constant Rule" :math-domain "Differential Calculus"
+  :latex "\\frac{d}{dx} c = 0"
+  :implemented-by "autograd::symbolic_derivative")
+(defprocedure :id "derivative-identity" :layer "R14"
+  :canonical-name "Identity Rule" :math-domain "Differential Calculus"
+  :latex "\\frac{d}{dx} x = 1"
+  :implemented-by "autograd::symbolic_derivative")
+(defprocedure :id "derivative-sum" :layer "R14"
+  :canonical-name "Sum Rule (Linearity of Differentiation)" :math-domain "Differential Calculus"
+  :latex "\\frac{d}{dx}(f + g) = \\frac{df}{dx} + \\frac{dg}{dx}"
+  :implemented-by "autograd::symbolic_derivative")
+(defprocedure :id "derivative-product" :layer "R14"
+  :canonical-name "Product Rule (Leibniz)" :math-domain "Differential Calculus"
+  :latex "\\frac{d}{dx}(f g) = \\frac{df}{dx} g + f \\frac{dg}{dx}"
+  :implemented-by "autograd::symbolic_derivative")
+(defprocedure :id "derivative-negation" :layer "R14"
+  :canonical-name "Negation Rule" :math-domain "Differential Calculus"
+  :latex "\\frac{d}{dx}(-f) = -\\frac{df}{dx}"
+  :implemented-by "autograd::symbolic_derivative")
+(defprocedure :id "derivative-successor" :layer "R14"
+  :canonical-name "Translation Invariance of the Derivative" :math-domain "Differential Calculus"
+  :latex "\\frac{d}{dx} S(f) = \\frac{df}{dx}"
+  :implemented-by "autograd::symbolic_derivative")
+(defprocedure :id "sgd-step" :layer "R15"
+  :canonical-name "Gradient Descent Step" :math-domain "Mathematical Optimization"
+  :latex "\\theta_{t+1} = \\theta_{t} - \\eta \\nabla_{\\theta} \\mathcal{L}(\\theta_{t})"
+  :implemented-by "optimizer::sgd_step_int, optimizer::sgd_step_tensor")

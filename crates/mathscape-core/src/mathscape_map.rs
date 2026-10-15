@@ -1,0 +1,1095 @@
+//! Phase V.spin (2026-04-18): the map of mathscape as a Merkle
+//! tree being mutated by the motor.
+//!
+//! # The reframing
+//!
+//! Every discovered library has a canonical Merkle root
+//! (`library_merkle_root`). Each motor phase that mutates the
+//! library produces a new root. The trajectory of roots IS the
+//! path through mathscape the machine traced; the set of rules
+//! at each root IS the territory mapped.
+//!
+//! Multiple runs (different seeds, different scenarios) produce
+//! different trajectories — different paths through the same
+//! space. The UNION of their snapshots is the cross-run map of
+//! mathscape discovered; the CORE (rules present in every run)
+//! is the invariant mathematics the motor finds no matter how
+//! it starts.
+//!
+//! # Why this is the right data structure
+//!
+//! Hash-identified. Content-addressable. Insertion-order
+//! independent (sorted leaves). Permutation-comparable: two maps
+//! from different seeds either share roots (same library reached
+//! by different paths) or diverge (different mathematics found).
+//!
+//! # What this enables
+//!
+//! - Save/restore maps across sessions (bincode-serializable)
+//! - Analyze permutations: which rules are universal? which are
+//!   seed-specific? which roots recur?
+//! - Visualize the mutation tree: nodes are library states, edges
+//!   are motor phases
+//! - Detect when the motor has explored a new region (root not
+//!   in prior map) vs retraced old territory (root already known)
+//!
+//! The map becomes the operational target: every session's
+//! purpose is to extend the map — add snapshots, discover new
+//! roots, expand the union.
+
+use crate::bootstrap::{library_merkle_root, LearningObservation};
+use crate::eval::RewriteRule;
+use crate::hash::TermRef;
+use serde::{Deserialize, Serialize};
+use std::collections::{BTreeMap, BTreeSet};
+
+/// Phase V.spin events (2026-04-18): the map EMITS these when
+/// significant tree-mutations are detected. Consumers
+/// (running model, optimizer/proposer, audit logs) egress them
+/// and react.
+///
+/// "Events and egress of those events to the overall running
+/// model and/or optimizer level" — the user's precise request.
+/// The map is now not just an analyzable artifact but a LIVE
+/// stream of signals tracking its own evolution.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum MapEvent {
+    /// A snapshot entered the map whose library root is NEW —
+    /// no prior snapshot had this root. The motor has touched
+    /// virgin territory.
+    NovelRoot {
+        seed: u64,
+        phase_index: usize,
+        root: TermRef,
+        library_size: usize,
+    },
+    /// Root changed from one phase to the next within a seed —
+    /// the motor mutated the tree. The delta field is
+    /// `new_library_size - prev_library_size`.
+    RootMutated {
+        seed: u64,
+        from_phase: usize,
+        to_phase: usize,
+        prev_root: TermRef,
+        next_root: TermRef,
+        size_delta: i64,
+    },
+    /// The core grew — a rule that was present in every seed's
+    /// final library just got added. Invariant mathematics
+    /// expanded. The primary algorithm should take note.
+    CoreGrew {
+        prev_core_size: usize,
+        new_core_size: usize,
+        added_rule: RewriteRule,
+    },
+    /// An observation crossed a staleness threshold — the
+    /// environment has stopped producing novelty. Proposer
+    /// should consume this to pick a diet-mutation.
+    StalenessCrossed {
+        seed: u64,
+        phase_index: usize,
+        threshold: f64,
+        observed: f64,
+    },
+    /// A rule just reached `Certified` level — passed stricter
+    /// evidence (e.g. K=32 × 3-seed Phase J). Emitted by a
+    /// certification worker subscribing to `CoreGrew`.
+    /// Downstream consumers (optimizer, audit log, persistence
+    /// layer) can react to this as "new certified mathematics."
+    RuleCertified {
+        rule: RewriteRule,
+        evidence_samples: usize,
+        translation: crate::translation::Translation,
+    },
+    /// A rule failed certification at the stricter evidence
+    /// level. Tracks the rule that didn't make it past the
+    /// Provisional → Certified transition, for observability.
+    RuleRejectedAtCertification {
+        rule: RewriteRule,
+        reason: String,
+    },
+    /// Phase V.benchmark: a benchmark of a static labeled problem
+    /// set completed. `solved_fraction` ∈ [0, 1] is the competence
+    /// metric; `delta_from_prior` is the improvement relative to
+    /// the last benchmark (NaN on the first observation). This is
+    /// the labeled-data ingress — the stream gains a supervised
+    /// signal the trainer can reward with high confidence.
+    BenchmarkScored {
+        solved_count: usize,
+        total: usize,
+        solved_fraction: f64,
+        /// Improvement since previous benchmark. Positive = library
+        /// got strictly better at the labeled task; zero = no change;
+        /// negative = REGRESSION (something was discovered that
+        /// makes eval fail on a problem that used to work —
+        /// important signal for the trainer).
+        delta_from_prior: f64,
+    },
+}
+
+impl MapEvent {
+    #[must_use]
+    pub fn rule_certified(rule: RewriteRule, evidence_samples: usize) -> Self {
+        let translation = crate::translation::Translation::of(&rule);
+        MapEvent::RuleCertified {
+            rule,
+            evidence_samples,
+            translation,
+        }
+    }
+
+    /// Short category tag for routing / filtering. Parallels the
+    /// existing `EventCategory` in `event.rs` but scoped to map
+    /// mutations.
+    #[must_use]
+    pub fn category(&self) -> &'static str {
+        match self {
+            MapEvent::NovelRoot { .. } => "novel-root",
+            MapEvent::RootMutated { .. } => "root-mutated",
+            MapEvent::CoreGrew { .. } => "core-grew",
+            MapEvent::StalenessCrossed { .. } => "staleness-crossed",
+            MapEvent::RuleCertified { .. } => "rule-certified",
+            MapEvent::RuleRejectedAtCertification { .. } => {
+                "rule-rejected-at-certification"
+            }
+            MapEvent::BenchmarkScored { .. } => "benchmark-scored",
+        }
+    }
+}
+
+/// Consumer interface — anything that wants to react to map
+/// events implements this. The motor/policy/optimizer
+/// subscribes; every event emitted gets dispatched. Pure
+/// side-channel — the map is still usable without consumers.
+pub trait MapEventConsumer {
+    fn on_event(&self, event: &MapEvent);
+}
+
+/// Trivial consumer — pushes events into an in-memory buffer.
+/// Useful for tests + offline analysis.
+#[derive(Debug, Default)]
+pub struct BufferedConsumer {
+    pub events: std::cell::RefCell<Vec<MapEvent>>,
+}
+
+impl BufferedConsumer {
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn drain(&self) -> Vec<MapEvent> {
+        self.events.borrow_mut().drain(..).collect()
+    }
+
+    pub fn len(&self) -> usize {
+        self.events.borrow().len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.events.borrow().is_empty()
+    }
+}
+
+impl MapEventConsumer for BufferedConsumer {
+    fn on_event(&self, event: &MapEvent) {
+        self.events.borrow_mut().push(event.clone());
+    }
+}
+
+/// Phase W.4: synchronous publish/subscribe hub. The piece that
+/// makes the machine a live, self-sustaining loop instead of a
+/// collection of components that a caller has to wire together
+/// by hand.
+///
+/// Producers (motor, benchmark runner, certifier, external
+/// probes) publish `MapEvent`s. Subscribers (streaming trainer,
+/// certifier, buffered history, experimentation probes) see
+/// every event in order. The hub owns the subscription list;
+/// consumers are held as `Rc<dyn MapEventConsumer>` so callers
+/// can still retain handles to query them out-of-band
+/// (`trainer.snapshot()`, `buffer.drain()`, etc.) while the hub
+/// fans out.
+///
+/// Single-threaded today. For multi-threaded publishing wrap
+/// the Vec in `RwLock` and switch `Rc` → `Arc`; public API is
+/// identical.
+///
+/// # Reentrancy
+///
+/// `publish` clones the subscription list before dispatching so
+/// a consumer may subscribe a new consumer while being
+/// dispatched (for dynamic probe attachment) without triggering
+/// reentrant-borrow panic.
+#[derive(Default)]
+pub struct EventHub {
+    subscribers: std::cell::RefCell<Vec<std::rc::Rc<dyn MapEventConsumer>>>,
+    published_count: std::cell::Cell<u64>,
+}
+
+impl std::fmt::Debug for EventHub {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("EventHub")
+            .field("subscribers", &self.subscribers.borrow().len())
+            .field("published_count", &self.published_count.get())
+            .finish()
+    }
+}
+
+impl EventHub {
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Subscribe a consumer. Consumers are held behind `Rc`; the
+    /// caller typically keeps its own `Rc` clone so it can query
+    /// the consumer later.
+    pub fn subscribe(
+        &self,
+        consumer: std::rc::Rc<dyn MapEventConsumer>,
+    ) {
+        self.subscribers.borrow_mut().push(consumer);
+    }
+
+    /// Publish an event. All subscribers see it in subscription
+    /// order. See "Reentrancy" on the struct doc.
+    pub fn publish(&self, event: &MapEvent) {
+        let subs: Vec<_> = self.subscribers.borrow().clone();
+        for s in subs {
+            s.on_event(event);
+        }
+        self.published_count.set(self.published_count.get() + 1);
+    }
+
+    /// Number of events published since the hub started.
+    pub fn published_count(&self) -> u64 {
+        self.published_count.get()
+    }
+
+    /// Number of subscribers currently attached.
+    pub fn subscriber_count(&self) -> usize {
+        self.subscribers.borrow().len()
+    }
+}
+
+/// An `EventHub` is itself a consumer — `on_event` forwards to
+/// `publish`. This lets the hub sit as the `downstream` of
+/// producer APIs (e.g. `BenchmarkConsumer::benchmark_now`) so
+/// producer-published events fan out to all hub subscribers.
+impl MapEventConsumer for EventHub {
+    fn on_event(&self, event: &MapEvent) {
+        self.publish(event);
+    }
+}
+
+/// A single snapshot of the library's state at a moment.
+/// Hash-identified by `library_root`. Two snapshots with the same
+/// root are the same library (possibly reached by different paths).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct MapSnapshot {
+    /// The motor run this snapshot came from (seed).
+    pub seed: u64,
+    /// Phase index within that run.
+    pub phase_index: usize,
+    /// Merkle root of the library at this moment.
+    pub library_root: TermRef,
+    /// The library content itself.
+    pub library: Vec<RewriteRule>,
+    /// The observation that produced this snapshot (for audit +
+    /// analysis: staleness level, policy delta, etc.).
+    pub observation: Option<LearningObservation>,
+}
+
+impl MapSnapshot {
+    #[must_use]
+    pub fn new(
+        seed: u64,
+        phase_index: usize,
+        library: Vec<RewriteRule>,
+        observation: Option<LearningObservation>,
+    ) -> Self {
+        let library_root = library_merkle_root(&library);
+        Self {
+            seed,
+            phase_index,
+            library_root,
+            library,
+            observation,
+        }
+    }
+
+    /// Number of rules at this snapshot.
+    #[must_use]
+    pub fn size(&self) -> usize {
+        self.library.len()
+    }
+}
+
+/// The map of mathscape — a collection of snapshots across one or
+/// more motor runs. Saveable, mergeable, analyzable.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct MathscapeMap {
+    pub snapshots: Vec<MapSnapshot>,
+}
+
+impl MathscapeMap {
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn push(&mut self, snapshot: MapSnapshot) {
+        self.snapshots.push(snapshot);
+    }
+
+    /// Phase V.spin events: push a snapshot and dispatch events
+    /// describing the mutation. Emits:
+    ///
+    ///   - `NovelRoot` when the snapshot's library_root is new
+    ///   - `RootMutated` when the snapshot's seed has a prior
+    ///     snapshot with a different root
+    ///   - `CoreGrew` when adding this snapshot expands the
+    ///     core-rule set (invariant mathematics)
+    ///   - `StalenessCrossed` when the snapshot's observation's
+    ///     staleness_score ≥ `staleness_threshold`
+    ///
+    /// Consumers receive the events in emission order; each call
+    /// is synchronous and side-effect-free on the map.
+    pub fn push_with_events<C: MapEventConsumer>(
+        &mut self,
+        snapshot: MapSnapshot,
+        consumer: &C,
+        staleness_threshold: f64,
+    ) {
+        let known_roots: BTreeSet<TermRef> = self.unique_roots();
+        let prior_for_seed: Option<&MapSnapshot> = self
+            .snapshots
+            .iter()
+            .filter(|s| s.seed == snapshot.seed)
+            .max_by_key(|s| s.phase_index);
+
+        // Novel root detection.
+        let root_is_novel = !known_roots.contains(&snapshot.library_root);
+
+        // Root mutation for this seed.
+        let mutation_event =
+            prior_for_seed.and_then(|prior| {
+                if prior.library_root == snapshot.library_root {
+                    None
+                } else {
+                    Some(MapEvent::RootMutated {
+                        seed: snapshot.seed,
+                        from_phase: prior.phase_index,
+                        to_phase: snapshot.phase_index,
+                        prev_root: prior.library_root,
+                        next_root: snapshot.library_root,
+                        size_delta: snapshot.library.len() as i64
+                            - prior.library.len() as i64,
+                    })
+                }
+            });
+
+        // Staleness crossing.
+        let staleness_event = snapshot.observation.as_ref().and_then(|obs| {
+            let s = obs.staleness_score();
+            if s >= staleness_threshold {
+                Some(MapEvent::StalenessCrossed {
+                    seed: snapshot.seed,
+                    phase_index: snapshot.phase_index,
+                    threshold: staleness_threshold,
+                    observed: s,
+                })
+            } else {
+                None
+            }
+        });
+
+        // Core growth detection — compute core BEFORE + AFTER.
+        let core_before: Vec<RewriteRule> = self.core_rules();
+        self.snapshots.push(snapshot.clone());
+        let core_after: Vec<RewriteRule> = self.core_rules();
+
+        // Emit in order: novel-root → root-mutated → core-grew →
+        // staleness-crossed. Consumers see NovelRoot FIRST because
+        // it's the most informative signal ("virgin territory");
+        // staleness is LAST because it's a retrospective flag.
+        if root_is_novel {
+            consumer.on_event(&MapEvent::NovelRoot {
+                seed: snapshot.seed,
+                phase_index: snapshot.phase_index,
+                root: snapshot.library_root,
+                library_size: snapshot.library.len(),
+            });
+        }
+        if let Some(ev) = mutation_event {
+            consumer.on_event(&ev);
+        }
+        // Emit one CoreGrew per rule added to the core.
+        if core_after.len() > core_before.len() {
+            let before_keys: BTreeSet<(String, String)> = core_before
+                .iter()
+                .map(|r| (format!("{:?}", r.lhs), format!("{:?}", r.rhs)))
+                .collect();
+            for rule in &core_after {
+                let key =
+                    (format!("{:?}", rule.lhs), format!("{:?}", rule.rhs));
+                if !before_keys.contains(&key) {
+                    consumer.on_event(&MapEvent::CoreGrew {
+                        prev_core_size: core_before.len(),
+                        new_core_size: core_after.len(),
+                        added_rule: rule.clone(),
+                    });
+                }
+            }
+        }
+        if let Some(ev) = staleness_event {
+            consumer.on_event(&ev);
+        }
+    }
+
+    /// Merge another map's snapshots into this one. Duplicate
+    /// (seed, phase_index) pairs are NOT deduplicated — the caller
+    /// is responsible for avoiding double-adds. Use this for
+    /// cross-run unioning.
+    pub fn merge(&mut self, other: MathscapeMap) {
+        self.snapshots.extend(other.snapshots);
+    }
+
+    /// All distinct library-root hashes seen across every snapshot.
+    /// The count is an upper bound on how many distinct library
+    /// states the motor has visited — a measure of map breadth.
+    #[must_use]
+    pub fn unique_roots(&self) -> BTreeSet<TermRef> {
+        self.snapshots
+            .iter()
+            .map(|s| s.library_root)
+            .collect()
+    }
+
+    /// All distinct seeds represented in the map.
+    #[must_use]
+    pub fn seeds(&self) -> BTreeSet<u64> {
+        self.snapshots.iter().map(|s| s.seed).collect()
+    }
+
+    /// All rules in the union — every rule discovered in any
+    /// snapshot. Deduplicated by (lhs, rhs) structural equality.
+    #[must_use]
+    pub fn union_rules(&self) -> Vec<RewriteRule> {
+        let mut seen: BTreeMap<(String, String), RewriteRule> =
+            BTreeMap::new();
+        for snap in &self.snapshots {
+            for rule in &snap.library {
+                let key = (format!("{:?}", rule.lhs), format!("{:?}", rule.rhs));
+                seen.entry(key).or_insert_with(|| rule.clone());
+            }
+        }
+        seen.into_values().collect()
+    }
+
+    /// Core rules — rules present in EVERY seed's final (largest-
+    /// phase) snapshot. The invariant mathematics of the current
+    /// motor configuration: what every run discovers regardless
+    /// of starting point.
+    #[must_use]
+    pub fn core_rules(&self) -> Vec<RewriteRule> {
+        let seeds: BTreeSet<u64> = self.seeds();
+        if seeds.is_empty() {
+            return Vec::new();
+        }
+        // Per-seed, pick the snapshot with the largest phase index
+        // (the final state).
+        let mut per_seed_final: BTreeMap<u64, &MapSnapshot> =
+            BTreeMap::new();
+        for snap in &self.snapshots {
+            let entry = per_seed_final.entry(snap.seed).or_insert(snap);
+            if snap.phase_index > entry.phase_index {
+                *entry = snap;
+            }
+        }
+        // Count rule occurrences across the per-seed finals.
+        let mut counts: BTreeMap<(String, String), (RewriteRule, usize)> =
+            BTreeMap::new();
+        for snap in per_seed_final.values() {
+            // Dedup within a single snapshot first (in case the
+            // library has alpha-variants).
+            let mut seen_this_snap: BTreeSet<(String, String)> =
+                BTreeSet::new();
+            for rule in &snap.library {
+                let key = (format!("{:?}", rule.lhs), format!("{:?}", rule.rhs));
+                if seen_this_snap.insert(key.clone()) {
+                    let entry = counts
+                        .entry(key)
+                        .or_insert_with(|| (rule.clone(), 0));
+                    entry.1 += 1;
+                }
+            }
+        }
+        let n = per_seed_final.len();
+        counts
+            .into_values()
+            .filter(|(_, c)| *c == n)
+            .map(|(r, _)| r)
+            .collect()
+    }
+
+    /// Mutation edges — ordered (prev_root, next_root) pairs
+    /// per-seed in phase order. The motor's trajectory through
+    /// the root-space.
+    #[must_use]
+    pub fn mutation_edges(&self) -> Vec<(u64, TermRef, TermRef)> {
+        let mut by_seed: BTreeMap<u64, Vec<&MapSnapshot>> =
+            BTreeMap::new();
+        for snap in &self.snapshots {
+            by_seed.entry(snap.seed).or_default().push(snap);
+        }
+        let mut edges = Vec::new();
+        for (seed, mut snaps) in by_seed {
+            snaps.sort_by_key(|s| s.phase_index);
+            for pair in snaps.windows(2) {
+                if pair[0].library_root != pair[1].library_root {
+                    edges.push((
+                        seed,
+                        pair[0].library_root,
+                        pair[1].library_root,
+                    ));
+                }
+            }
+        }
+        edges
+    }
+
+    /// Persist to disk as bincode. Cross-session accumulation:
+    /// load the map at session start, add new snapshots, save
+    /// at session end. The canonical mathematics the machine has
+    /// discovered is now a file.
+    pub fn save_to_path<P: AsRef<std::path::Path>>(
+        &self,
+        path: P,
+    ) -> Result<(), String> {
+        let bytes = bincode::serialize(self)
+            .map_err(|e| format!("serialize error: {e}"))?;
+        std::fs::write(path, bytes)
+            .map_err(|e| format!("write error: {e}"))?;
+        Ok(())
+    }
+
+    /// Load a persisted map from disk.
+    pub fn load_from_path<P: AsRef<std::path::Path>>(
+        path: P,
+    ) -> Result<Self, String> {
+        let bytes = std::fs::read(path)
+            .map_err(|e| format!("read error: {e}"))?;
+        bincode::deserialize(&bytes)
+            .map_err(|e| format!("deserialize error: {e}"))
+    }
+
+    /// Summary report — counts of snapshots / unique roots /
+    /// union-size / core-size / edge count.
+    #[must_use]
+    pub fn summary(&self) -> MapSummary {
+        MapSummary {
+            total_snapshots: self.snapshots.len(),
+            unique_roots: self.unique_roots().len(),
+            seeds: self.seeds().len(),
+            union_rule_count: self.union_rules().len(),
+            core_rule_count: self.core_rules().len(),
+            mutation_edges: self.mutation_edges().len(),
+        }
+    }
+}
+
+/// Summary statistics for a `MathscapeMap` — the shape of the
+/// discovered territory at a glance.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MapSummary {
+    pub total_snapshots: usize,
+    /// Distinct library-root hashes — upper bound on the count
+    /// of distinct library states visited.
+    pub unique_roots: usize,
+    pub seeds: usize,
+    /// Size of the union library (any rule from any seed).
+    pub union_rule_count: usize,
+    /// Size of the core library (rules in every seed's final).
+    pub core_rule_count: usize,
+    /// Number of phase-transitions where the root CHANGED.
+    /// A mutation that added/removed a rule. Transitions where
+    /// the root stayed the same (e.g. when a phase discovered
+    /// nothing) don't count.
+    pub mutation_edges: usize,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::term::Term;
+    use crate::value::Value;
+
+    fn var(id: u32) -> Term {
+        Term::Var(id)
+    }
+    fn apply(h: Term, args: Vec<Term>) -> Term {
+        Term::Apply(Box::new(h), args)
+    }
+    fn nat(n: u64) -> Term {
+        Term::Number(Value::Nat(n))
+    }
+
+    fn add_id() -> RewriteRule {
+        RewriteRule {
+            name: "add-id".into(),
+            lhs: apply(var(2), vec![nat(0), var(100)]),
+            rhs: var(100),
+        }
+    }
+    fn mul_id() -> RewriteRule {
+        RewriteRule {
+            name: "mul-id".into(),
+            lhs: apply(var(3), vec![nat(1), var(100)]),
+            rhs: var(100),
+        }
+    }
+
+    #[test]
+    fn empty_map_has_empty_summary() {
+        let m = MathscapeMap::new();
+        let s = m.summary();
+        assert_eq!(s.total_snapshots, 0);
+        assert_eq!(s.seeds, 0);
+        assert_eq!(s.union_rule_count, 0);
+        assert_eq!(s.core_rule_count, 0);
+    }
+
+    #[test]
+    fn snapshot_computes_library_root() {
+        let snap =
+            MapSnapshot::new(1, 0, vec![add_id()], None);
+        // Root is a 32-byte hash — not the zero hash.
+        let zero = TermRef::from_bytes(&[]);
+        // Empty library's root is empty-bytes hash; ours is not
+        // empty-bytes.
+        assert_ne!(snap.library_root, zero);
+    }
+
+    #[test]
+    fn two_snapshots_same_content_same_root() {
+        let s1 = MapSnapshot::new(1, 0, vec![add_id(), mul_id()], None);
+        let s2 = MapSnapshot::new(7, 3, vec![mul_id(), add_id()], None);
+        // Same rules, different order → same root.
+        assert_eq!(s1.library_root, s2.library_root);
+    }
+
+    #[test]
+    fn map_union_collects_all_rules() {
+        let mut m = MathscapeMap::new();
+        m.push(MapSnapshot::new(1, 0, vec![add_id()], None));
+        m.push(MapSnapshot::new(2, 0, vec![mul_id()], None));
+        let union = m.union_rules();
+        assert_eq!(union.len(), 2);
+    }
+
+    #[test]
+    fn map_core_is_intersection_of_seed_finals() {
+        let mut m = MathscapeMap::new();
+        m.push(MapSnapshot::new(1, 0, vec![add_id()], None));
+        m.push(MapSnapshot::new(1, 1, vec![add_id(), mul_id()], None));
+        m.push(MapSnapshot::new(2, 0, vec![mul_id()], None));
+        m.push(MapSnapshot::new(2, 1, vec![add_id(), mul_id()], None));
+        // Each seed's final has both rules → core is both rules.
+        let core = m.core_rules();
+        assert_eq!(core.len(), 2);
+    }
+
+    #[test]
+    fn map_core_respects_seed_finals_only() {
+        let mut m = MathscapeMap::new();
+        // Seed 1 final has add_id + mul_id.
+        m.push(MapSnapshot::new(1, 0, vec![add_id(), mul_id()], None));
+        // Seed 2 final has only add_id — no mul_id.
+        m.push(MapSnapshot::new(2, 0, vec![add_id()], None));
+        // Core is only add_id (present in both finals).
+        let core = m.core_rules();
+        assert_eq!(core.len(), 1);
+    }
+
+    #[test]
+    fn mutation_edges_record_root_transitions() {
+        let mut m = MathscapeMap::new();
+        // Seed 1: empty → {add_id} → {add_id, mul_id}
+        m.push(MapSnapshot::new(1, 0, vec![], None));
+        m.push(MapSnapshot::new(1, 1, vec![add_id()], None));
+        m.push(MapSnapshot::new(1, 2, vec![add_id(), mul_id()], None));
+        let edges = m.mutation_edges();
+        assert_eq!(edges.len(), 2);
+        assert_eq!(edges[0].0, 1);
+        assert_ne!(edges[0].1, edges[0].2);
+    }
+
+    #[test]
+    fn mutation_edges_skip_no_op_transitions() {
+        // When root stays the same phase-to-phase, no edge.
+        let mut m = MathscapeMap::new();
+        m.push(MapSnapshot::new(1, 0, vec![add_id()], None));
+        m.push(MapSnapshot::new(1, 1, vec![add_id()], None));
+        m.push(MapSnapshot::new(1, 2, vec![add_id(), mul_id()], None));
+        let edges = m.mutation_edges();
+        assert_eq!(edges.len(), 1, "only the real mutation counted");
+    }
+
+    // ── Phase V.spin events tests ────────────────────────────────
+
+    #[test]
+    fn novel_root_event_fires_for_first_snapshot() {
+        let mut m = MathscapeMap::new();
+        let consumer = BufferedConsumer::new();
+        let snap = MapSnapshot::new(1, 0, vec![add_id()], None);
+        m.push_with_events(snap, &consumer, 0.6);
+        let events = consumer.drain();
+        assert!(
+            events.iter().any(|e| matches!(e, MapEvent::NovelRoot { .. })),
+            "first snapshot must emit NovelRoot"
+        );
+    }
+
+    #[test]
+    fn novel_root_event_does_not_fire_when_root_recurs() {
+        let mut m = MathscapeMap::new();
+        let consumer = BufferedConsumer::new();
+        m.push_with_events(
+            MapSnapshot::new(1, 0, vec![add_id()], None),
+            &consumer,
+            0.6,
+        );
+        consumer.drain();
+        // Different seed, same content → same root.
+        m.push_with_events(
+            MapSnapshot::new(2, 0, vec![add_id()], None),
+            &consumer,
+            0.6,
+        );
+        let events = consumer.drain();
+        assert!(
+            !events.iter().any(|e| matches!(e, MapEvent::NovelRoot { .. })),
+            "re-visiting a known root must not emit NovelRoot"
+        );
+    }
+
+    #[test]
+    fn root_mutated_event_fires_on_intra_seed_transition() {
+        let mut m = MathscapeMap::new();
+        let consumer = BufferedConsumer::new();
+        m.push_with_events(
+            MapSnapshot::new(1, 0, vec![add_id()], None),
+            &consumer,
+            0.6,
+        );
+        consumer.drain();
+        // Same seed, next phase, different library → root mutated.
+        m.push_with_events(
+            MapSnapshot::new(1, 1, vec![add_id(), mul_id()], None),
+            &consumer,
+            0.6,
+        );
+        let events = consumer.drain();
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, MapEvent::RootMutated { .. })),
+            "transition within seed must emit RootMutated"
+        );
+    }
+
+    #[test]
+    fn core_grew_event_fires_when_a_rule_becomes_invariant() {
+        let mut m = MathscapeMap::new();
+        let consumer = BufferedConsumer::new();
+        // Seed 1 final: {add_id, mul_id} — core with 1 seed is both.
+        m.push_with_events(
+            MapSnapshot::new(1, 0, vec![add_id(), mul_id()], None),
+            &consumer,
+            0.6,
+        );
+        consumer.drain();
+        // Seed 2 phase 0: {add_id} only. Core shrinks to {add_id}.
+        m.push_with_events(
+            MapSnapshot::new(2, 0, vec![add_id()], None),
+            &consumer,
+            0.6,
+        );
+        consumer.drain();
+        // Seed 2 phase 1: adds mul_id. Core expands to {add_id, mul_id} —
+        // the rule became invariant across the two seeds. CoreGrew
+        // fires for mul_id.
+        m.push_with_events(
+            MapSnapshot::new(2, 1, vec![add_id(), mul_id()], None),
+            &consumer,
+            0.6,
+        );
+        let events = consumer.drain();
+        let grew: Vec<_> = events
+            .iter()
+            .filter(|e| matches!(e, MapEvent::CoreGrew { .. }))
+            .collect();
+        assert_eq!(
+            grew.len(),
+            1,
+            "a rule becoming present in every seed's final must fire CoreGrew"
+        );
+    }
+
+    #[test]
+    fn staleness_crossed_event_fires_at_threshold() {
+        use crate::hash::TermRef;
+        let obs_stale = LearningObservation {
+            total_library_size: 3,
+            seed_library_size: 3,
+            net_growth_per_phase: vec![0],
+            saturation_phase_index: Some(0),
+            extract_ns_per_iteration: vec![],
+            trained_policy_delta_norm: 0.0,
+            scenario_total_ns: 1000,
+            chain_attestation: TermRef::from_bytes(b"s"),
+        };
+        let mut m = MathscapeMap::new();
+        let consumer = BufferedConsumer::new();
+        m.push_with_events(
+            MapSnapshot::new(1, 0, vec![add_id()], Some(obs_stale)),
+            &consumer,
+            0.6,
+        );
+        let events = consumer.drain();
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, MapEvent::StalenessCrossed { .. })),
+            "stale observation must emit StalenessCrossed"
+        );
+    }
+
+    #[test]
+    fn staleness_event_does_not_fire_below_threshold() {
+        use crate::hash::TermRef;
+        let obs_fresh = LearningObservation {
+            total_library_size: 5,
+            seed_library_size: 0,
+            net_growth_per_phase: vec![5],
+            saturation_phase_index: None,
+            extract_ns_per_iteration: vec![],
+            trained_policy_delta_norm: 0.5,
+            scenario_total_ns: 1000,
+            chain_attestation: TermRef::from_bytes(b"f"),
+        };
+        let mut m = MathscapeMap::new();
+        let consumer = BufferedConsumer::new();
+        m.push_with_events(
+            MapSnapshot::new(1, 0, vec![add_id()], Some(obs_fresh)),
+            &consumer,
+            0.6,
+        );
+        let events = consumer.drain();
+        assert!(
+            !events
+                .iter()
+                .any(|e| matches!(e, MapEvent::StalenessCrossed { .. })),
+            "fresh observation must NOT emit StalenessCrossed"
+        );
+    }
+
+    #[test]
+    fn events_emit_in_stable_order() {
+        // Order: novel-root → root-mutated → core-grew → staleness.
+        // Test the ordering with a snapshot that triggers multiple.
+        use crate::hash::TermRef;
+        let mut m = MathscapeMap::new();
+        let consumer = BufferedConsumer::new();
+        // Seed 1, phase 0.
+        m.push_with_events(
+            MapSnapshot::new(1, 0, vec![add_id()], None),
+            &consumer,
+            0.6,
+        );
+        // Seed 2, phase 0, same library (core grows).
+        m.push_with_events(
+            MapSnapshot::new(2, 0, vec![add_id()], None),
+            &consumer,
+            0.6,
+        );
+        // Seed 1, phase 1, novel root + STALENESS signal (library
+        // grew but observation reports stuck: seed==total AND delta=0,
+        // which models a scenario where the library passed through
+        // unchanged in the observation frame).
+        let obs_stale = LearningObservation {
+            total_library_size: 2,
+            seed_library_size: 2, // no net growth over seed
+            net_growth_per_phase: vec![0],
+            saturation_phase_index: Some(0),
+            extract_ns_per_iteration: vec![],
+            trained_policy_delta_norm: 0.0,
+            scenario_total_ns: 1000,
+            chain_attestation: TermRef::from_bytes(b"x"),
+        };
+        m.push_with_events(
+            MapSnapshot::new(
+                1,
+                1,
+                vec![add_id(), mul_id()],
+                Some(obs_stale),
+            ),
+            &consumer,
+            0.6,
+        );
+        let events = consumer.drain();
+        // Check the last snapshot's events ordering.
+        let phase1_events: Vec<&MapEvent> = events
+            .iter()
+            .filter(|e| match e {
+                MapEvent::NovelRoot { seed, phase_index, .. } => {
+                    *seed == 1 && *phase_index == 1
+                }
+                MapEvent::RootMutated { seed, to_phase, .. } => {
+                    *seed == 1 && *to_phase == 1
+                }
+                MapEvent::StalenessCrossed { seed, phase_index, .. } => {
+                    *seed == 1 && *phase_index == 1
+                }
+                _ => false,
+            })
+            .collect();
+        // Expect at least NovelRoot + RootMutated + StalenessCrossed
+        // for phase 1.
+        let kinds: Vec<&'static str> =
+            phase1_events.iter().map(|e| e.category()).collect();
+        assert!(kinds.contains(&"novel-root"));
+        assert!(kinds.contains(&"root-mutated"));
+        assert!(kinds.contains(&"staleness-crossed"));
+    }
+
+    #[test]
+    fn map_bincode_roundtrip() {
+        let mut m = MathscapeMap::new();
+        m.push(MapSnapshot::new(42, 3, vec![add_id(), mul_id()], None));
+        let bytes = bincode::serialize(&m).unwrap();
+        let back: MathscapeMap = bincode::deserialize(&bytes).unwrap();
+        assert_eq!(m, back);
+    }
+
+    // ── Phase W.4: EventHub pub/sub tests ───────────────────────
+
+    #[test]
+    fn event_hub_fans_out_to_multiple_subscribers() {
+        let hub = EventHub::new();
+        let a = std::rc::Rc::new(BufferedConsumer::new());
+        let b = std::rc::Rc::new(BufferedConsumer::new());
+        hub.subscribe(a.clone());
+        hub.subscribe(b.clone());
+        assert_eq!(hub.subscriber_count(), 2);
+
+        let e = MapEvent::CoreGrew {
+            prev_core_size: 0,
+            new_core_size: 1,
+            added_rule: add_id(),
+        };
+        hub.publish(&e);
+
+        assert_eq!(a.len(), 1);
+        assert_eq!(b.len(), 1);
+        assert_eq!(hub.published_count(), 1);
+    }
+
+    #[test]
+    fn event_hub_maintains_publish_order_per_subscriber() {
+        let hub = EventHub::new();
+        let buf = std::rc::Rc::new(BufferedConsumer::new());
+        hub.subscribe(buf.clone());
+
+        let events = vec![
+            MapEvent::NovelRoot {
+                seed: 1,
+                phase_index: 0,
+                root: TermRef::from_bytes(b"a"),
+                library_size: 0,
+            },
+            MapEvent::CoreGrew {
+                prev_core_size: 0,
+                new_core_size: 1,
+                added_rule: add_id(),
+            },
+            MapEvent::StalenessCrossed {
+                seed: 1,
+                phase_index: 0,
+                threshold: 0.6,
+                observed: 0.9,
+            },
+        ];
+        for e in &events {
+            hub.publish(e);
+        }
+        assert_eq!(buf.len(), 3);
+        let captured = buf.drain();
+        assert_eq!(captured.len(), 3);
+        assert_eq!(captured[0].category(), "novel-root");
+        assert_eq!(captured[1].category(), "core-grew");
+        assert_eq!(captured[2].category(), "staleness-crossed");
+    }
+
+    #[test]
+    fn event_hub_handle_survives_external_access() {
+        let hub = EventHub::new();
+        let buf = std::rc::Rc::new(BufferedConsumer::new());
+        hub.subscribe(buf.clone());
+
+        hub.publish(&MapEvent::CoreGrew {
+            prev_core_size: 0,
+            new_core_size: 1,
+            added_rule: add_id(),
+        });
+        // External access still works while subscribed.
+        let drained = buf.drain();
+        assert_eq!(drained.len(), 1);
+        // Next publish still reaches the same consumer instance.
+        hub.publish(&MapEvent::NovelRoot {
+            seed: 1,
+            phase_index: 0,
+            root: TermRef::from_bytes(b"b"),
+            library_size: 1,
+        });
+        assert_eq!(buf.len(), 1);
+    }
+
+    #[test]
+    fn event_hub_reentrant_subscribe_during_publish_is_safe() {
+        // A subscriber that subscribes ANOTHER subscriber mid-
+        // dispatch must not panic on reentrant borrow.
+        struct SelfSubscriber {
+            hub: std::rc::Weak<EventHub>,
+            added: std::cell::Cell<bool>,
+        }
+        impl MapEventConsumer for SelfSubscriber {
+            fn on_event(&self, _: &MapEvent) {
+                if self.added.get() {
+                    return;
+                }
+                if let Some(hub) = self.hub.upgrade() {
+                    hub.subscribe(std::rc::Rc::new(BufferedConsumer::new()));
+                    self.added.set(true);
+                }
+            }
+        }
+
+        let hub = std::rc::Rc::new(EventHub::new());
+        let ss = std::rc::Rc::new(SelfSubscriber {
+            hub: std::rc::Rc::downgrade(&hub),
+            added: std::cell::Cell::new(false),
+        });
+        hub.subscribe(ss.clone());
+
+        hub.publish(&MapEvent::CoreGrew {
+            prev_core_size: 0,
+            new_core_size: 1,
+            added_rule: add_id(),
+        });
+        // The self-subscriber added one more sub mid-dispatch.
+        assert_eq!(hub.subscriber_count(), 2);
+    }
+}

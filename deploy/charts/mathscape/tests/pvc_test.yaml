@@ -1,0 +1,49 @@
+suite: pvc tests (volumeClaimTemplate in StatefulSet)
+templates:
+  - templates/statefulset.yaml
+tests:
+  - it: should create PVC with 10Gi default size
+    asserts:
+      - equal:
+          path: spec.volumeClaimTemplates[0].spec.resources.requests.storage
+          value: 10Gi
+
+  - it: should allow custom storage size
+    set:
+      persistence.size: 100Gi
+    asserts:
+      - equal:
+          path: spec.volumeClaimTemplates[0].spec.resources.requests.storage
+          value: 100Gi
+
+  - it: should allow custom storage class
+    set:
+      persistence.storageClass: longhorn
+    asserts:
+      - equal:
+          path: spec.volumeClaimTemplates[0].spec.storageClassName
+          value: longhorn
+
+  - it: should not set storageClassName when storageClass is empty
+    set:
+      persistence.storageClass: ""
+    asserts:
+      - isNull:
+          path: spec.volumeClaimTemplates[0].spec.storageClassName
+
+  - it: should use ReadWriteOnce access mode by default
+    asserts:
+      - contains:
+          path: spec.volumeClaimTemplates[0].spec.accessModes
+          content: ReadWriteOnce
+
+  - it: should set selector labels on PVC metadata
+    asserts:
+      - exists:
+          path: spec.volumeClaimTemplates[0].metadata.labels
+
+  - it: should name the PVC data
+    asserts:
+      - equal:
+          path: spec.volumeClaimTemplates[0].metadata.name
+          value: data

@@ -1,0 +1,18 @@
+[package]
+name = "mathscape-acquisition"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Garimpo acquisition-space typescape — the TYPED-SPEC + INTERPRETER triplet for the layer ratchet (Layer/SealWitness/FoldBack/AbsorbDecision/Frontier/AcquisitionState)"
+
+[dependencies]
+mathscape-core.workspace = true
+serde.workspace = true
+bincode.workspace = true
+
+# The (defacquisition …) authoring surface — same Sexp substrate the
+# mechanism/proof layers already use (to_sexp/from_sexp over
+# tatara_lisp::ast::Sexp). Not the runtime #[derive(TataraDomain)]
+# registration machinery — see the honest limit in lib.rs.
+tatara-lisp.workspace = true
