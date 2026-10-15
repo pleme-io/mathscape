@@ -30,6 +30,29 @@ pub enum Extractor {
 
 impl Extractor {
     #[must_use]
+    pub const fn with_min_support(self, min_support: usize) -> Self {
+        match self {
+            Self::DerivedLaws { step_limit, .. } => Self::DerivedLaws {
+                step_limit,
+                min_support,
+            },
+            Self::Validated {
+                step_limit,
+                subterm_depth,
+                k_samples,
+                seed,
+                ..
+            } => Self::Validated {
+                step_limit,
+                min_support,
+                subterm_depth,
+                k_samples,
+                seed,
+            },
+        }
+    }
+
+    #[must_use]
     pub const fn derived_laws() -> Self {
         Self::DerivedLaws {
             step_limit: 300,
@@ -93,11 +116,34 @@ pub enum UnknownCorpus {
 
 const KNOWN_CORPORA: [&str; 2] = ["default", "adaptive"];
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CorpusShape {
+    pub term_count: usize,
+    pub base_depth: usize,
+    pub vocab: Vec<u32>,
+    pub max_value: u64,
+    pub shells: bool,
+}
+
+impl CorpusShape {
+    fn generator(&self, seed: u64) -> AdaptiveCorpusGenerator {
+        AdaptiveCorpusGenerator {
+            seed,
+            term_count: self.term_count,
+            base_depth: self.base_depth,
+            vocab: self.vocab.clone(),
+            max_value: self.max_value,
+            shells: self.shells,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Motor {
     pub extractor: Extractor,
     pub seed: u64,
     pub unknown_corpus: UnknownCorpus,
+    pub corpus: Option<CorpusShape>,
 }
 
 impl Default for Motor {
@@ -106,6 +152,7 @@ impl Default for Motor {
             extractor: Extractor::derived_laws(),
             seed: 0,
             unknown_corpus: UnknownCorpus::Refuse,
+            corpus: None,
         }
     }
 }
@@ -132,6 +179,12 @@ impl Motor {
         self
     }
 
+    #[must_use]
+    pub fn with_corpus(mut self, corpus: CorpusShape) -> Self {
+        self.corpus = Some(corpus);
+        self
+    }
+
     pub fn run_spec(&self, spec: &BootstrapCycleSpec) -> Result<BootstrapOutcome, SpecExecutionError> {
         let n = spec.n_iterations;
         let lib = spec.seed_library.clone();
@@ -146,10 +199,13 @@ impl Motor {
             )),
             "adaptive" => Ok(drive(
                 BootstrapCycle::new(
-                    AdaptiveCorpusGenerator {
-                        seed: self.seed,
-                        ..AdaptiveCorpusGenerator::default()
-                    },
+                    self.corpus.as_ref().map_or_else(
+                        || AdaptiveCorpusGenerator {
+                            seed: self.seed,
+                            ..AdaptiveCorpusGenerator::default()
+                        },
+                        |shape| shape.generator(self.seed),
+                    ),
                     self.extractor,
                     DefaultModelUpdater::default(),
                     n,

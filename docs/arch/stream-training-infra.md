@@ -180,11 +180,96 @@ level up: the frontier at size ≤ 5 over this vocabulary is exhausted
 back off (window doubles per failure: 4, 8, 16 … epochs), so the
 sterile tail costs little.
 
-The next lever is in the mechanism layer, not compute: key the
-graveyard by (mutation, base config) or let a size bump's trial
-budget scale with the frontier it opens, then ML4.3's diagnostics
-(candidate-size exhaustion is exactly this case). Scaling hardware
-before that buys the same sterile tail.
+The next lever was in the mechanism layer, not compute; it is the
+section below.
+
+## The second plateau opened (2026-10-15, v0.1.9)
+
+**Re-measured first**, on 0.1.8's own plateau state (seed 7, HEAD at
+epoch 1,145, library 188): the graveyard held `(bump-candidate-max-size 1)`
+and `(add-candidate-vocab-op 11)` keyed on the mutation alone; op 11
+had only got back in by riding a compound whose other half
+(`set-corpus-seed-from-theorems`) was inert. Re-building that state's
+frontier at larger sizes and scanning past the size-5 tail:
+
+| max size | equations | build | scanned past tail | non-entailed | certified | first novel at |
+|---|---|---|---|---|---|---|
+| 5 | 8,083 | 74 ms | 6,000 (from 0) | 0 | 0 | — |
+| 6 | 26,826 | 210 ms | 6,000 | 4 | 4 | 2,901 |
+| 7 | 140,577 | 1.1 s | 6,000 | 2 | 2 | 1,399 |
+
+So size 6 held novel laws, but the first one sat 2,901 equations past
+the tail; a 256-equation trial could never reach it. The entailment
+gate costs ~6.7 ms per equation and dominates a trial.
+
+**What changed:**
+
+- `mechanism.graveyard: context` (default): a failed mutation is
+  recorded with the context it failed in, `blake3(config ‖ library
+  root)`, and retried once either moves. The context is logged as
+  `:context` on every `(mechanism-delta …)` and persisted with the
+  pool. `mutation` keeps 0.1.8's mutation-only key.
+- `mechanism.trial-scale: opened` (default): a size bump trials every
+  equation it opens, `trial_budget ≤ opened ≤ trial_ceiling`
+  (32,768); `trial-stop-after: 1` ends a trial at its first certified
+  law. `fixed` and `0` restore 0.1.8.
+- `mechanism.drive-motor: true` (default): the motor's corpus
+  (`corpus_*`), extractor (`extract_min_matches` → `min_support`, then
+  `extract_min_shared_size` and `extract_max_new_rules` as filters) and
+  semantic projections (`candidate_max_size`, `composition_cap`,
+  `validator_*`) are read from `MechanismConfig`, and a mutant that
+  moves them gets a motor trial. `StreamMechanism::v0_1_8()` is the
+  whole prior surface; `tests/stream.rs` pins it.
+- **Certifier soundness.** Driving the motor surfaced `(?f ?x) → ?x`
+  ("every function is the identity") certifying against any library
+  that holds a double-negation law: a sampled value in head position
+  reduces through it. `DefaultCertifier` now refuses a pattern
+  variable in operator position by name; every other rule is judged
+  as before. Neither 0.1.8 library held one (0 of 188, 0 of 161).
+
+**Measurement** (release, two seeds concurrently, 30-minute cap; both
+hit it; duckdb over the epoch logs):
+
+| | seed 7 | seed 2026 |
+|---|---|---|
+| epochs in 30 min | 1,388 | 1,635 |
+| library at 30 min (0.1.8) | 173 (188) | 146 (161) |
+| certified after epoch 0 | 163 | 136 |
+| last certifying minute (0.1.8) | **26.8** (18.1) | **26.4** (8.8) |
+| certified/hour after epoch 0, whole 30 min (0.1.8) | 354 (356) | 272 (302) |
+| mutations / saturated responses (0.1.8) | 21 / 0 (22 / 4) | 18 / 0 (23 / 10) |
+| size bump adopted at epoch | 518 | 305 |
+
+Certified per 5-minute window, minutes 0–30:
+
+| | 0–5 | 5–10 | 10–15 | 15–20 | 20–25 | 25–30 |
+|---|---|---|---|---|---|---|
+| seed 7, 0.1.8 | 126 | 25 | 25 | 2 | 0 | 0 |
+| seed 7, 0.1.9 | 115 | 20 | 2 | 17 | 7 | 2 |
+| seed 2026, 0.1.8 | 125 | 26 | 0 | 0 | 0 | 0 |
+| seed 2026, 0.1.9 | 76 | 30 | 10 | 8 | 0 | 12 |
+
+The dead tail is gone: no saturated response in either run, and both
+still certify past minute 26. At the 30-minute mark the libraries are
+8–9% smaller, because the size bump is now adopted early and every
+later vocabulary addition rebuilds a size-6 frontier, about three
+times longer, from cursor 0. Every law certified after epoch 0 came
+from the frontier: the driven motor and its projections added
+nothing beyond the two epoch-0 laws in any of the four runs.
+
+**Where it plateaus next, and why.** Not within 30 minutes. Two
+measured limits bound it:
+
+- Frontier density falls with size: about 4 certified per 6,000
+  non-known equations at size 6 and 2 per 6,000 at size 7, all through
+  a ~6.7 ms entailment check. At 64 equations an epoch the frontier
+  supplies roughly 0.04 laws per epoch at size 7. Seed 7 ended with its
+  size-6 frontier nearly walked (cursor 19,136 of 19,184).
+- Canonical fitness takes the first mutant with any yield, so a
+  sparse size bump can win over a dense vocabulary addition. A
+  yield-per-equation fitness (ML4.3's diagnostics) would order them,
+  and memoizing entailment verdicts would make a rebuild from 0 cheap.
+  Neither is built.
 
 ## Build order
 

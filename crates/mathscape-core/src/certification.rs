@@ -314,6 +314,11 @@ impl Certifier for DefaultCertifier {
         // Domain-aware sampling (mirrors Phase J.2). Detect the
         // rule's algebraic domain from its LHS head op; sample
         // from the matching pool.
+        if let Some(var) = head_pattern_var(&rule.lhs).or_else(|| head_pattern_var(&rule.rhs)) {
+            return CertificationVerdict::Rejected {
+                reason: format!("operator variable ?{var} in head position cannot be sampled by value"),
+            };
+        }
         let domain = detect_domain(rule);
         let mut total_samples = 0;
         for seed in 0..self.seed_count as u64 {
@@ -357,6 +362,19 @@ impl Certifier for DefaultCertifier {
         CertificationVerdict::Certified {
             samples_passed: total_samples,
         }
+    }
+}
+
+fn head_pattern_var(t: &crate::term::Term) -> Option<u32> {
+    use crate::term::Term;
+    match t {
+        Term::Apply(f, args) => match **f {
+            Term::Var(v) if v >= 100 => Some(v),
+            _ => head_pattern_var(f).or_else(|| args.iter().find_map(head_pattern_var)),
+        },
+        Term::Symbol(_, args) => args.iter().find_map(head_pattern_var),
+        Term::Fn(_, body) => head_pattern_var(body),
+        _ => None,
     }
 }
 
@@ -636,6 +654,35 @@ mod tests {
             "add-identity must certify, got {:?}",
             verdict
         );
+    }
+
+    #[test]
+    fn an_operator_variable_in_head_position_is_refused_and_concrete_heads_still_certify() {
+        let cert = DefaultCertifier::default();
+        let every_function_is_identity = RewriteRule {
+            name: "f-id".into(),
+            lhs: apply(var(200), vec![var(201)]),
+            rhs: var(201),
+        };
+        let nested = RewriteRule {
+            name: "nested".into(),
+            lhs: apply(var(2), vec![apply(var(200), vec![var(201)]), nat(0)]),
+            rhs: apply(var(200), vec![var(201)]),
+        };
+        let double_negation = RewriteRule {
+            name: "neg-neg".into(),
+            lhs: apply(var(14), vec![apply(var(14), vec![var(200)])]),
+            rhs: var(200),
+        };
+        for rule in [every_function_is_identity, nested] {
+            let verdict = cert.try_certify(&rule, std::slice::from_ref(&double_negation));
+            assert!(
+                matches!(&verdict, CertificationVerdict::Rejected { reason } if reason.contains("head position")),
+                "{} must be refused, got {verdict:?}",
+                rule.name
+            );
+        }
+        assert!(matches!(cert.try_certify(&add_id(), &[]), CertificationVerdict::Certified { .. }));
     }
 
     #[test]

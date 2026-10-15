@@ -27,6 +27,7 @@ pub struct MechanismDelta {
     pub outcome: MechanismOutcome,
     pub config: MechanismConfig,
     pub frontier_cursor: usize,
+    pub context: Option<u64>,
 }
 
 impl MechanismDelta {
@@ -54,6 +55,9 @@ impl MechanismDelta {
             Sexp::keyword("frontier-cursor"),
             Sexp::string(self.frontier_cursor.to_string()),
         ]);
+        if let Some(context) = self.context {
+            items.extend([Sexp::keyword("context"), Sexp::string(context.to_string())]);
+        }
         Sexp::List(items)
     }
 
@@ -90,6 +94,10 @@ impl MechanismDelta {
             outcome,
             config: MechanismConfig::from_sexp(fields.get("config")?)?,
             frontier_cursor: usize::try_from(number("frontier-cursor")?).ok()?,
+            context: match fields.get("context") {
+                None => None,
+                Some(_) => Some(number("context")?),
+            },
         })
     }
 

@@ -16,7 +16,7 @@ This doc articulates the missing architectural layer: **the
 machine must self-mutate its OWN DISCOVERY MECHANISMS with the
 same autonomy that already applies to the apparatus.**
 
-## Status (2026-10-15): ML4.2 runs in the stream
+## Status (2026-10-15, v0.1.9): ML4.2 runs in the stream, past its second plateau
 
 `mathscape-stream` answers a plateau by mutating its mechanism,
 with no human in the loop. What landed, and what did not:
@@ -50,12 +50,30 @@ with no human in the loop. What landed, and what did not:
   form in snapshot metadata beside the frontier cursor and plateau
   counters; every response is a `(mechanism-delta …)` line in
   `deltas.lisp`. Same seed → same mutations → same hash chain.
-- **Still dead in the stream:** the corpus, extract and
-  composition knobs. The stream's corpus comes from the motor's
-  `AdaptiveCorpusGenerator`, which does not read `MechanismConfig`;
-  mutating those knobs changes nothing there, so their trials score
-  0 and land in the graveyard. ML4.3 diagnostics are not built:
-  proposals are still the uniform sampler.
+- **The graveyard is keyed by context** (v0.1.9,
+  `respond_to_saturation_in_context`): a failed mutation records
+  `graveyard_context(blake3(config ‖ library root))` and is retried
+  once either moves; its stale entry is replaced, so the graveyard
+  stays at most one entry per distinct mutation. The mutation-only key
+  is `stream.mechanism.graveyard: mutation` and
+  `respond_to_saturation`.
+- **A size bump trials what it opens** (`trial-scale: opened`, capped
+  by `trial-ceiling`, stopped at the first certified law by
+  `trial-stop-after`). This is what opened size 6: its first novel law
+  sat 2,901 equations past the size-5 tail.
+- **The corpus, extract and composition knobs drive the motor**
+  (`drive-motor: true`): `MotorMechanism::of` projects them onto the
+  motor's `CorpusShape`, extractor support, candidate filters and
+  semantic projections, and a mutant that moves them gets a motor
+  trial. Wired and tested, but measured yield is zero so far: every
+  law past epoch 0 still comes from the frontier.
+- **Certifier:** a pattern variable in operator position is refused
+  (`(?f ?x) → ?x` had certified through double negation once the
+  driven motor produced it).
+- **Not built:** ML4.3 diagnostics. Proposals are still the uniform
+  sampler, and canonical fitness takes the first mutant with any
+  yield, so a sparse size bump can win over a dense vocabulary
+  addition.
 
 Measurements: `stream-training-infra.md`.
 

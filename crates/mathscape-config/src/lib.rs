@@ -113,6 +113,22 @@ impl Default for StreamFrontier {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum StreamGraveyard {
+    #[default]
+    Context,
+    Mutation,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum StreamTrialScale {
+    #[default]
+    Opened,
+    Fixed,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct StreamMechanism {
@@ -121,6 +137,11 @@ pub struct StreamMechanism {
     pub mutations_per_round: usize,
     pub escalation_budget: usize,
     pub trial_budget: usize,
+    pub graveyard: StreamGraveyard,
+    pub trial_scale: StreamTrialScale,
+    pub trial_ceiling: usize,
+    pub trial_stop_after: usize,
+    pub drive_motor: bool,
 }
 
 impl Default for StreamMechanism {
@@ -131,6 +152,24 @@ impl Default for StreamMechanism {
             mutations_per_round: 6,
             escalation_budget: 2,
             trial_budget: 256,
+            graveyard: StreamGraveyard::Context,
+            trial_scale: StreamTrialScale::Opened,
+            trial_ceiling: 32_768,
+            trial_stop_after: 1,
+            drive_motor: true,
+        }
+    }
+}
+
+impl StreamMechanism {
+    #[must_use]
+    pub fn v0_1_8() -> Self {
+        Self {
+            graveyard: StreamGraveyard::Mutation,
+            trial_scale: StreamTrialScale::Fixed,
+            trial_stop_after: 0,
+            drive_motor: false,
+            ..Self::default()
         }
     }
 }

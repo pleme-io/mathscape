@@ -1125,6 +1125,56 @@ where
 /// ledger capture in their closure.
 pub fn respond_to_saturation_with_fitness<F>(
     pool: &mut MechanismPool,
+    trial_fn: F,
+    fitness_form: &tatara_lisp::ast::Sexp,
+    mutations_per_round: usize,
+    escalation_budget: usize,
+    seed: u64,
+) -> Option<(MechanismMutation, MechanismConfig)>
+where
+    F: FnMut(&MechanismConfig) -> TrialResult,
+{
+    respond_in_context(
+        pool,
+        None,
+        trial_fn,
+        fitness_form,
+        mutations_per_round,
+        escalation_budget,
+        seed,
+    )
+}
+
+#[must_use]
+pub fn graveyard_context(stamp: u64) -> usize {
+    usize::try_from(stamp >> 1).unwrap_or(usize::MAX >> 1)
+}
+
+pub fn respond_to_saturation_in_context<F>(
+    pool: &mut MechanismPool,
+    context: usize,
+    trial_fn: F,
+    mutations_per_round: usize,
+    escalation_budget: usize,
+    seed: u64,
+) -> Option<(MechanismMutation, MechanismConfig)>
+where
+    F: FnMut(&MechanismConfig) -> TrialResult,
+{
+    respond_in_context(
+        pool,
+        Some(context),
+        trial_fn,
+        &canonical_fitness_form(),
+        mutations_per_round,
+        escalation_budget,
+        seed,
+    )
+}
+
+fn respond_in_context<F>(
+    pool: &mut MechanismPool,
+    context: Option<usize>,
     mut trial_fn: F,
     fitness_form: &tatara_lisp::ast::Sexp,
     mutations_per_round: usize,
@@ -1175,7 +1225,7 @@ where
             let graveyard_hit = pool
                 .graveyard
                 .iter()
-                .any(|(m, _)| *m == mutation);
+                .any(|(m, at)| *m == mutation && context.is_none_or(|c| *at == c));
             if graveyard_hit {
                 continue;
             }
@@ -1192,7 +1242,10 @@ where
                     Some((mutation.clone(), mutant.clone(), score, result.clone()));
             }
             if score <= 0.0 {
-                pool.graveyard.push((mutation, 0));
+                if context.is_some() {
+                    pool.graveyard.retain(|(m, _)| *m != mutation);
+                }
+                pool.graveyard.push((mutation, context.unwrap_or(0)));
             }
         }
         if let Some((mutation, mutant, score, _result)) = best {
@@ -1239,6 +1292,64 @@ mod tests {
         let empty = MechanismPool::new().to_sexp().to_string();
         let forms = tatara_lisp::reader::read(&empty).unwrap();
         assert_eq!(MechanismPool::from_sexp(&forms[0]).unwrap().current, MechanismConfig::default());
+    }
+
+    #[test]
+    fn a_mutation_that_failed_in_one_context_is_retried_in_the_next_but_not_in_the_same() {
+        let barren = |_: &MechanismConfig| TrialResult {
+            delta_novelty: 0,
+            total_theorems_found: 0,
+        };
+        let mut pool = MechanismPool::new();
+        assert!(respond_to_saturation_in_context(&mut pool, 11, barren, 6, 0, 99).is_none());
+        let failed: Vec<MechanismMutation> = pool.graveyard.iter().map(|(m, _)| m.clone()).collect();
+        assert!(!failed.is_empty());
+        assert!(pool.graveyard.iter().all(|(_, at)| *at == 11));
+
+        let mut tried = Vec::new();
+        respond_to_saturation_in_context(
+            &mut pool,
+            11,
+            |c: &MechanismConfig| {
+                tried.push(c.clone());
+                barren(c)
+            },
+            6,
+            0,
+            99,
+        );
+        assert!(tried.is_empty(), "retried {} graveyarded mutations in the same context", tried.len());
+
+        respond_to_saturation_in_context(
+            &mut pool,
+            12,
+            |c: &MechanismConfig| {
+                tried.push(c.clone());
+                barren(c)
+            },
+            6,
+            0,
+            99,
+        );
+        assert_eq!(tried.len(), failed.len(), "a new context retries every earlier failure");
+        assert_eq!(pool.graveyard.len(), failed.len());
+        assert!(pool.graveyard.iter().all(|(_, at)| *at == 12));
+
+        let mut legacy = MechanismPool::new();
+        respond_to_saturation(&mut legacy, barren, 6, 0, 99);
+        let mut again = 0;
+        respond_to_saturation(
+            &mut legacy,
+            |c: &MechanismConfig| {
+                again += 1;
+                barren(c)
+            },
+            6,
+            0,
+            99,
+        );
+        assert_eq!(again, 0, "the mutation-scoped graveyard stays a configured behaviour");
+        assert_eq!(graveyard_context(u64::MAX), usize::MAX >> 1);
     }
 
     #[test]

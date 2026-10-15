@@ -24,4 +24,4 @@ pub use law_generator::{
 pub use antiunify::paired_subterm_anti_unify;
 pub use meta_gen::{CompositeGenerator, MetaPatternGenerator};
 pub use frontier::{Equation, Frontier, FrontierSpec, entailed_by_library};
-pub use motor::{Extractor, Motor, UnknownCorpus};
+pub use motor::{CorpusShape, Extractor, Motor, UnknownCorpus};

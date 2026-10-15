@@ -62,6 +62,7 @@ pub struct AdaptiveCorpusGenerator {
     pub vocab: Vec<u32>,
     /// Max Nat leaf value.
     pub max_value: u64,
+    pub shells: bool,
 }
 
 impl Default for AdaptiveCorpusGenerator {
@@ -75,6 +76,7 @@ impl Default for AdaptiveCorpusGenerator {
             base_depth: 3,
             vocab: vec![2, 3, 1], // ADD, MUL, SUCC
             max_value: 10,
+            shells: true,
         }
     }
 }
@@ -94,6 +96,7 @@ impl AdaptiveCorpusGenerator {
             base_depth,
             vocab,
             max_value,
+            shells: true,
         }
     }
 }
@@ -112,10 +115,11 @@ impl CorpusGenerator for AdaptiveCorpusGenerator {
             .wrapping_mul(0x9E37_79B9_7F4A_7C15)
             .wrapping_add(iteration as u64)
             .wrapping_mul(0x9E37_79B9_7F4A_7C15);
+        let substrate = if self.shells { library } else { &[] };
         let mut out = Vec::with_capacity(self.term_count);
         for _ in 0..self.term_count {
             out.push(build_shelled_term(
-                library,
+                substrate,
                 &mut state,
                 depth,
                 &self.vocab,

@@ -1,6 +1,8 @@
-use mathscape_config::{StreamConfig, StreamFrontier, StreamMechanism, StreamNovelty};
+use mathscape_config::{StreamConfig, StreamFrontier, StreamMechanism, StreamNovelty, StreamTrialScale};
 use mathscape_core::hash::TermRef;
-use mathscape_stream::writer::DELTA_LOG;
+use mathscape_proof::mechanism::MechanismConfig;
+use mathscape_stream::writer::{DELTA_LOG, MotorMechanism, motor_candidates, trial_window};
+use std::collections::BTreeSet;
 use mathscape_stream::{EpochDelta, MechanismDelta, MechanismEvent, MechanismOutcome, StreamError, Writer};
 use std::path::PathBuf;
 
@@ -46,7 +48,7 @@ impl Dir {
             },
             mechanism: StreamMechanism {
                 respond: false,
-                ..StreamMechanism::default()
+                ..StreamMechanism::v0_1_8()
             },
             ..self.cfg(until)
         }
@@ -315,4 +317,56 @@ fn two_runs_with_mutation_on_grow_the_same_hash_chain() {
     assert!(!a.mechanism_deltas().is_empty(), "no mechanism mutation happened");
     assert_eq!(first, second);
     assert_eq!(a.deltas(), b.deltas());
+}
+
+#[test]
+fn a_size_bump_trials_every_equation_it_opens_up_to_the_ceiling() {
+    let opened = StreamMechanism::default();
+    assert_eq!(opened.trial_scale, StreamTrialScale::Opened);
+    assert_eq!(trial_window(&opened, 8083, 26826, true, 8083), (8083, 18743));
+    assert_eq!(trial_window(&opened, 8083, 8183, true, 8083), (8083, opened.trial_budget));
+    assert_eq!(trial_window(&opened, 26826, 140_577, true, 26826), (26826, opened.trial_ceiling));
+    assert_eq!(trial_window(&opened, 8083, 26826, false, 8083), (0, opened.trial_budget));
+    let fixed = StreamMechanism::v0_1_8();
+    assert_eq!(trial_window(&fixed, 8083, 26826, true, 8083), (8083, fixed.trial_budget));
+}
+
+#[test]
+fn the_mechanism_drives_the_motor_corpus_extract_and_composition() {
+    let dir = Dir::new("motor");
+    let mut w = Writer::open(dir.evolving(40)).unwrap();
+    w.step().unwrap();
+    let library = w.library();
+    assert!(!library.is_empty());
+    let cfg = dir.evolving(40);
+    let policy = mathscape_core::policy::LinearPolicy::tensor_seeking_prior();
+    let none = BTreeSet::new();
+    let run = |m: &MechanismConfig| motor_candidates(&cfg, 1, &library, &policy, &none, Some(&MotorMechanism::of(m))).unwrap();
+    let base = MechanismConfig::default();
+    let driven = run(&base);
+    assert!(!driven.is_empty());
+    assert!(run(&MechanismConfig { extract_max_new_rules: 0, ..base.clone() }).is_empty());
+    assert!(run(&MechanismConfig { extract_min_shared_size: 99, ..base.clone() }).is_empty());
+    let projections: BTreeSet<usize> = [0, 5, 30, 120]
+        .iter()
+        .map(|cap| run(&MechanismConfig { composition_cap: *cap, ..base.clone() }).len())
+        .collect();
+    assert!(projections.len() > 1, "composition cap moved nothing: {projections:?}");
+    let corpora: BTreeSet<Vec<String>> = [
+        base.clone(),
+        MechanismConfig { corpus_base_depth: 7, ..base.clone() },
+        MechanismConfig { corpus_vocab: vec![2], ..base.clone() },
+        MechanismConfig { corpus_seed_from_theorems: true, ..base.clone() },
+    ]
+    .iter()
+    .map(|m| motor_candidates(&cfg, 1, &library, &policy, &library_hashes(&library), Some(&MotorMechanism::of(m))).unwrap())
+    .map(|rules| rules.iter().map(|r| format!("{} => {}", r.lhs, r.rhs)).collect())
+    .collect();
+    assert!(corpora.len() > 1, "every corpus shape produced the same candidates: {corpora:?}");
+    let undriven = motor_candidates(&cfg, 1, &library, &policy, &none, None).unwrap();
+    assert!(undriven.len() >= library.len());
+}
+
+fn library_hashes(library: &[mathscape_core::eval::RewriteRule]) -> BTreeSet<TermRef> {
+    library.iter().map(mathscape_core::certification::rule_content_hash).collect()
 }

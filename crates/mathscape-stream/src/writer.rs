@@ -1,10 +1,15 @@
 use crate::delta::{Discovery, EpochDelta, MechanismDelta, MechanismOutcome};
 use crate::error::StreamError;
 use crate::store::ObjectStore;
-use mathscape_compress::{Extractor, Frontier, FrontierSpec, Motor, entailed_by_library};
-use mathscape_config::{StreamClock, StreamConfig, StreamNovelty};
+use mathscape_compress::{CorpusShape, Extractor, Frontier, FrontierSpec, Motor, entailed_by_library};
+use mathscape_config::{StreamClock, StreamConfig, StreamGraveyard, StreamMechanism, StreamNovelty, StreamTrialScale};
 use mathscape_core::certification::{CertificationVerdict, Certifier};
-use mathscape_proof::mechanism::{MechanismConfig, MechanismPool, TrialResult, respond_to_saturation};
+use mathscape_core::policy::LinearPolicy;
+use mathscape_proof::mechanism::{
+    MechanismConfig, MechanismPool, TrialResult, graveyard_context, respond_to_saturation,
+    respond_to_saturation_in_context,
+};
+use mathscape_proof::semantic::{ValidationConfig, discover_semantic_projections_with_config};
 use mathscape_core::bootstrap::{BootstrapCycleSpec, ExperimentScenario, library_merkle_root};
 use mathscape_core::certification::{CertifyingConsumer, DefaultCertifier, rule_content_hash};
 use mathscape_core::eval::RewriteRule;
@@ -30,6 +35,7 @@ const META_CURSOR: &str = "stream.frontier-cursor";
 const META_DRY: &str = "stream.dry-epochs";
 const META_SATURATIONS: &str = "stream.saturations";
 const MECHANISM_SALT: u64 = 0x4D45_4348_414E_4953;
+const CORPUS_TERMS: usize = 16;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MechanismEvent {
@@ -118,6 +124,147 @@ fn meta_pool(snap: &mathscape_core::snapshot::ModelSnapshot, object: &TermRef) -
             }
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MotorMechanism {
+    pub corpus: CorpusShape,
+    pub min_support: usize,
+    pub min_shared_size: usize,
+    pub max_new_rules: usize,
+    pub projection_size: usize,
+    pub composition_cap: usize,
+    pub validator_samples: usize,
+    pub validator_max_value: u64,
+    pub validator_step_limit: usize,
+}
+
+impl MotorMechanism {
+    #[must_use]
+    pub fn of(m: &MechanismConfig) -> Self {
+        Self {
+            corpus: CorpusShape {
+                term_count: CORPUS_TERMS,
+                base_depth: m.corpus_base_depth,
+                vocab: m.corpus_vocab.clone(),
+                max_value: m.corpus_max_value,
+                shells: m.corpus_seed_from_theorems,
+            },
+            min_support: m.extract_min_matches,
+            min_shared_size: m.extract_min_shared_size,
+            max_new_rules: m.extract_max_new_rules,
+            projection_size: m.candidate_max_size,
+            composition_cap: m.composition_cap,
+            validator_samples: m.validator_samples,
+            validator_max_value: m.validator_max_value,
+            validator_step_limit: m.validator_step_limit,
+        }
+    }
+}
+
+fn extractor_for(cfg: &StreamConfig, seed: u64) -> Extractor {
+    match cfg.extractor {
+        Extractor::Validated {
+            step_limit,
+            min_support,
+            subterm_depth,
+            k_samples,
+            ..
+        } => Extractor::Validated {
+            step_limit,
+            min_support,
+            subterm_depth,
+            k_samples,
+            seed,
+        },
+        other => other,
+    }
+}
+
+pub fn motor_candidates(
+    cfg: &StreamConfig,
+    epoch: u64,
+    library: &[RewriteRule],
+    policy: &LinearPolicy,
+    known: &BTreeSet<TermRef>,
+    drive: Option<&MotorMechanism>,
+) -> Result<Vec<RewriteRule>, StreamError> {
+    let seed = epoch_seed(cfg.seed, epoch);
+    let adaptive = cfg.adaptive_every > 0 && epoch.is_multiple_of(cfg.adaptive_every);
+    let extractor = extractor_for(cfg, seed);
+    let motor = match drive {
+        Some(mm) => Motor::seeded(seed)
+            .with_extractor(extractor.with_min_support(mm.min_support))
+            .with_corpus(mm.corpus.clone()),
+        None => Motor::seeded(seed).with_extractor(extractor),
+    };
+    let meta_loop = MetaLoop::new(
+        motor,
+        HeuristicProposer::with_extractor("derived-laws"),
+        MetaLoopConfig {
+            max_phases: cfg.phases_per_epoch,
+            sail_out_window: 0,
+            policy_delta_threshold: 1e-9,
+        },
+    );
+    let scenario = ExperimentScenario {
+        name: format!("stream-epoch-{epoch}"),
+        phases: vec![BootstrapCycleSpec {
+            corpus_generator: if adaptive { "adaptive" } else { "default" }.into(),
+            law_extractor: "derived-laws".into(),
+            model_updater: "default".into(),
+            deduper: "canonical".into(),
+            n_iterations: cfg.iterations,
+            seed_library: library.to_vec(),
+            seed_policy: policy.clone(),
+            early_stop_after_stable: Some(1),
+        }],
+    };
+    let outcome = meta_loop.run(scenario)?;
+    let Some(mm) = drive else {
+        return Ok(outcome.final_library().to_vec());
+    };
+    let mut seen = BTreeSet::new();
+    let fresh: Vec<RewriteRule> = outcome
+        .final_library()
+        .iter()
+        .filter(|r| {
+            let h = rule_content_hash(r);
+            !known.contains(&h) && r.lhs.size() >= mm.min_shared_size && seen.insert(h)
+        })
+        .take(mm.max_new_rules)
+        .cloned()
+        .collect();
+    let validation = ValidationConfig {
+        samples: mm.validator_samples,
+        max_value: mm.validator_max_value,
+        step_limit: mm.validator_step_limit,
+        rng_seed: seed,
+    };
+    let mut out = fresh.clone();
+    for rule in &fresh {
+        out.extend(
+            discover_semantic_projections_with_config(rule, library, &validation, mm.projection_size, mm.composition_cap)
+                .into_iter()
+                .map(|(c, _)| c.rule)
+                .filter(|r| seen.insert(rule_content_hash(r))),
+        );
+    }
+    Ok(out)
+}
+
+#[must_use]
+pub fn trial_window(policy: &StreamMechanism, base_len: usize, built_len: usize, extends: bool, cursor: usize) -> (usize, usize) {
+    if !extends {
+        return (0, policy.trial_budget);
+    }
+    let budget = match policy.trial_scale {
+        StreamTrialScale::Fixed => policy.trial_budget,
+        StreamTrialScale::Opened => built_len
+            .saturating_sub(base_len)
+            .clamp(policy.trial_budget, policy.trial_ceiling.max(policy.trial_budget)),
+    };
+    (cursor, budget)
 }
 
 #[must_use]
@@ -272,61 +419,28 @@ impl Writer {
         self.cursor
     }
 
-    fn extractor_for(&self, seed: u64) -> Extractor {
-        match self.cfg.extractor {
-            Extractor::Validated {
-                step_limit,
-                min_support,
-                subterm_depth,
-                k_samples,
-                ..
-            } => Extractor::Validated {
-                step_limit,
-                min_support,
-                subterm_depth,
-                k_samples,
-                seed,
-            },
-            other => other,
-        }
+    #[must_use]
+    pub fn motor_mechanism(&self) -> Option<MotorMechanism> {
+        self.cfg.mechanism.drive_motor.then(|| MotorMechanism::of(&self.pool.current))
     }
 
     pub fn discover(&self, epoch: u64) -> Result<Discovery, StreamError> {
         let seed = epoch_seed(self.cfg.seed, epoch);
-        let adaptive = self.cfg.adaptive_every > 0 && epoch.is_multiple_of(self.cfg.adaptive_every);
-        let motor = Motor::seeded(seed).with_extractor(self.extractor_for(seed));
-        let meta_loop = MetaLoop::new(
-            motor,
-            HeuristicProposer::with_extractor("derived-laws"),
-            MetaLoopConfig {
-                max_phases: self.cfg.phases_per_epoch,
-                sail_out_window: 0,
-                policy_delta_threshold: 1e-9,
-            },
-        );
-        let scenario = ExperimentScenario {
-            name: format!("stream-epoch-{epoch}"),
-            phases: vec![BootstrapCycleSpec {
-                corpus_generator: if adaptive { "adaptive" } else { "default" }.into(),
-                law_extractor: "derived-laws".into(),
-                model_updater: "default".into(),
-                deduper: "canonical".into(),
-                n_iterations: self.cfg.iterations,
-                seed_library: self.library(),
-                seed_policy: self.trainer.snapshot(),
-                early_stop_after_stable: Some(1),
-            }],
-        };
-        let outcome = meta_loop.run(scenario)?;
+        let raw = motor_candidates(
+            &self.cfg,
+            epoch,
+            &self.library(),
+            &self.trainer.snapshot(),
+            &self.known,
+            self.motor_mechanism().as_ref(),
+        )?;
         let mut seen = BTreeSet::new();
-        let mut candidates: Vec<RewriteRule> = outcome
-            .final_library()
-            .iter()
+        let mut candidates: Vec<RewriteRule> = raw
+            .into_iter()
             .filter(|r| {
                 let h = rule_content_hash(r);
                 !self.known.contains(&h) && seen.insert(h)
             })
-            .cloned()
             .collect();
         let frontier = self.frontier.as_ref().map(|f| {
             let slice = f.slice(self.cursor, self.cfg.frontier.per_epoch);
@@ -491,28 +605,43 @@ impl Writer {
             return Ok(None);
         }
         let base = frontier.spec().clone();
+        let base_len = frontier.len();
         let cursor = self.cursor;
         let library = self.library();
         let tombstones = self.tombstones.clone();
+        let known = self.known.clone();
+        let learned = self.trainer.snapshot();
+        let current_motor = MotorMechanism::of(&self.pool.current);
         let cfg = self.cfg.clone();
         let trial = |m: &MechanismConfig| {
-            let spec = frontier_spec(&cfg, m);
-            let from = if spec.extends(&base) { cursor } else { 0 };
-            let built = Frontier::build(spec);
             let certifier = DefaultCertifier::default();
             let mut lib = library.clone();
             let mut found = 0;
             let mut novel = 0;
-            for eq in built.slice(from, policy.trial_budget) {
-                let rule = eq.rule();
-                if tombstones.contains(&rule_content_hash(&rule)) || entailed_by_library(&rule, &lib) {
-                    continue;
+            let mut weigh = |rule: RewriteRule, lib: &mut Vec<RewriteRule>| {
+                let h = rule_content_hash(&rule);
+                if known.contains(&h) || tombstones.contains(&h) || entailed_by_library(&rule, lib) {
+                    return false;
                 }
                 found += 1;
-                if matches!(certifier.try_certify(&rule, &lib), CertificationVerdict::Certified { .. }) {
+                if matches!(certifier.try_certify(&rule, lib), CertificationVerdict::Certified { .. }) {
                     lib.push(rule);
                     novel += 1;
                 }
+                policy.trial_stop_after > 0 && novel >= policy.trial_stop_after
+            };
+            let spec = frontier_spec(&cfg, m);
+            let mut done = false;
+            if spec != base {
+                let extends = spec.extends(&base);
+                let built = Frontier::build(spec);
+                let (from, budget) = trial_window(&policy, base_len, built.len(), extends, cursor);
+                done = built.slice(from, budget).iter().any(|eq| weigh(eq.rule(), &mut lib));
+            }
+            let motor = MotorMechanism::of(m);
+            if !done && policy.drive_motor && motor != current_motor {
+                let candidates = motor_candidates(&cfg, epoch, &library, &learned, &known, Some(&motor)).unwrap_or_default();
+                let _ = candidates.into_iter().any(|rule| weigh(rule, &mut lib));
             }
             TrialResult {
                 delta_novelty: novel,
@@ -520,13 +649,19 @@ impl Writer {
             }
         };
         let seed = epoch_seed(self.cfg.seed ^ MECHANISM_SALT, epoch);
-        let response = respond_to_saturation(
-            &mut self.pool,
-            trial,
-            policy.mutations_per_round.max(1),
-            policy.escalation_budget,
-            seed,
-        );
+        let context = (policy.graveyard == StreamGraveyard::Context).then(|| self.context_stamp());
+        let rounds = policy.mutations_per_round.max(1);
+        let response = match context {
+            Some(stamp) => respond_to_saturation_in_context(
+                &mut self.pool,
+                graveyard_context(stamp),
+                trial,
+                rounds,
+                policy.escalation_budget,
+                seed,
+            ),
+            None => respond_to_saturation(&mut self.pool, trial, rounds, policy.escalation_budget, seed),
+        };
         let outcome = match response {
             Some((mutation, config)) => {
                 let next = frontier_spec(&self.cfg, &config);
@@ -555,9 +690,21 @@ impl Writer {
             outcome,
             config: self.pool.current.clone(),
             frontier_cursor: self.cursor,
+            context,
         };
         self.log_line(delta.to_line())?;
         Ok(Some(event))
+    }
+
+    #[must_use]
+    pub fn context_stamp(&self) -> u64 {
+        let mut hasher = blake3::Hasher::new();
+        hasher.update(self.pool.current.to_sexp().to_string().as_bytes());
+        hasher.update(self.library_root().as_bytes());
+        let digest = hasher.finalize();
+        let mut word = [0u8; 8];
+        word.copy_from_slice(&digest.as_bytes()[..8]);
+        u64::from_le_bytes(word)
     }
 
     pub fn snapshot(&mut self) -> Result<TermRef, StreamError> {
