@@ -24,29 +24,29 @@ members = [
 ]
 
 [workspace.package]
-version = "0.1.7"
+version = "0.1.8"
 edition = "2024"
 license = "MIT"
 repository = "https://github.com/pleme-io/mathscape"
 
 [workspace.dependencies]
 # Internal crates
-mathscape-core = { path = "crates/mathscape-core", version = "0.1.7" }
-mathscape-store = { path = "crates/mathscape-store", version = "0.1.7" }
-mathscape-compress = { path = "crates/mathscape-compress", version = "0.1.7" }
-mathscape-evolve = { path = "crates/mathscape-evolve", version = "0.1.7" }
-mathscape-reward = { path = "crates/mathscape-reward", version = "0.1.7" }
-mathscape-proof = { path = "crates/mathscape-proof", version = "0.1.7" }
-mathscape-policy = { path = "crates/mathscape-policy", version = "0.1.7" }
-mathscape-migration = { path = "crates/mathscape-migration", version = "0.1.7" }
-mathscape-discovery = { path = "crates/mathscape-discovery", version = "0.1.7" }
-mathscape-config = { path = "crates/mathscape-config", version = "0.1.7" }
-mathscape-entity = { path = "crates/mathscape-entity", version = "0.1.7" }
-mathscape-api = { path = "crates/mathscape-api", version = "0.1.7" }
-mathscape-inference-api = { path = "crates/mathscape-inference-api", version = "0.1.7" }
-mathscape-acquisition = { path = "crates/mathscape-acquisition", version = "0.1.7" }
-mathscape-axiom-bridge = { path = "crates/mathscape-axiom-bridge", version = "0.1.7" }
-mathscape-stream = { path = "crates/mathscape-stream", version = "0.1.7" }
+mathscape-core = { path = "crates/mathscape-core", version = "0.1.8" }
+mathscape-store = { path = "crates/mathscape-store", version = "0.1.8" }
+mathscape-compress = { path = "crates/mathscape-compress", version = "0.1.8" }
+mathscape-evolve = { path = "crates/mathscape-evolve", version = "0.1.8" }
+mathscape-reward = { path = "crates/mathscape-reward", version = "0.1.8" }
+mathscape-proof = { path = "crates/mathscape-proof", version = "0.1.8" }
+mathscape-policy = { path = "crates/mathscape-policy", version = "0.1.8" }
+mathscape-migration = { path = "crates/mathscape-migration", version = "0.1.8" }
+mathscape-discovery = { path = "crates/mathscape-discovery", version = "0.1.8" }
+mathscape-config = { path = "crates/mathscape-config", version = "0.1.8" }
+mathscape-entity = { path = "crates/mathscape-entity", version = "0.1.8" }
+mathscape-api = { path = "crates/mathscape-api", version = "0.1.8" }
+mathscape-inference-api = { path = "crates/mathscape-inference-api", version = "0.1.8" }
+mathscape-acquisition = { path = "crates/mathscape-acquisition", version = "0.1.8" }
+mathscape-axiom-bridge = { path = "crates/mathscape-axiom-bridge", version = "0.1.8" }
+mathscape-stream = { path = "crates/mathscape-stream", version = "0.1.8" }
 
 # tatara-lisp — the canonical homoiconic Sexp substrate (crates.io)
 tatara-lisp = "0.3.3"
