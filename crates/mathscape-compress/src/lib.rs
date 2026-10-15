@@ -8,6 +8,7 @@ pub mod adapter;
 pub mod antiunify;
 pub mod egraph;
 pub mod extract;
+pub mod frontier;
 pub mod law_generator;
 pub mod meta_gen;
 pub mod motor;
@@ -22,4 +23,5 @@ pub use law_generator::{
 };
 pub use antiunify::paired_subterm_anti_unify;
 pub use meta_gen::{CompositeGenerator, MetaPatternGenerator};
+pub use frontier::{Equation, Frontier, FrontierSpec, entailed_by_library};
 pub use motor::{Extractor, Motor, UnknownCorpus};

@@ -16,6 +16,49 @@ This doc articulates the missing architectural layer: **the
 machine must self-mutate its OWN DISCOVERY MECHANISMS with the
 same autonomy that already applies to the apparatus.**
 
+## Status (2026-10-15): ML4.2 runs in the stream
+
+`mathscape-stream` answers a plateau by mutating its mechanism,
+with no human in the loop. What landed, and what did not:
+
+- **The candidate axis is live.** `candidate_max_size`,
+  `candidate_vocab`, `candidate_constants` and `validator_samples`
+  drive `mathscape_compress::Frontier`, an observational-equivalence
+  enumerator (QuickSpec-shaped): terms are built in size order from
+  class representatives over the evaluator's own operators, each is
+  fingerprinted on seeded per-domain samples, and a term that lands
+  in an existing class is an equation candidate `term → smallest
+  representative`. Growing only the size extends the frontier
+  without reordering it, so the cursor survives a size bump.
+- **Novelty is entailment, not syntax.** A candidate the current
+  library already proves (e-graph over the library's own rules,
+  both directions where the variables allow) is skipped before
+  certification (`entailed_by_library`, `stream.novelty:
+  entailment`). Without it the frontier floods the library with
+  instances of laws it already has.
+- **Saturation response = `respond_to_saturation`.** When the
+  frontier is exhausted and `plateau_epochs` epochs certified
+  nothing, the stream trials mutants (frontier slice of the mutant,
+  entailment, `DefaultCertifier`) and adopts the winner; a failed
+  response doubles the next plateau window. `sample_mutation` now
+  proposes every evaluator operator of arity 1–2 as an
+  `AddCandidateVocabOp`, so vocabulary growth into new domains (Int,
+  Float, Tensor, FloatTensor) is reachable; before, the only vocab
+  addition was op 4, which the evaluator does not know.
+- **Persisted and replayed.** The `MechanismPool` (current config,
+  graveyard, history, discovered operators) is a `(mechanism-pool …)`
+  form in snapshot metadata beside the frontier cursor and plateau
+  counters; every response is a `(mechanism-delta …)` line in
+  `deltas.lisp`. Same seed → same mutations → same hash chain.
+- **Still dead in the stream:** the corpus, extract and
+  composition knobs. The stream's corpus comes from the motor's
+  `AdaptiveCorpusGenerator`, which does not read `MechanismConfig`;
+  mutating those knobs changes nothing there, so their trials score
+  0 and land in the graveyard. ML4.3 diagnostics are not built:
+  proposals are still the uniform sampler.
+
+Measurements: `stream-training-infra.md`.
+
 ## The invariant we've been violating
 
 Every phase of the session has applied the correctness criterion

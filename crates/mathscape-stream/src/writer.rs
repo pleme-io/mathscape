@@ -1,8 +1,10 @@
-use crate::delta::{Discovery, EpochDelta};
+use crate::delta::{Discovery, EpochDelta, MechanismDelta, MechanismOutcome};
 use crate::error::StreamError;
 use crate::store::ObjectStore;
-use mathscape_compress::{Extractor, Motor};
-use mathscape_config::{StreamClock, StreamConfig};
+use mathscape_compress::{Extractor, Frontier, FrontierSpec, Motor, entailed_by_library};
+use mathscape_config::{StreamClock, StreamConfig, StreamNovelty};
+use mathscape_core::certification::{CertificationVerdict, Certifier};
+use mathscape_proof::mechanism::{MechanismConfig, MechanismPool, TrialResult, respond_to_saturation};
 use mathscape_core::bootstrap::{BootstrapCycleSpec, ExperimentScenario, library_merkle_root};
 use mathscape_core::certification::{CertifyingConsumer, DefaultCertifier, rule_content_hash};
 use mathscape_core::eval::RewriteRule;
@@ -23,6 +25,17 @@ const META_EPOCH: &str = "stream.epoch";
 const META_PARENT: &str = "stream.parent";
 const META_TOMBSTONES: &str = "stream.tombstones";
 const META_CERTIFIED: &str = "stream.certified-deltas";
+const META_MECHANISM: &str = "stream.mechanism";
+const META_CURSOR: &str = "stream.frontier-cursor";
+const META_DRY: &str = "stream.dry-epochs";
+const META_SATURATIONS: &str = "stream.saturations";
+const MECHANISM_SALT: u64 = 0x4D45_4348_414E_4953;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MechanismEvent {
+    Mutated,
+    Saturated,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct EpochReport {
@@ -32,6 +45,8 @@ pub struct EpochReport {
     pub rejected: usize,
     pub library: usize,
     pub snapshot: Option<TermRef>,
+    pub frontier: Option<(usize, usize)>,
+    pub mechanism: Option<MechanismEvent>,
 }
 
 pub struct Writer {
@@ -52,6 +67,11 @@ pub struct Writer {
     head: Option<TermRef>,
     resumed_from: Option<TermRef>,
     epochs_run: u64,
+    pool: MechanismPool,
+    frontier: Option<Frontier>,
+    cursor: usize,
+    dry: u64,
+    saturations: u32,
 }
 
 #[must_use]
@@ -75,6 +95,43 @@ fn meta_u64(snap: &mathscape_core::snapshot::ModelSnapshot, object: &TermRef, ke
         .map_err(|_| StreamError::BadMetadata { object: object.to_hex(), key })
 }
 
+fn meta_or<T: std::str::FromStr>(
+    snap: &mathscape_core::snapshot::ModelSnapshot,
+    object: &TermRef,
+    key: &'static str,
+    absent: T,
+) -> Result<T, StreamError> {
+    snap.metadata.get(key).map_or(Ok(absent), |v| {
+        v.parse().map_err(|_| StreamError::BadMetadata { object: object.to_hex(), key })
+    })
+}
+
+fn meta_pool(snap: &mathscape_core::snapshot::ModelSnapshot, object: &TermRef) -> Result<MechanismPool, StreamError> {
+    let bad = || StreamError::BadMetadata { object: object.to_hex(), key: META_MECHANISM };
+    match snap.metadata.get(META_MECHANISM) {
+        None => Ok(MechanismPool::new()),
+        Some(text) => {
+            let forms = tatara_lisp::reader::read(text).map_err(|_| bad())?;
+            match forms.as_slice() {
+                [one] => MechanismPool::from_sexp(one).ok_or_else(bad),
+                _ => Err(bad()),
+            }
+        }
+    }
+}
+
+#[must_use]
+pub fn frontier_spec(cfg: &StreamConfig, mechanism: &MechanismConfig) -> FrontierSpec {
+    FrontierSpec {
+        max_size: mechanism.candidate_max_size,
+        vocab: mechanism.candidate_vocab.clone(),
+        constants: mechanism.candidate_constants.clone(),
+        variables: cfg.frontier.variables,
+        samples: mechanism.validator_samples,
+        seed: cfg.seed,
+    }
+}
+
 impl Writer {
     pub fn open(cfg: StreamConfig) -> Result<Self, StreamError> {
         let store = ObjectStore::open(&cfg.data_dir)?;
@@ -94,6 +151,10 @@ impl Writer {
                     .collect::<Result<BTreeSet<_>, _>>()?;
                 let trainer = Rc::new(trainer_from_snapshot(&snap.trainer));
                 Self {
+                    pool: meta_pool(&snap, &head)?,
+                    cursor: meta_or(&snap, &head, META_CURSOR, 0)?,
+                    dry: meta_or(&snap, &head, META_DRY, 0)?,
+                    saturations: meta_or(&snap, &head, META_SATURATIONS, 0)?,
                     epoch: meta_u64(&snap, &head, META_EPOCH)?,
                     certified_deltas: meta_u64(&snap, &head, META_CERTIFIED)?,
                     known: snap.library.iter().map(rule_content_hash).collect(),
@@ -111,7 +172,16 @@ impl Writer {
         hub.subscribe(buffer);
         w.gate = CertifyingConsumer::new(DefaultCertifier::default(), hub);
         w.logged = store.read_lines(DELTA_LOG)?.iter().map(|l| TermRef::from_bytes(l.as_bytes())).collect();
+        w.rebuild_frontier();
         Ok(w)
+    }
+
+    fn rebuild_frontier(&mut self) {
+        self.frontier = self
+            .cfg
+            .frontier
+            .enabled
+            .then(|| Frontier::build(frontier_spec(&self.cfg, &self.pool.current)));
     }
 
     fn empty(cfg: StreamConfig, store: ObjectStore, buffer: Rc<BufferedConsumer>) -> Self {
@@ -134,6 +204,11 @@ impl Writer {
             head: None,
             resumed_from: None,
             epochs_run: 0,
+            pool: MechanismPool::new(),
+            frontier: None,
+            cursor: 0,
+            dry: 0,
+            saturations: 0,
         }
     }
 
@@ -180,6 +255,21 @@ impl Writer {
     #[must_use]
     pub fn config(&self) -> &StreamConfig {
         &self.cfg
+    }
+
+    #[must_use]
+    pub fn mechanism(&self) -> &MechanismPool {
+        &self.pool
+    }
+
+    #[must_use]
+    pub fn frontier(&self) -> Option<&Frontier> {
+        self.frontier.as_ref()
+    }
+
+    #[must_use]
+    pub fn frontier_cursor(&self) -> usize {
+        self.cursor
     }
 
     fn extractor_for(&self, seed: u64) -> Extractor {
@@ -229,7 +319,7 @@ impl Writer {
         };
         let outcome = meta_loop.run(scenario)?;
         let mut seen = BTreeSet::new();
-        let candidates = outcome
+        let mut candidates: Vec<RewriteRule> = outcome
             .final_library()
             .iter()
             .filter(|r| {
@@ -238,7 +328,20 @@ impl Writer {
             })
             .cloned()
             .collect();
-        Ok(Discovery { epoch, seed, candidates })
+        let frontier = self.frontier.as_ref().map(|f| {
+            let slice = f.slice(self.cursor, self.cfg.frontier.per_epoch);
+            candidates.extend(slice.iter().map(mathscape_compress::Equation::rule).filter(|r| {
+                let h = rule_content_hash(r);
+                !self.known.contains(&h) && !self.tombstones.contains(&h) && seen.insert(h)
+            }));
+            (self.cursor, self.cursor + slice.len())
+        });
+        Ok(Discovery {
+            epoch,
+            seed,
+            candidates,
+            frontier,
+        })
     }
 
     fn stamp(&self) -> u64 {
@@ -253,9 +356,17 @@ impl Writer {
     pub fn apply(&mut self, discovery: &Discovery) -> Option<EpochDelta> {
         let parent_root = self.library_root();
         drop(self.buffer.drain());
+        if let Some((from, to)) = discovery.frontier
+            && from == self.cursor
+        {
+            self.cursor = to;
+        }
         for rule in &discovery.candidates {
             let h = rule_content_hash(rule);
             if self.known.contains(&h) || self.tombstones.contains(&h) {
+                continue;
+            }
+            if self.cfg.novelty == StreamNovelty::Entailment && entailed_by_library(rule, &self.library.borrow()) {
                 continue;
             }
             let size = self.library.borrow().len();
@@ -320,7 +431,10 @@ impl Writer {
     }
 
     fn log(&mut self, delta: &EpochDelta) -> Result<(), StreamError> {
-        let line = delta.to_line();
+        self.log_line(delta.to_line())
+    }
+
+    fn log_line(&mut self, line: String) -> Result<(), StreamError> {
         let h = TermRef::from_bytes(line.as_bytes());
         if self.logged.contains(&h) {
             return Ok(());
@@ -347,7 +461,11 @@ impl Writer {
         if certified > 0 {
             self.certified_deltas += 1;
             self.since_snapshot += 1;
+            self.dry = 0;
+        } else {
+            self.dry += 1;
         }
+        let mechanism = self.respond_if_saturated(discovery.epoch)?;
         let cadence = certified > 0 && self.since_snapshot >= self.cfg.snapshot_every.max(1);
         let checkpoint = self.cfg.checkpoint_epochs > 0 && self.epochs_since_snapshot >= self.cfg.checkpoint_epochs;
         let snapshot = if cadence || checkpoint { Some(self.snapshot()?) } else { None };
@@ -358,7 +476,88 @@ impl Writer {
             rejected,
             library: self.library.borrow().len(),
             snapshot,
+            frontier: self.frontier.as_ref().map(|f| (self.cursor, f.len())),
+            mechanism,
         })
+    }
+
+    fn respond_if_saturated(&mut self, epoch: u64) -> Result<Option<MechanismEvent>, StreamError> {
+        let Some(frontier) = self.frontier.as_ref() else {
+            return Ok(None);
+        };
+        let policy = self.cfg.mechanism.clone();
+        let threshold = policy.plateau_epochs.max(1).saturating_mul(1u64 << self.saturations.min(16));
+        if !policy.respond || self.cursor < frontier.len() || self.dry < threshold {
+            return Ok(None);
+        }
+        let base = frontier.spec().clone();
+        let cursor = self.cursor;
+        let library = self.library();
+        let tombstones = self.tombstones.clone();
+        let cfg = self.cfg.clone();
+        let trial = |m: &MechanismConfig| {
+            let spec = frontier_spec(&cfg, m);
+            let from = if spec.extends(&base) { cursor } else { 0 };
+            let built = Frontier::build(spec);
+            let certifier = DefaultCertifier::default();
+            let mut lib = library.clone();
+            let mut found = 0;
+            let mut novel = 0;
+            for eq in built.slice(from, policy.trial_budget) {
+                let rule = eq.rule();
+                if tombstones.contains(&rule_content_hash(&rule)) || entailed_by_library(&rule, &lib) {
+                    continue;
+                }
+                found += 1;
+                if matches!(certifier.try_certify(&rule, &lib), CertificationVerdict::Certified { .. }) {
+                    lib.push(rule);
+                    novel += 1;
+                }
+            }
+            TrialResult {
+                delta_novelty: novel,
+                total_theorems_found: found,
+            }
+        };
+        let seed = epoch_seed(self.cfg.seed ^ MECHANISM_SALT, epoch);
+        let response = respond_to_saturation(
+            &mut self.pool,
+            trial,
+            policy.mutations_per_round.max(1),
+            policy.escalation_budget,
+            seed,
+        );
+        let outcome = match response {
+            Some((mutation, config)) => {
+                let next = frontier_spec(&self.cfg, &config);
+                if !next.extends(&base) {
+                    self.cursor = 0;
+                }
+                self.pool.current = config;
+                self.rebuild_frontier();
+                self.saturations = 0;
+                MechanismOutcome::Mutated(mutation)
+            }
+            None => {
+                self.saturations = self.saturations.saturating_add(1);
+                MechanismOutcome::Saturated
+            }
+        };
+        self.dry = 0;
+        self.dirty = true;
+        let event = match outcome {
+            MechanismOutcome::Mutated(_) => MechanismEvent::Mutated,
+            MechanismOutcome::Saturated => MechanismEvent::Saturated,
+        };
+        let delta = MechanismDelta {
+            epoch,
+            seed,
+            outcome,
+            config: self.pool.current.clone(),
+            frontier_cursor: self.cursor,
+        };
+        self.log_line(delta.to_line())?;
+        Ok(Some(event))
     }
 
     pub fn snapshot(&mut self) -> Result<TermRef, StreamError> {
@@ -382,6 +581,10 @@ impl Writer {
         snap.metadata.insert(META_PARENT.into(), self.head.map(|h| h.to_hex()).unwrap_or_default());
         snap.metadata.insert(META_TOMBSTONES.into(), tombstones.join(","));
         snap.metadata.insert(META_CERTIFIED.into(), self.certified_deltas.to_string());
+        snap.metadata.insert(META_MECHANISM.into(), self.pool.to_sexp().to_string());
+        snap.metadata.insert(META_CURSOR.into(), self.cursor.to_string());
+        snap.metadata.insert(META_DRY.into(), self.dry.to_string());
+        snap.metadata.insert(META_SATURATIONS.into(), self.saturations.to_string());
         snap.content_hash = snap.compute_content_hash();
         snap
     }

@@ -580,7 +580,8 @@ impl Domain {
     ///   30-39 → Float
     ///   40+   → FloatTensor
     /// Anything ≥ 100 is a pattern variable, not an op — return None.
-    fn from_op_id(id: u32) -> Option<Self> {
+    #[must_use]
+    pub fn from_op_id(id: u32) -> Option<Self> {
         match id {
             0..=9 => Some(Self::Nat),
             10..=19 => Some(Self::Int),
@@ -590,10 +591,29 @@ impl Domain {
             _ => None,
         }
     }
+
+    pub const ALL: [Self; 5] = [Self::Nat, Self::Int, Self::Tensor, Self::Float, Self::FloatTensor];
+
+    #[must_use]
+    pub fn sample(self, seed: u64, sample_index: usize, var_pos: usize) -> Term {
+        pick_concrete_value_for_domain(seed, sample_index, var_pos, self)
+    }
+
+    #[must_use]
+    pub fn constant(self, c: u64) -> Term {
+        match self {
+            Self::Nat => Term::Number(Value::Nat(c)),
+            Self::Int => Term::Number(Value::Int(i64::try_from(c).unwrap_or(i64::MAX))),
+            Self::Float => float_term(c as f64),
+            Self::Tensor => tensor_term(vec![2], vec![i64::try_from(c).unwrap_or(i64::MAX); 2]),
+            Self::FloatTensor => float_tensor_term(vec![2], &[c as f64; 2]),
+        }
+    }
 }
 
 /// Phase J.2: pick a concrete value from the pool matching the
 /// given domain. Same determinism property as `pick_concrete_value`.
+#[allow(clippy::approx_constant)]
 fn pick_concrete_value_for_domain(
     seed: u64,
     sample_index: usize,

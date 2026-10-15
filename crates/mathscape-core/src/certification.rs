@@ -268,6 +268,7 @@ impl CertifierDomain {
                 Term::Number(Value::Int(pool[(x as usize) % pool.len()]))
             }
             Self::Float => {
+                #[allow(clippy::approx_constant)]
                 let pool = [0.0f64, 1.0, 2.5, -1.5, 0.5, 3.14];
                 let f = pool[(x as usize) % pool.len()];
                 Term::Number(

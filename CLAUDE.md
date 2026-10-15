@@ -115,7 +115,10 @@ machine produces the trajectory.
     triggers mechanism mutation, not halt. The machine diagnoses
     its own bottleneck, proposes mutations, keeps winners,
     resumes. Zero human intervention for parameter-bump
-    saturations. Design only — implementation starts at ML4.1.
+    saturations. ML4.2 runs in `mathscape-stream` since
+    2026-10-15 (candidate + validator axes live through the
+    `Frontier`; corpus/extract axes not yet read there); see the
+    doc's Status section.
 24. `docs/arch/self-tuning-meta-loop.md` — **PHASE U + V LANDED**
     (2026-04-18). The outer orchestrator: observe → propose →
     execute → observe, ... Each component is a pure-Lisp value.
@@ -1106,7 +1109,7 @@ capability.
 | `mathscape-migration` | SeaORM database migrations for PostgreSQL schema lifecycle |
 | `mathscape-db` | Database management CLI: migrate, rollback, status, verify, reset |
 | `mathscape-proof` | Proof construction, verification status tracking, proof composition, Lean 4 export |
-| `mathscape-compress` | Anti-unification, e-graph integration (`egg`), library extraction, rewriting; the `Motor` (the one `ScenarioExecutor`, seeded, with its `Extractor`) |
+| `mathscape-compress` | Anti-unification, e-graph integration (`egg`), library extraction, rewriting; the `Motor` (the one `ScenarioExecutor`, seeded, with its `Extractor`); the `Frontier` (observational-equivalence equation enumerator) and `entailed_by_library` (novelty = not provable from the library) |
 | `mathscape-evolve` | Genetic operators, population management, tournament selection |
 | `mathscape-reward` | Description length, compression ratio, novelty scoring, meta-compression, combined fitness |
 | `mathscape-policy` | Optional RL policy network for guided mutation (Phase 7+) |
@@ -1114,7 +1117,7 @@ capability.
 | `mathscape-mcp` | MCP server (stdio transport) — observe-only tools for agent interaction, `Arc<Engine>` read boundary |
 | `mathscape-service` | Long-running HTTP service — engine loop + health/metrics + read-only query API for K8s deployment |
 | `mathscape-discovery` | Discovery mining: epoch analysis, known-math pattern matching, representation data for React UI |
-| `mathscape-stream` | The one writer: grows the canonical model epoch by epoch (motor → certification → trainer), persists content-addressed snapshots behind `HEAD`, resumes from `HEAD`; see `docs/arch/stream-training-infra.md` |
+| `mathscape-stream` | The one writer: grows the canonical model epoch by epoch (motor + frontier → entailment gate → certification → trainer), mutates its `MechanismConfig` on a plateau (ML4.2), persists content-addressed snapshots behind `HEAD`, resumes from `HEAD`; see `docs/arch/stream-training-infra.md` |
 
 ## Service Mode
 

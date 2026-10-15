@@ -79,6 +79,60 @@ pub struct StreamConfig {
     pub extractor: mathscape_compress::Extractor,
     #[serde(default)]
     pub clock: StreamClock,
+    #[serde(default)]
+    pub novelty: StreamNovelty,
+    #[serde(default)]
+    pub frontier: StreamFrontier,
+    #[serde(default)]
+    pub mechanism: StreamMechanism,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum StreamNovelty {
+    #[default]
+    Entailment,
+    Off,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct StreamFrontier {
+    pub enabled: bool,
+    pub per_epoch: usize,
+    pub variables: u32,
+}
+
+impl Default for StreamFrontier {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            per_epoch: 64,
+            variables: 3,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct StreamMechanism {
+    pub respond: bool,
+    pub plateau_epochs: u64,
+    pub mutations_per_round: usize,
+    pub escalation_budget: usize,
+    pub trial_budget: usize,
+}
+
+impl Default for StreamMechanism {
+    fn default() -> Self {
+        Self {
+            respond: true,
+            plateau_epochs: 4,
+            mutations_per_round: 6,
+            escalation_budget: 2,
+            trial_budget: 256,
+        }
+    }
 }
 
 impl StreamConfig {
@@ -96,6 +150,9 @@ impl StreamConfig {
             learning_rate: default_learning_rate(),
             extractor: default_extractor(),
             clock: StreamClock::default(),
+            novelty: StreamNovelty::default(),
+            frontier: StreamFrontier::default(),
+            mechanism: StreamMechanism::default(),
         }
     }
 }

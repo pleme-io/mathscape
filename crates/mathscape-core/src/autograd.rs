@@ -1214,7 +1214,7 @@ mod tests {
 
     #[test]
     fn float_derivative_of_constant_is_zero() {
-        assert_eq!(symbolic_derivative_float(&f(3.14), 100), f(0.0));
+        assert_eq!(symbolic_derivative_float(&f(2.75), 100), f(0.0));
     }
 
     #[test]

@@ -146,7 +146,7 @@ fn eval_add(args: &[Term]) -> Option<Term> {
     if let (Term::Number(Value::Nat(a)), Term::Number(Value::Nat(b))) =
         (&args[0], &args[1])
     {
-        Some(Term::Number(Value::Nat(a + b)))
+        a.checked_add(*b).map(|v| Term::Number(Value::Nat(v)))
     } else {
         None
     }
@@ -165,7 +165,7 @@ fn eval_mul(args: &[Term]) -> Option<Term> {
     if let (Term::Number(Value::Nat(a)), Term::Number(Value::Nat(b))) =
         (&args[0], &args[1])
     {
-        Some(Term::Number(Value::Nat(a * b)))
+        a.checked_mul(*b).map(|v| Term::Number(Value::Nat(v)))
     } else {
         None
     }
@@ -1027,6 +1027,17 @@ mod tests {
     }
 
     #[test]
+    fn nat_add_and_mul_refuse_to_reduce_past_the_domain() {
+        let big = Term::Number(Value::Nat(u64::MAX / 2 + 1));
+        assert_eq!(eval_add(&[big.clone(), big.clone()]), None);
+        assert_eq!(eval_mul(&[big.clone(), Term::Number(Value::Nat(2))]), None);
+        assert_eq!(
+            eval_mul(&[Term::Number(Value::Nat(6)), Term::Number(Value::Nat(7))]),
+            Some(Term::Number(Value::Nat(42)))
+        );
+    }
+
+    #[test]
     fn succ_is_unary_and_non_ac() {
         let succ = lookup(1).unwrap();
         assert_eq!(succ.arity, 1);
@@ -1646,8 +1657,8 @@ mod tests {
 
     #[test]
     fn float_neg_flips_sign() {
-        let r = eval_float_neg(&[f(3.14)]).unwrap();
-        assert_eq!(r, f(-3.14));
+        let r = eval_float_neg(&[f(2.75)]).unwrap();
+        assert_eq!(r, f(-2.75));
     }
 
     #[test]

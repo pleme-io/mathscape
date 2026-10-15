@@ -2,6 +2,7 @@ use mathscape_core::eval::RewriteRule;
 use mathscape_core::hash::TermRef;
 use mathscape_core::mathscape_map::MapEvent;
 use mathscape_proof::map_event_lisp::{map_event_from_sexp, map_event_to_sexp};
+use mathscape_proof::mechanism::{MechanismConfig, MechanismMutation};
 use std::collections::BTreeMap;
 use tatara_lisp::ast::{Atom, Sexp};
 
@@ -10,6 +11,96 @@ pub struct Discovery {
     pub epoch: u64,
     pub seed: u64,
     pub candidates: Vec<RewriteRule>,
+    pub frontier: Option<(usize, usize)>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MechanismOutcome {
+    Mutated(MechanismMutation),
+    Saturated,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MechanismDelta {
+    pub epoch: u64,
+    pub seed: u64,
+    pub outcome: MechanismOutcome,
+    pub config: MechanismConfig,
+    pub frontier_cursor: usize,
+}
+
+impl MechanismDelta {
+    #[must_use]
+    pub fn to_sexp(&self) -> Sexp {
+        let mut items = vec![
+            Sexp::symbol("mechanism-delta"),
+            Sexp::keyword("epoch-id"),
+            Sexp::string(self.epoch.to_string()),
+            Sexp::keyword("seed"),
+            Sexp::string(self.seed.to_string()),
+            Sexp::keyword("outcome"),
+        ];
+        match &self.outcome {
+            MechanismOutcome::Mutated(m) => {
+                items.push(Sexp::symbol("mutated"));
+                items.push(Sexp::keyword("mutation"));
+                items.push(m.to_sexp());
+            }
+            MechanismOutcome::Saturated => items.push(Sexp::symbol("saturated")),
+        }
+        items.extend([
+            Sexp::keyword("config"),
+            self.config.to_sexp(),
+            Sexp::keyword("frontier-cursor"),
+            Sexp::string(self.frontier_cursor.to_string()),
+        ]);
+        Sexp::List(items)
+    }
+
+    #[must_use]
+    pub fn to_line(&self) -> String {
+        self.to_sexp().to_string()
+    }
+
+    #[must_use]
+    pub fn from_sexp(sexp: &Sexp) -> Option<Self> {
+        let items = sexp.as_list()?;
+        if items.first()?.as_symbol()? != "mechanism-delta" {
+            return None;
+        }
+        let mut fields: BTreeMap<&str, &Sexp> = BTreeMap::new();
+        for pair in items[1..].chunks(2) {
+            let [Sexp::Atom(Atom::Keyword(k)), v] = pair else {
+                return None;
+            };
+            fields.insert(k.as_str(), v);
+        }
+        let number = |k: &str| match fields.get(k) {
+            Some(Sexp::Atom(Atom::Str(s))) => s.parse::<u64>().ok(),
+            _ => None,
+        };
+        let outcome = match fields.get("outcome")?.as_symbol()? {
+            "mutated" => MechanismOutcome::Mutated(MechanismMutation::from_sexp(fields.get("mutation")?)?),
+            "saturated" => MechanismOutcome::Saturated,
+            _ => return None,
+        };
+        Some(Self {
+            epoch: number("epoch-id")?,
+            seed: number("seed")?,
+            outcome,
+            config: MechanismConfig::from_sexp(fields.get("config")?)?,
+            frontier_cursor: usize::try_from(number("frontier-cursor")?).ok()?,
+        })
+    }
+
+    #[must_use]
+    pub fn from_line(line: &str) -> Option<Self> {
+        let forms = tatara_lisp::reader::read(line).ok()?;
+        match forms.as_slice() {
+            [one] => Self::from_sexp(one),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]

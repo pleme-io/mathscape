@@ -70,6 +70,35 @@ define_language! {
     }
 }
 
+/// R7/R13/R18/R19: every `Value` lands on one egg `Num(u64)`.
+/// Nat is its value; Int reinterprets its i64 bits (small positive
+/// Ints coincide with Nat, harmless because the kernel never mixes
+/// domains in one e-graph run); Float is its bit pattern; Tensor
+/// and FloatTensor hash shape + data, so equal tensors are
+/// e-graph-equal and nothing finer is claimed.
+#[must_use]
+pub fn number_code(value: &Value) -> u64 {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+    match value {
+        Value::Nat(n) => *n,
+        Value::Int(n) => *n as u64,
+        Value::Float(bits) => *bits,
+        Value::Tensor { shape, data } => {
+            let mut h = DefaultHasher::new();
+            shape.hash(&mut h);
+            data.hash(&mut h);
+            h.finish()
+        }
+        Value::FloatTensor { shape, data } => {
+            let mut h = DefaultHasher::new();
+            shape.hash(&mut h);
+            data.hash(&mut h);
+            h.finish()
+        }
+    }
+}
+
 /// Push a `Term` into an egg `RecExpr`, returning the root `Id`.
 ///
 /// Walks bottom-up; children are added before parents so egg's
@@ -77,49 +106,7 @@ define_language! {
 /// structural sharing mathscape's Term already has.
 pub fn term_to_recexpr(term: &Term, expr: &mut RecExpr<MathscapeLang>) -> Id {
     match term {
-        Term::Number(Value::Nat(n)) => expr.add(MathscapeLang::Num(*n)),
-        // R7 (2026-04-18): Int encoded into egg by reinterpreting
-        // the i64 bits as u64. Egg's Num node is u64; the kernel
-        // round-trips Int via this reinterpretation. Equivalence
-        // saturation doesn't care about semantic distinction — it
-        // operates on syntactic structure — so Int vs Nat are
-        // distinct at the egg level if the u64-bit encodings
-        // differ. For small positive Ints (common case) the bit
-        // pattern matches Nat, which is fine because the kernel
-        // never inserts cross-domain candidates into the same
-        // e-graph run.
-        Term::Number(Value::Int(n)) => {
-            expr.add(MathscapeLang::Num(*n as u64))
-        }
-        // R13: Tensors are opaque to the e-graph (shape + data
-        // don't have e-node representation yet). Encode the
-        // tensor's structural identity as a single hash-like u64
-        // so the e-graph can at least distinguish equal vs
-        // unequal tensors. Richer tensor reasoning — contraction
-        // equivalence, reshape-invariance — is future work.
-        Term::Number(Value::Tensor { shape, data }) => {
-            use std::collections::hash_map::DefaultHasher;
-            use std::hash::{Hash, Hasher};
-            let mut h = DefaultHasher::new();
-            shape.hash(&mut h);
-            data.hash(&mut h);
-            expr.add(MathscapeLang::Num(h.finish()))
-        }
-        // R18: Float — same bit-pattern encoding as Value::Float.
-        // Distinct floats hash distinctly; equivalent floats
-        // (same bits) are e-graph-equal. IEEE 754 NaN would be
-        // problematic but kernel never sees NaN.
-        Term::Number(Value::Float(bits)) => expr.add(MathscapeLang::Num(*bits)),
-        // R19: FloatTensor — hashed into a u64 for e-graph
-        // identity, similar to Tensor.
-        Term::Number(Value::FloatTensor { shape, data }) => {
-            use std::collections::hash_map::DefaultHasher;
-            use std::hash::{Hash, Hasher};
-            let mut h = DefaultHasher::new();
-            shape.hash(&mut h);
-            data.hash(&mut h);
-            expr.add(MathscapeLang::Num(h.finish()))
-        }
+        Term::Number(value) => expr.add(MathscapeLang::Num(number_code(value))),
         Term::Var(v) => {
             let id_node = expr.add(MathscapeLang::Num(*v as u64));
             expr.add(MathscapeLang::Var([id_node]))
@@ -308,6 +295,94 @@ pub fn is_semantically_novel(
         }
     }
     true
+}
+
+fn pattern_source(term: &Term) -> Option<String> {
+    Some(match term {
+        Term::Var(v) if *v >= 100 => format!("?v{v}"),
+        Term::Var(v) => format!("(var {v})"),
+        Term::Number(value) => number_code(value).to_string(),
+        Term::Apply(f, args) => {
+            let mut parts = vec![pattern_source(f)?];
+            for a in args {
+                parts.push(pattern_source(a)?);
+            }
+            format!("(apply {})", parts.join(" "))
+        }
+        _ => return None,
+    })
+}
+
+fn vars_of(term: &Term, out: &mut std::collections::BTreeSet<u32>) {
+    match term {
+        Term::Var(v) if *v >= 100 => {
+            out.insert(*v);
+        }
+        Term::Apply(f, args) => {
+            vars_of(f, out);
+            for a in args {
+                vars_of(a, out);
+            }
+        }
+        Term::Symbol(_, args) => {
+            for a in args {
+                vars_of(a, out);
+            }
+        }
+        Term::Fn(_, body) => vars_of(body, out),
+        _ => {}
+    }
+}
+
+fn directed(name: String, from: &Term, to: &Term) -> Option<MathscapeRewrite> {
+    let mut lv = std::collections::BTreeSet::new();
+    let mut rv = std::collections::BTreeSet::new();
+    vars_of(from, &mut lv);
+    vars_of(to, &mut rv);
+    if from == to || !rv.is_subset(&lv) || matches!(from, Term::Var(v) if *v >= 100) {
+        return None;
+    }
+    let searcher: egg::Pattern<MathscapeLang> = pattern_source(from)?.parse().ok()?;
+    let applier: egg::Pattern<MathscapeLang> = pattern_source(to)?.parse().ok()?;
+    Rewrite::new(name, searcher, applier).ok()
+}
+
+#[must_use]
+pub fn library_rewrites(library: &[RewriteRule]) -> Vec<MathscapeRewrite> {
+    library
+        .iter()
+        .enumerate()
+        .flat_map(|(i, r)| {
+            [
+                directed(format!("lib-{i}-fwd"), &r.lhs, &r.rhs),
+                directed(format!("lib-{i}-rev"), &r.rhs, &r.lhs),
+            ]
+        })
+        .flatten()
+        .collect()
+}
+
+#[must_use]
+pub fn entailed_by(rule: &RewriteRule, rewrites: &[MathscapeRewrite], iter_limit: usize, node_limit: usize) -> bool {
+    if rule.lhs == rule.rhs {
+        return true;
+    }
+    if rewrites.is_empty() {
+        return false;
+    }
+    let lhs = term_to_expr(&rule.lhs);
+    let rhs = term_to_expr(&rule.rhs);
+    let runner = Runner::default()
+        .with_iter_limit(iter_limit)
+        .with_node_limit(node_limit)
+        .with_time_limit(std::time::Duration::from_secs(u64::from(u32::MAX)))
+        .with_expr(&lhs)
+        .with_expr(&rhs)
+        .run(rewrites);
+    matches!(
+        (runner.egraph.lookup_expr(&lhs), runner.egraph.lookup_expr(&rhs)),
+        (Some(a), Some(b)) if a == b
+    )
 }
 
 #[cfg(test)]

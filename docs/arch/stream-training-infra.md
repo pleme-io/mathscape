@@ -1,7 +1,9 @@
 # Stream-training infrastructure — destination and path
 
 **Status:** step 1 built 2026-10-15 (`crates/mathscape-stream`, see
-[Built](#built-2026-10-15)); steps 2–4 remain. The "today" table below was
+[Built](#built-2026-10-15)); the first-epoch saturation it exposed is
+broken by ML4.2 (see [Saturation](#saturation-broken-then-the-second-plateau-2026-10-15));
+steps 2–4 remain. The "today" table below was
 measured 2026-10-14, before step 1.
 
 ## Where the machine actually is
@@ -114,6 +116,75 @@ state**: with this motor configuration discovery saturates in one epoch.
 The bottleneck is the motor (corpus and extractor), not compute; buying
 spot capacity now would buy more sterile epochs. ML4's mechanism mutation
 is the lever.
+
+## Saturation broken, then the second plateau (2026-10-15)
+
+**Why 0.1.7 stopped after epoch 0.** Measured, not guessed:
+
+- The `default` corpus is a fixed tensor zoo with no seed; its two
+  identity laws are fully extracted in epoch 0.
+- The `adaptive` corpus emits random whole Peano terms. The
+  derived-laws extractor anti-unifies whole input→normal-form traces,
+  so two random terms generalize to `?x → n` (a constant), which the
+  certifier rejects: every later candidate was one of those, tombstoned.
+- Each epoch builds a fresh `MetaLoop`, so its proposer never sees a
+  history and its staleness branch never fires. Nothing mutates.
+
+**What changed** (ML4.2, `ml4-mechanism-evolution.md` Status):
+each epoch also feeds a slice of the `Frontier` (observational-
+equivalence equations over `MechanismConfig`'s candidate vocabulary),
+an entailment gate skips anything the library already proves, and an
+exhausted frontier plus `plateau_epochs` dry epochs triggers
+`respond_to_saturation`. `frontier.enabled: false`,
+`mechanism.respond: false`, `novelty: off` is exactly 0.1.7
+(`tests/stream.rs` pins it).
+
+**Measurement** (this Mac, release, defaults, two seeds run
+concurrently, 30-minute cap; both hit the cap, so rates are from the
+epoch log via duckdb):
+
+| | seed 7 | seed 2026 |
+|---|---|---|
+| epochs in 30 min | 1,146 | 2,808 |
+| certified, total / after epoch 0 | 188 / 178 | 161 / 151 |
+| epochs that certified (after 0) | 87 | 84 |
+| last certifying epoch (minute) | 953 (18.1) | 1,178 (8.8) |
+| **certified/hour after epoch 0, until the last certification** | **590** | **1,029** |
+| certified/hour after epoch 0, whole 30 min | 356 | 302 |
+| mechanism mutations / saturated responses | 22 / 4 | 23 / 10 |
+
+Library growth by 100-epoch bucket, seed 7: 45, 67, 104, 114, 124,
+136, 158, 161, 170, 188, then flat. Seed 2026: 47, 64, 71, 87, 96, 111,
+123, 128, 135, 137, 147, 161, then flat for 1,600 epochs. What it
+found, in order: the Nat commutative semiring and its succ laws, then
+one domain per mutation as each evaluator operator joined the
+vocabulary (float add/sub/mul/div/neg, Int, tensor and float-tensor
+elementwise ops): identities, inverses (`x − x = 0`,
+`x + neg x = 0`), double negation, commutativity, associativity,
+negation through multiplication. Mutations were almost all
+`add-candidate-vocab-op`, plus constants 2 and 3.
+
+**The second plateau, named.** Both seeds end mechanism-saturated
+with `candidate_max_size` still 5 and 23 of the evaluator's 30
+operators of arity 1–2 in the vocabulary. The other seven (tensor
+scale, matmul, transpose, reshape, float-from-int, float-tensor scale
+and matmul) take or return a second sort or a 2-D shape, which the
+single-sort frontier cannot build, so their trials score 0. The size lever is shut: an early
+`(bump-candidate-max-size 1)` trial found nothing new inside its
+256-equation budget, so `respond_to_saturation` graveyarded it, and the
+graveyard is keyed on the mutation alone, never on the base config it
+failed against. It is never retried, even after the vocabulary has
+grown from 3 operators to 23. Rates are therefore 0/hour at steady state again, one
+level up: the frontier at size ≤ 5 over this vocabulary is exhausted
+(seed 2026: cursor 8,063/8,063 from epoch ~1,180). Responses then
+back off (window doubles per failure: 4, 8, 16 … epochs), so the
+sterile tail costs little.
+
+The next lever is in the mechanism layer, not compute: key the
+graveyard by (mutation, base config) or let a size bump's trial
+budget scale with the frontier it opens, then ML4.3's diagnostics
+(candidate-size exhaustion is exactly this case). Scaling hardware
+before that buys the same sterile tail.
 
 ## Build order
 

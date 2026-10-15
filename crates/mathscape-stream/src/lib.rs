@@ -3,7 +3,7 @@ pub mod error;
 pub mod store;
 pub mod writer;
 
-pub use delta::{Discovery, EpochDelta};
+pub use delta::{Discovery, EpochDelta, MechanismDelta, MechanismOutcome};
 pub use error::StreamError;
 pub use store::ObjectStore;
-pub use writer::{EpochReport, Writer, epoch_seed};
+pub use writer::{EpochReport, MechanismEvent, Writer, epoch_seed};

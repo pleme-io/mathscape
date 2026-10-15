@@ -673,6 +673,82 @@ impl MechanismPool {
     fn is_discovered(&self, m: &MechanismMutation) -> bool {
         self.discovered_operators.contains(m)
     }
+
+    pub fn to_sexp(&self) -> tatara_lisp::ast::Sexp {
+        use tatara_lisp::ast::Sexp;
+        let count = |n: usize| Sexp::int(i64::try_from(n).unwrap_or(i64::MAX));
+        Sexp::List(vec![
+            Sexp::symbol("mechanism-pool"),
+            Sexp::keyword("current"),
+            self.current.to_sexp(),
+            Sexp::keyword("graveyard"),
+            Sexp::List(
+                self.graveyard
+                    .iter()
+                    .map(|(m, n)| Sexp::List(vec![m.to_sexp(), count(*n)]))
+                    .collect(),
+            ),
+            Sexp::keyword("history"),
+            Sexp::List(
+                self.history
+                    .iter()
+                    .map(|(n, m)| Sexp::List(vec![count(*n), m.to_sexp()]))
+                    .collect(),
+            ),
+            Sexp::keyword("discovered"),
+            Sexp::List(self.discovered_operators.iter().map(MechanismMutation::to_sexp).collect()),
+        ])
+    }
+
+    pub fn from_sexp(sexp: &tatara_lisp::ast::Sexp) -> Option<Self> {
+        use tatara_lisp::ast::Sexp;
+        let items = sexp.as_list()?;
+        if items.first()?.as_symbol()? != "mechanism-pool" {
+            return None;
+        }
+        let list = |v: &Sexp| -> Option<Vec<Sexp>> {
+            match v {
+                Sexp::Nil => Some(Vec::new()),
+                other => other.as_list().map(<[Sexp]>::to_vec),
+            }
+        };
+        let count = |v: &Sexp| v.as_int().and_then(|n| usize::try_from(n).ok());
+        let mut pool = Self::new();
+        for pair in items[1..].chunks(2) {
+            let [key, value] = pair else {
+                return None;
+            };
+            match key.as_keyword()? {
+                "current" => pool.current = MechanismConfig::from_sexp(value)?,
+                "graveyard" => {
+                    pool.graveyard = list(value)?
+                        .iter()
+                        .map(|e| match e.as_list()? {
+                            [m, n] => Some((MechanismMutation::from_sexp(m)?, count(n)?)),
+                            _ => None,
+                        })
+                        .collect::<Option<_>>()?;
+                }
+                "history" => {
+                    pool.history = list(value)?
+                        .iter()
+                        .map(|e| match e.as_list()? {
+                            [n, m] => Some((count(n)?, MechanismMutation::from_sexp(m)?)),
+                            _ => None,
+                        })
+                        .collect::<Option<_>>()?;
+                }
+                "discovered" => {
+                    pool.discovered_operators = list(value)?
+                        .iter()
+                        .map(MechanismMutation::from_sexp)
+                        .collect::<Option<_>>()?;
+                }
+                _ => return None,
+            }
+        }
+        Some(pool)
+    }
 }
 
 // ── Mutation proposal ────────────────────────────────────────────
@@ -789,6 +865,11 @@ fn sample_mutation(rng: &mut u64, current: &MechanismConfig) -> MechanismMutatio
             AddCorpusVocabOp(6),    // div (no evaluator semantics, but corpus-inert)
             AddCorpusVocabOp(1),    // succ alias
         ];
+        for b in mathscape_core::builtin::BUILTINS {
+            if (1..=2).contains(&b.arity) && !current.candidate_vocab.contains(&b.id) {
+                v.push(AddCandidateVocabOp(b.id));
+            }
+        }
         // Vocab removal for current operators:
         for &op in &current.candidate_vocab {
             v.push(RemoveCandidateVocabOp(op));
@@ -1136,6 +1217,46 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_pool_with_history_round_trips_through_its_sexp() {
+        let mut pool = MechanismPool::new();
+        pool.current = MechanismMutation::AddCandidateVocabOp(12).apply(&pool.current);
+        pool.graveyard.push((MechanismMutation::BumpCandidateMaxSize(-1), 0));
+        pool.history.push((0, MechanismMutation::AddCandidateVocabOp(12)));
+        let compound = MechanismMutation::Compound(vec![
+            MechanismMutation::BumpCandidateMaxSize(1),
+            MechanismMutation::AddCandidateConstant(2),
+        ]);
+        pool.discovered_operators.push(compound);
+        let text = pool.to_sexp().to_string();
+        let forms = tatara_lisp::reader::read(&text).unwrap();
+        let back = MechanismPool::from_sexp(&forms[0]).unwrap();
+        assert_eq!(back.current, pool.current);
+        assert_eq!(back.graveyard, pool.graveyard);
+        assert_eq!(back.history, pool.history);
+        assert_eq!(back.discovered_operators, pool.discovered_operators);
+        let empty = MechanismPool::new().to_sexp().to_string();
+        let forms = tatara_lisp::reader::read(&empty).unwrap();
+        assert_eq!(MechanismPool::from_sexp(&forms[0]).unwrap().current, MechanismConfig::default());
+    }
+
+    #[test]
+    fn every_evaluator_operator_is_a_reachable_vocabulary_mutation() {
+        let current = MechanismConfig::default();
+        let mut reachable = HashSet::new();
+        for seed in 1..4000u64 {
+            let mut rng = seed;
+            if let MechanismMutation::AddCandidateVocabOp(op) = sample_mutation(&mut rng, &current) {
+                reachable.insert(op);
+            }
+        }
+        for b in mathscape_core::builtin::BUILTINS {
+            if (1..=2).contains(&b.arity) && !current.candidate_vocab.contains(&b.id) {
+                assert!(reachable.contains(&b.id), "{} ({}) is never proposed", b.name, b.id);
+            }
+        }
+    }
 
     #[test]
     fn sexp_round_trip_preserves_default_config() {

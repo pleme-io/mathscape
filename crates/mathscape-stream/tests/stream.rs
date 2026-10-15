@@ -1,7 +1,7 @@
-use mathscape_config::StreamConfig;
+use mathscape_config::{StreamConfig, StreamFrontier, StreamMechanism, StreamNovelty};
 use mathscape_core::hash::TermRef;
 use mathscape_stream::writer::DELTA_LOG;
-use mathscape_stream::{EpochDelta, StreamError, Writer};
+use mathscape_stream::{EpochDelta, MechanismDelta, MechanismEvent, MechanismOutcome, StreamError, Writer};
 use std::path::PathBuf;
 
 struct Dir(PathBuf);
@@ -20,6 +20,40 @@ impl Dir {
             checkpoint_epochs: 3,
             ..StreamConfig::seeded(7, self.0.to_string_lossy())
         }
+    }
+
+    fn evolving(&self, until: u64) -> StreamConfig {
+        StreamConfig {
+            frontier: StreamFrontier {
+                per_epoch: 128,
+                ..StreamFrontier::default()
+            },
+            mechanism: StreamMechanism {
+                plateau_epochs: 2,
+                trial_budget: 96,
+                ..StreamMechanism::default()
+            },
+            ..self.cfg(until)
+        }
+    }
+
+    fn fixed(&self, until: u64) -> StreamConfig {
+        StreamConfig {
+            novelty: StreamNovelty::Off,
+            frontier: StreamFrontier {
+                enabled: false,
+                ..StreamFrontier::default()
+            },
+            mechanism: StreamMechanism {
+                respond: false,
+                ..StreamMechanism::default()
+            },
+            ..self.cfg(until)
+        }
+    }
+
+    fn mechanism_deltas(&self) -> Vec<MechanismDelta> {
+        self.deltas().lines().filter_map(MechanismDelta::from_line).collect()
     }
 
     fn deltas(&self) -> String {
@@ -190,4 +224,95 @@ fn a_stream_refuses_to_resume_under_a_different_seed() {
     let mut cfg = dir.cfg(40);
     cfg.seed = 8;
     assert!(matches!(Writer::open(cfg), Err(StreamError::SeedMismatch { head: 7, config: 8 })));
+}
+
+type EpochTrace = Vec<(u64, usize, Option<MechanismEvent>)>;
+
+fn certified_by_epoch(cfg: StreamConfig) -> (EpochTrace, Option<TermRef>) {
+    let mut w = Writer::open(cfg).unwrap();
+    let mut out = Vec::new();
+    let head = w.run(|r| out.push((r.epoch, r.certified, r.mechanism))).unwrap();
+    (out, head)
+}
+
+#[test]
+fn the_fixed_mechanism_stays_a_configured_value_and_still_saturates_after_epoch_zero() {
+    let dir = Dir::new("fixed");
+    let (epochs, _) = certified_by_epoch(dir.fixed(12));
+    assert!(epochs[0].1 > 0);
+    assert_eq!(epochs[1..].iter().map(|e| e.1).sum::<usize>(), 0);
+    assert!(epochs.iter().all(|e| e.2.is_none()));
+    assert!(dir.mechanism_deltas().is_empty());
+}
+
+#[test]
+fn a_stream_keeps_certifying_after_epoch_zero_and_mutates_its_mechanism_on_a_plateau() {
+    let dir = Dir::new("evolving");
+    let (epochs, _) = certified_by_epoch(dir.evolving(14));
+    let after_zero: usize = epochs[1..].iter().map(|e| e.1).sum();
+    assert!(after_zero > 0, "no certification after epoch 0: {epochs:?}");
+    let mutated = epochs
+        .iter()
+        .position(|e| e.2 == Some(MechanismEvent::Mutated))
+        .expect("a plateau answered by a mechanism mutation");
+    let after_mutation: usize = epochs[mutated + 1..].iter().map(|e| e.1).sum();
+    assert!(after_mutation > 0, "the mutation broke no saturation: {epochs:?}");
+    let logged = dir.mechanism_deltas();
+    assert!(matches!(logged.first().map(|d| &d.outcome), Some(MechanismOutcome::Mutated(_))));
+    assert_eq!(MechanismDelta::from_line(&logged[0].to_line()).as_ref(), Some(&logged[0]));
+}
+
+#[test]
+fn mechanism_state_survives_a_kill_and_the_resumed_stream_converges() {
+    let (whole, killed) = (Dir::new("mech-whole"), Dir::new("mech-killed"));
+    let (epochs, uninterrupted) = certified_by_epoch(whole.evolving(14));
+    let mutated = epochs
+        .iter()
+        .position(|e| e.2 == Some(MechanismEvent::Mutated))
+        .expect("a mutation inside the run");
+    assert!(mutated + 3 < 14, "mutation too late to kill after it: {mutated}");
+
+    let mut w = Writer::open(killed.evolving(14)).unwrap();
+    let mut saved = None;
+    while saved.is_none() {
+        let r = w.step().unwrap();
+        if let (Some(h), true) = (r.snapshot, r.epoch > mutated as u64) {
+            saved = Some((h, w.mechanism().current.clone(), w.frontier_cursor()));
+        }
+    }
+    let (head_at_kill, at_kill, cursor_at_kill) = saved.unwrap();
+    assert_ne!(at_kill, mathscape_proof::mechanism::MechanismConfig::default());
+    w.step().unwrap();
+    drop(w);
+
+    let mut resumed = Writer::open(killed.evolving(14)).unwrap();
+    assert_eq!(resumed.resumed_from(), Some(head_at_kill));
+    assert_eq!(resumed.mechanism().current, at_kill);
+    assert_eq!(resumed.frontier_cursor(), cursor_at_kill);
+    let head = resumed.run(|_| {}).unwrap();
+    assert_eq!(head, uninterrupted);
+    assert_eq!(killed.deltas(), whole.deltas());
+}
+
+#[test]
+fn two_runs_with_mutation_on_grow_the_same_hash_chain() {
+    let (a, b) = (Dir::new("mut-a"), Dir::new("mut-b"));
+    let grow = |d: &Dir| {
+        let mut w = Writer::open(d.evolving(14)).unwrap();
+        let mut hashes = Vec::new();
+        let head = w
+            .run(|r| {
+                if let Some(h) = r.snapshot {
+                    hashes.push(h);
+                }
+            })
+            .unwrap();
+        hashes.push(head.unwrap());
+        hashes
+    };
+    let first = grow(&a);
+    let second = grow(&b);
+    assert!(!a.mechanism_deltas().is_empty(), "no mechanism mutation happened");
+    assert_eq!(first, second);
+    assert_eq!(a.deltas(), b.deltas());
 }
