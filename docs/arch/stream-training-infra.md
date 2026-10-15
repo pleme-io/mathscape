@@ -188,6 +188,8 @@ before that buys the same sterile tail.
 
 ## Build order
 
+Donated compute and the commit ledger the stream grows into: [model-ledger.md](model-ledger.md).
+
 1. ~~`mathscape-stream` binary: explicit seed in config, the writer loop
    (EventHub → trainer → certification → snapshot every K), `HEAD` file,
    resume from `HEAD` on start. Fix the chart to the env the binary reads.~~

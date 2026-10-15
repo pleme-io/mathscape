@@ -187,6 +187,13 @@ machine produces the trajectory.
     `definvariant`, `defstructure`, `defprocedure`), shared with
     `mathscape-discovery`. `TheoryDocument` renders Markdown/LaTeX;
     `mathscape-cli translate` pipes a Lisp event stream into it.
+28. `docs/arch/model-ledger.md` — **MODEL LEDGER** (DESIGN, 2026-10-15).
+    The one model as a commit history: content-addressed trees,
+    commits with parents + certification receipts, a tameshi-signed
+    ref log with consistency proofs. Any donor may propose rules;
+    the writer never trusts a donor verdict and re-certifies on
+    samples drawn after submission. Revert = demotion, merge =
+    union + re-certify, branch = per-ref seed. Build order L1–L8.
 
 The sections below (Core Thesis, Compression as Tractability, etc.)
 are preserved because they explain the *philosophy* the machine
