@@ -350,7 +350,7 @@ checksum = "c08606f8c3cbf4ce6ec8e28fb0014a2c086708fe954eaa885384a6165172e7e8"
 [[package]]
 name = "axiom-forge"
 version = "0.1.0"
-source = "git+https://github.com/pleme-io/axiom-forge#3cae95c9eb23cbe515a073a1d5551cc8b2372856"
+source = "git+https://github.com/pleme-io/axiom-forge#b251e302a05014b26cb0470f1684693f7236086a"
 dependencies = [
  "blake3",
  "iac-forge",
@@ -1651,15 +1651,15 @@ dependencies = [
 
 [[package]]
 name = "iac-forge"
-version = "0.1.0"
-source = "git+https://github.com/pleme-io/iac-forge#c592b447755b62f9c3c7c5181cdd7b4508cae3df"
+version = "0.1.6"
+source = "git+https://github.com/pleme-io/iac-forge#c5298abd04dfcbaa6beb71602cee173ef5cd112f"
 dependencies = [
  "blake3",
  "meimei",
  "openapi-forge",
+ "pleme-io-takumi",
  "serde",
  "serde_json",
- "takumi",
  "thiserror 2.0.18",
  "toml",
 ]
@@ -2283,7 +2283,8 @@ dependencies = [
 [[package]]
 name = "meimei"
 version = "0.1.1"
-source = "git+https://github.com/pleme-io/meimei#a3865aca03012893719fa4d093e20de4065fa58b"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "60ce0a798a521097fe07f18e25515f208922ebd2058be2e30f9836a29568a5d8"
 
 [[package]]
 name = "memchr"
@@ -2478,15 +2479,16 @@ checksum = "384b8ab6d37215f3c5301a95a4accb5d64aa607f1fcb26a11b5303878451b4fe"
 
 [[package]]
 name = "openapi-forge"
-version = "0.1.1"
-source = "git+https://github.com/pleme-io/openapi-forge#2b954c275a4866ff2308ca17638a530523ce5674"
+version = "0.1.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ba0d692bfa4a3bcd8d438a32137df663300b3c75b8bd282b2164b0bddf30de7f"
 dependencies = [
  "indexmap 2.13.0",
+ "pleme-io-takumi",
  "sekkei",
  "serde",
  "serde_json",
  "serde_yaml_ng",
- "takumi",
  "thiserror 2.0.18",
 ]
 
@@ -2722,6 +2724,18 @@ name = "plain"
 version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b4596b6d070b27117e987119b4dac604f3c58cfb0b191112e24771b2faeac1a6"
+
+[[package]]
+name = "pleme-io-takumi"
+version = "0.1.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bd681c89c33b4b524a751fcd5661c71904801a41db35e50eca6cfc3c38f10307"
+dependencies = [
+ "indexmap 2.13.0",
+ "sekkei",
+ "serde",
+ "serde_json",
+]
 
 [[package]]
 name = "polling"
@@ -3452,8 +3466,9 @@ checksum = "1c107b6f4780854c8b126e228ea8869f4d7b71260f962fefb57b996b8959ba6b"
 
 [[package]]
 name = "sekkei"
-version = "0.1.1"
-source = "git+https://github.com/pleme-io/sekkei#f9d27e9971bd0be7729a492797efa65711cb6171"
+version = "0.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1d104896c98e535036fe8574720f7ad422fa5e9edc3a480924b94f7861332533"
 dependencies = [
  "serde",
  "serde_json",
@@ -4050,17 +4065,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.117",
-]
-
-[[package]]
-name = "takumi"
-version = "0.1.0"
-source = "git+https://github.com/pleme-io/takumi#234adbbe0e3f75239cba39b7fe033d9d6806b162"
-dependencies = [
- "indexmap 2.13.0",
- "sekkei",
- "serde",
- "serde_json",
 ]
 
 [[package]]
