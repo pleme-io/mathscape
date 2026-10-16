@@ -326,6 +326,23 @@ breathe's CRDs run on that cluster; `/metrics` is the observation
 surface until they do. Moving ryn to the default mechanism waits on
 its memory being bounded.
 
+**Live on ryn (2026-10-16 00:14Z).** Applied by switching ryn to the
+pushed system (its closure diff against the running one was exactly
+`mathscape-stream` and its manifest); engenho's node-manifests driver
+created `mathscape/mathscape-stream-0`, Ready, `/readyz` 200 on
+127.0.0.1:9473, HEAD advancing (`d8d6f2…` → `005957…` → `ee1025…`).
+Deleting the pod brought it back with `resumed from HEAD
+head=005957… epoch=137` and `mathscape_stream_resumed 1`; the 5 epochs
+since that snapshot replayed. **It runs at ~8% of a core, not one**:
+engenho's LaunchDaemon (`io.pleme.engenho.daemon`) is `ProcessType:
+Adaptive`, and its native children inherit that throttled QoS, so the
+writer does ~6 epochs a minute where an unthrottled process does ~50.
+Certified invariants per hour on ryn: ~120 after epoch 0 in the first
+21 minutes, ~73 in the 9 minutes after the resume, against 590 for the
+same seed unthrottled. The slice is smaller than the chart asks for;
+raising it is the daemon's `ProcessType`, a node-wide choice for every
+engenho workload.
+
 **The 0.1.8 20-minute run, scraped once a minute from `/metrics`:** library 76 at
 minute 1, 136 at 5, 161 at 9, 186 at 14, 188 at 18, then flat;
 22 mechanism mutations. That is the second plateau above, reproduced
