@@ -370,3 +370,20 @@ fn the_mechanism_drives_the_motor_corpus_extract_and_composition() {
 fn library_hashes(library: &[mathscape_core::eval::RewriteRule]) -> BTreeSet<TermRef> {
     library.iter().map(mathscape_core::certification::rule_content_hash).collect()
 }
+
+#[test]
+fn a_large_library_keeps_the_motor_corpus_inside_its_node_budget() {
+    let dir = Dir::new("budget");
+    let mut w = Writer::open(dir.evolving(40)).unwrap();
+    w.step().unwrap();
+    let seed_rules = w.library();
+    let library: Vec<_> = seed_rules.iter().cycle().take(150).cloned().collect();
+    let cfg = dir.evolving(40);
+    let policy = mathscape_core::policy::LinearPolicy::tensor_seeking_prior();
+    let wide = MechanismConfig { corpus_vocab: vec![2, 3, 5, 7, 6], ..MechanismConfig::default() };
+    let started = std::time::Instant::now();
+    let bounded = motor_candidates(&cfg, 0, &library, &policy, &library_hashes(&seed_rules), Some(&MotorMechanism::of(&wide))).unwrap();
+    assert!(started.elapsed() < std::time::Duration::from_secs(120), "motor took {:?}", started.elapsed());
+    let again = motor_candidates(&cfg, 0, &library, &policy, &library_hashes(&seed_rules), Some(&MotorMechanism::of(&wide))).unwrap();
+    assert_eq!(bounded, again);
+}

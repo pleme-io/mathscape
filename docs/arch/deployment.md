@@ -102,7 +102,7 @@ engine's Services. `engine.enabled: false` renders the writer alone.
 | `stream.storage.kind` | `claimTemplate` (a 2Gi PVC at `/data`) or `hostPath` (a host directory mounted at itself, for a node whose pods are host processes). |
 | `stream.dataDir` | Must lie under the mount, or the render fails: HEAD outside the volume would not survive a restart. |
 | `stream.health` | The binary serves `/healthz`, `/readyz` (503 until HEAD is open) and `/metrics` on `health.port` (9473); startup, liveness and readiness probe it. |
-| `stream.resources` | One core requested and limited (the epoch loop is single-threaded); 3Gi request and 16Gi limit, sized for the default mechanism, which reached 12.3 GiB at 40 minutes ([the slice, measured](stream-training-infra.md#on-ryns-engenho-2026-10-15)). |
+| `stream.resources` | One core requested and limited (the epoch loop is single-threaded); 768Mi request and 2Gi limit. The motor's corpus is bounded by `stream.corpus_max_nodes`, and the default mechanism peaked at 526 MiB over 65 minutes ([memory bounded](stream-training-infra.md#memory-bounded-2026-10-16)). |
 | `stream.terminationGracePeriodSeconds` | 10. Writes are temp-then-rename, so a SIGKILL only replays the epochs since HEAD. |
 | `stream.alerts`, `stream.scrape`, `stream.breathe` | VMRule (Down, Stalled, SnapshotStale, Plateau), VMPodScrape, MemoryBand on the writer's StatefulSet. Off by default; on for a cluster with VictoriaMetrics and breathe. |
 
@@ -111,8 +111,8 @@ closures, so there is no image to push: `pleme.mathscape.stream`
 (`nix/modules/pleme/darwin/mathscape-stream.nix`) renders this chart with
 `image.repository = nix:<mathscape-stream closure>`, `command: []`,
 `storage.kind: hostPath` under `~/.local/share/mathscape`, and loopback
-health, and the `v0.1.8` mechanism profile (2.7 GiB flat, where the
-default reached 12.3 GiB), through substrate's `mkHelmRender`, into
+health, and the default mechanism (bounded since 2026-10-16), through
+substrate's `mkHelmRender`, into
 `/etc/engenho/manifests.d/mathscape-stream.yaml`. engenho's
 node-manifests driver applies and prunes it; `nix run .#rebuild` is the
 deploy. The alert layer and breathe stay off there because neither

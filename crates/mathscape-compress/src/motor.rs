@@ -10,6 +10,7 @@ use mathscape_core::meta_loop::ScenarioExecutor;
 use mathscape_core::policy::LinearPolicy;
 use mathscape_core::term::{SymbolId, Term};
 use mathscape_core::AdaptiveCorpusGenerator;
+use mathscape_core::adaptive_corpus::DEFAULT_MAX_NODES;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -126,7 +127,7 @@ pub struct CorpusShape {
 }
 
 impl CorpusShape {
-    fn generator(&self, seed: u64) -> AdaptiveCorpusGenerator {
+    fn generator(&self, seed: u64, max_nodes: usize) -> AdaptiveCorpusGenerator {
         AdaptiveCorpusGenerator {
             seed,
             term_count: self.term_count,
@@ -134,6 +135,7 @@ impl CorpusShape {
             vocab: self.vocab.clone(),
             max_value: self.max_value,
             shells: self.shells,
+            max_nodes,
         }
     }
 }
@@ -144,6 +146,7 @@ pub struct Motor {
     pub seed: u64,
     pub unknown_corpus: UnknownCorpus,
     pub corpus: Option<CorpusShape>,
+    pub corpus_max_nodes: usize,
 }
 
 impl Default for Motor {
@@ -153,6 +156,7 @@ impl Default for Motor {
             seed: 0,
             unknown_corpus: UnknownCorpus::Refuse,
             corpus: None,
+            corpus_max_nodes: DEFAULT_MAX_NODES,
         }
     }
 }
@@ -185,6 +189,12 @@ impl Motor {
         self
     }
 
+    #[must_use]
+    pub fn with_corpus_max_nodes(mut self, max_nodes: usize) -> Self {
+        self.corpus_max_nodes = max_nodes;
+        self
+    }
+
     pub fn run_spec(&self, spec: &BootstrapCycleSpec) -> Result<BootstrapOutcome, SpecExecutionError> {
         let n = spec.n_iterations;
         let lib = spec.seed_library.clone();
@@ -202,9 +212,10 @@ impl Motor {
                     self.corpus.as_ref().map_or_else(
                         || AdaptiveCorpusGenerator {
                             seed: self.seed,
+                            max_nodes: self.corpus_max_nodes,
                             ..AdaptiveCorpusGenerator::default()
                         },
-                        |shape| shape.generator(self.seed),
+                        |shape| shape.generator(self.seed, self.corpus_max_nodes),
                     ),
                     self.extractor,
                     DefaultModelUpdater::default(),

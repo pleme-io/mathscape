@@ -307,15 +307,12 @@ run, `/usr/bin/time -l`; CPU is user+sys over wall):
 | 0.1.9, `v0.1.8` profile | 20 min | 1,001 | 0.96 core | 2.6 GiB | 8,083 |
 | 0.1.9, `v0.1.8` profile | 40 min | 1,389 | 0.97 core | 2.7 GiB | 8,083 |
 
-CPU is one core whatever the mechanism. Memory follows the frontier,
-not time: at 8,083 equations it is flat at ~2.6 GiB; the 0.1.9
-default's opened size-6 frontier took it from 0.43 to 12.3 GiB between
-minutes 20 and 40, not flat. Both mechanisms reach the same library in
-40 minutes (188 and 186 rules). The chart's defaults are sized for the
-default mechanism: 1 core, 3Gi request, 16Gi limit (the measured 12.3
-GiB plus ~30%); whether it flattens past 40 minutes is not measured.
+CPU is one core whatever the mechanism. The memory reading in this
+table was wrong about its cause: it is not the frontier, and the 12.3
+GiB is a transient peak inside a mechanism trial, not growth. The cause
+and the bound are in [Memory bounded](#memory-bounded-2026-10-16).
 
-**ryn runs the `v0.1.8` profile** (`pleme.mathscape.stream.mechanism`,
+**ryn ran the `v0.1.8` profile until 2026-10-16** (`pleme.mathscape.stream.mechanism`,
 which sets `mechanism.graveyard: mutation`, `trial_scale: fixed`,
 `trial_stop_after: 0`, `drive_motor: false`): a darwin engenho has no
 cgroups, so no limit is enforced there, and the profile is the bound
@@ -323,8 +320,8 @@ that holds. That is 1 of ryn's 14 cores and ~2.7 of its 48 GiB. The
 alert layer and breathe bands are off there, like the pangea stack and
 the llm server beside it, because neither VictoriaMetrics nor
 breathe's CRDs run on that cluster; `/metrics` is the observation
-surface until they do. Moving ryn to the default mechanism waits on
-its memory being bounded.
+surface until they do. Since 2026-10-16 ryn runs the default
+mechanism, its memory bounded ([below](#memory-bounded-2026-10-16)).
 
 **Live on ryn (2026-10-16 00:14Z).** Applied by switching ryn to the
 pushed system (its closure diff against the running one was exactly
@@ -348,6 +345,61 @@ minute 1, 136 at 5, 161 at 9, 186 at 14, 188 at 18, then flat;
 22 mechanism mutations. That is the second plateau above, reproduced
 through the new surface.
 
+## Memory bounded (2026-10-16)
+
+**Cause, measured.** The peak lives in the motor's corpus, not the
+frontier. `Frontier::build` with ryn's 20-operator vocabulary peaks at
+22 MiB at size 5, 52 MiB at 6, 272 MiB at 7, 680 MiB at 8 (the clamp's
+ceiling). A bisect of the four 0.1.9 mechanism switches (eight runs,
+seed 7, RSS every 20 s) showed every profile spiking, the default
+highest (4.7 GiB at minute 34, back to 69 MiB a minute later), so the
+growth is a spike, not a leak. Replaying the default stream from its
+epoch-1347 snapshot reproduced a 12.9 GiB peak; per-trial logging put it
+in two motor trials of epoch 1388's saturation response (157 s and 58 s)
+whose corpus vocabulary had lost operator 4, and the motor alone on
+that input took 163 s and 7.6 GiB. A call-stack sample put the time in
+`derive_laws_with_cache` → `eval`, and a probe in `eval` showed the
+input terms themselves at 1.2M and 2.5M nodes.
+
+`AdaptiveCorpusGenerator` nests to `base_depth + library.len()/3`, and
+each node stops with probability 1/3, so a vocabulary of binary
+operators is a supercritical branching process: expected term size
+grows exponentially in library size. Measured over 256 terms per cell
+(base depth 4):
+
+| corpus vocab | library | p90 nodes | max nodes |
+|---|---|---|---|
+| 2-3-1 (v0.1.8's fixed corpus) | 30 / 120 / 180 | 133 / 6,092 / 48,664 | 531 / 26,275 / 179,028 |
+| 2-3-5-7-6 (a default-mechanism trial) | 30 / 120 / 180 | 343 / 92,805 / 4,396,990 | 871 / 254,197 / 10,381,902 |
+
+**Fix.** Every corpus term has a node budget (`max_nodes`, default
+2048, `stream.corpus_max_nodes`), threaded through the residue, shell
+and rule-instantiation builders: an application is built only while the
+budget can still close it, and a rule's pattern variables share the
+budget by occurrence count. A corpus that never reaches the budget is
+generated exactly as before, and `usize::MAX` restores the unbounded
+generator. Pinned by `a_large_library_cannot_grow_a_corpus_term_past_the_node_budget`
+(red without the budget: a 9,255-node term) and
+`a_large_library_keeps_the_motor_corpus_inside_its_node_budget`
+(150-rule library, debug build: 3 s and 0.7 GiB; budget off, 308 s and
+4.0 GiB).
+
+**After** (release, three streams at once, 65 minutes, RSS every 5 s):
+
+| run | peak RSS, min 0-30 | peak RSS, min 30-65 | epochs | library | certified after epoch 0 | last certification |
+|---|---|---|---|---|---|---|
+| default, seed 7 | 136 MiB | 526 MiB | 2,027 | 216 | 206 | minute 62.6 |
+| default, seed 2026 | 134 MiB | 437 MiB | 2,581 | 159 | 149 | minute 43.8 |
+| v0.1.8, seed 7 | 119 MiB | 117 MiB | 73,541 | 188 | 178 | minute 6.8 |
+
+The minute-40 peaks are size-7 trial frontiers (272 MiB alone) and fall
+back by minute 60 (246 and 289 MiB). At 30 minutes the default reaches
+186 rules for seed 7 and 147 for seed 2026, against 173 and 146 under
+0.1.9; seed 7 passes 0.1.9's 188-rule ceiling and is still certifying
+at minute 62. The v0.1.8 profile, no longer spending minutes on
+million-node corpora, reaches its 188 rules in 6.8 minutes instead of
+about 18. The chart now asks 768Mi and limits at 2Gi.
+
 ## Build order
 
 Donated compute and the commit ledger the stream grows into: [model-ledger.md](model-ledger.md).
@@ -359,8 +411,8 @@ Donated compute and the commit ledger the stream grows into: [model-ledger.md](m
 2. Scout mode of the same binary: `--seed --scenario`, emits
    `(epoch-delta …)` on stdout or to the writer's socket.
 3. ~~Run under engenho~~ Declared for ryn's engenho 2026-10-15
-   (`pleme.mathscape.stream`, seed 7, `v0.1.8` mechanism): one writer,
-   one core, ~2.7 GiB, $0. Measure certified-invariants/hour from its `/metrics` once it is
+   (`pleme.mathscape.stream`, seed 7; the default mechanism since
+   2026-10-16): one writer, one core, under 0.6 GiB, $0. Measure certified-invariants/hour from its `/metrics` once it is
    running; rio stays the scout box for step 2.
 4. Only when rio is saturated: the spot scout tier and an S3 object backend
    through arch-synthesizer's spot suite.

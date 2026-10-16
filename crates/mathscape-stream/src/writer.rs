@@ -197,7 +197,8 @@ pub fn motor_candidates(
             .with_extractor(extractor.with_min_support(mm.min_support))
             .with_corpus(mm.corpus.clone()),
         None => Motor::seeded(seed).with_extractor(extractor),
-    };
+    }
+    .with_corpus_max_nodes(cfg.corpus_max_nodes);
     let meta_loop = MetaLoop::new(
         motor,
         HeuristicProposer::with_extractor("derived-laws"),
@@ -633,15 +634,21 @@ impl Writer {
             let spec = frontier_spec(&cfg, m);
             let mut done = false;
             if spec != base {
+                let started = std::time::Instant::now();
                 let extends = spec.extends(&base);
+                let (size, vocab, samples) = (spec.max_size, spec.vocab.len(), spec.samples);
                 let built = Frontier::build(spec);
                 let (from, budget) = trial_window(&policy, base_len, built.len(), extends, cursor);
                 done = built.slice(from, budget).iter().any(|eq| weigh(eq.rule(), &mut lib));
+                tracing::info!(epoch, size, vocab, samples, terms = built.terms(), equations = built.len(), from, budget, ms = started.elapsed().as_millis() as u64, "trial frontier");
             }
             let motor = MotorMechanism::of(m);
             if !done && policy.drive_motor && motor != current_motor {
+                let started = std::time::Instant::now();
                 let candidates = motor_candidates(&cfg, epoch, &library, &learned, &known, Some(&motor)).unwrap_or_default();
+                let n = candidates.len();
                 let _ = candidates.into_iter().any(|rule| weigh(rule, &mut lib));
+                tracing::info!(epoch, corpus_vocab = ?motor.corpus.vocab, candidates = n, ms = started.elapsed().as_millis() as u64, "trial motor");
             }
             TrialResult {
                 delta_novelty: novel,

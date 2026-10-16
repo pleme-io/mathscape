@@ -24,4 +24,5 @@ pub use law_generator::{
 pub use antiunify::paired_subterm_anti_unify;
 pub use meta_gen::{CompositeGenerator, MetaPatternGenerator};
 pub use frontier::{Equation, Frontier, FrontierSpec, entailed_by_library};
+pub use mathscape_core::adaptive_corpus::DEFAULT_MAX_NODES as DEFAULT_CORPUS_MAX_NODES;
 pub use motor::{CorpusShape, Extractor, Motor, UnknownCorpus};

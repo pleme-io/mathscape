@@ -77,6 +77,8 @@ pub struct StreamConfig {
     pub learning_rate: f64,
     #[serde(default = "default_extractor")]
     pub extractor: mathscape_compress::Extractor,
+    #[serde(default = "default_corpus_max_nodes")]
+    pub corpus_max_nodes: usize,
     #[serde(default)]
     pub clock: StreamClock,
     #[serde(default)]
@@ -190,6 +192,7 @@ impl StreamConfig {
             adaptive_every: default_adaptive_every(),
             learning_rate: default_learning_rate(),
             extractor: default_extractor(),
+            corpus_max_nodes: default_corpus_max_nodes(),
             clock: StreamClock::default(),
             novelty: StreamNovelty::default(),
             frontier: StreamFrontier::default(),
@@ -197,6 +200,10 @@ impl StreamConfig {
             health_addr: None,
         }
     }
+}
+
+fn default_corpus_max_nodes() -> usize {
+    mathscape_compress::DEFAULT_CORPUS_MAX_NODES
 }
 
 fn default_stream_data_dir() -> String {

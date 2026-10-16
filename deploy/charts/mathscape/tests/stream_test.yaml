@@ -150,10 +150,10 @@ tests:
           value: 1000m
       - equal:
           path: spec.template.spec.containers[0].resources.requests.memory
-          value: 3Gi
+          value: 768Mi
       - equal:
           path: spec.template.spec.containers[0].resources.limits.memory
-          value: 16Gi
+          value: 2Gi
 
   - it: keeps the model on a claim by default
     set:
@@ -367,4 +367,4 @@ tests:
             name: ms-mathscape-stream
       - equal:
           path: spec.floor
-          value: 3Gi
+          value: 768Mi

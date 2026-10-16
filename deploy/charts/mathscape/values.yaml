@@ -115,17 +115,16 @@ stream:
     storageClass: ""
     # -- Host directory for hostPath; required for that kind, and dataDir must lie under it
     path: ""
-  # -- One core: the epoch loop is single-threaded (measured 0.93-0.97 of a core). Memory follows the frontier, not time
-  # (seed 7, 2026-10-15): the default mechanism reached 0.43Gi at 20 min and 12.3Gi at 40 (frontier 21,296 equations,
-  # not yet flat); mechanism v0.1.8 (graveyard: mutation, trial_scale: fixed, trial_stop_after: 0, drive_motor: false)
-  # holds 2.6Gi from 20 to 40 min (frontier 8,083). The limit is the default's 12.3Gi plus ~30%; past 40 min is unmeasured.
+  # -- One core: the epoch loop is single-threaded (measured 0.93-0.97 of a core). Memory is bounded by the motor's
+  # corpus node budget (stream.corpus_max_nodes, 2048): over 65 min (2026-10-16, seeds 7 and 2026) the default mechanism
+  # peaked at 526Mi and v0.1.8 at 119Mi. A size-8 trial frontier alone is ~680Mi, so the limit is 2Gi.
   resources:
     requests:
       cpu: 1000m
-      memory: 3Gi
+      memory: 768Mi
     limits:
       cpu: 1000m
-      memory: 16Gi
+      memory: 2Gi
   # -- SIGTERM to SIGKILL; writes are atomic, so a kill only replays epochs since HEAD
   terminationGracePeriodSeconds: 10
   # -- Node selector for the writer
@@ -147,8 +146,8 @@ stream:
   breathe:
     enabled: false
     memory:
-      floor: 3Gi
-      ceiling: 16Gi
+      floor: 768Mi
+      ceiling: 2Gi
     cpu:
       enabled: false
 

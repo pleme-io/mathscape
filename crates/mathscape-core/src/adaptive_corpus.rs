@@ -63,7 +63,11 @@ pub struct AdaptiveCorpusGenerator {
     /// Max Nat leaf value.
     pub max_value: u64,
     pub shells: bool,
+    pub max_nodes: usize,
 }
+
+pub const DEFAULT_MAX_NODES: usize = 2048;
+const APPLY_FLOOR: usize = 4;
 
 impl Default for AdaptiveCorpusGenerator {
     /// Phase V default: Peano vocabulary (ADD=2, MUL=3, SUCC=1),
@@ -77,6 +81,7 @@ impl Default for AdaptiveCorpusGenerator {
             vocab: vec![2, 3, 1], // ADD, MUL, SUCC
             max_value: 10,
             shells: true,
+            max_nodes: DEFAULT_MAX_NODES,
         }
     }
 }
@@ -97,7 +102,14 @@ impl AdaptiveCorpusGenerator {
             vocab,
             max_value,
             shells: true,
+            max_nodes: DEFAULT_MAX_NODES,
         }
+    }
+
+    #[must_use]
+    pub fn with_max_nodes(mut self, max_nodes: usize) -> Self {
+        self.max_nodes = max_nodes;
+        self
     }
 }
 
@@ -105,8 +117,8 @@ impl CorpusGenerator for AdaptiveCorpusGenerator {
     fn generate(&self, iteration: usize, library: &[RewriteRule]) -> Vec<Term> {
         // Depth scales with library size — more library means we
         // need deeper nesting to keep the residue interesting.
-        // +1 per 3 substrate rules is empirical; conservative
-        // enough not to blow up term size.
+        // +1 per 3 substrate rules is empirical; the depth alone
+        // grows size exponentially, so `max_nodes` bounds each term.
         let depth = self.base_depth + library.len() / 3;
         // Seed mixes with iteration so per-iter corpora differ
         // while remaining deterministic.
@@ -118,12 +130,14 @@ impl CorpusGenerator for AdaptiveCorpusGenerator {
         let substrate = if self.shells { library } else { &[] };
         let mut out = Vec::with_capacity(self.term_count);
         for _ in 0..self.term_count {
+            let mut budget = self.max_nodes;
             out.push(build_shelled_term(
                 substrate,
                 &mut state,
                 depth,
                 &self.vocab,
                 self.max_value,
+                &mut budget,
             ));
         }
         out
@@ -163,17 +177,30 @@ fn build_residue_term(
     depth: usize,
     vocab: &[u32],
     max_value: u64,
+    budget: &mut usize,
 ) -> Term {
-    if depth == 0 || xorshift_u64(state) % 3 == 0 {
+    if depth == 0 || *budget < APPLY_FLOOR || xorshift_u64(state).is_multiple_of(3) {
+        *budget = budget.saturating_sub(1);
         return random_leaf(state, max_value);
     }
     let op = pick_operator(state, vocab);
     let arity = op_arity(op);
+    *budget -= 2;
     let mut args = Vec::with_capacity(arity);
-    for _ in 0..arity {
-        args.push(build_residue_term(state, depth - 1, vocab, max_value));
+    for i in 0..arity {
+        args.push(within(budget, arity - i - 1, |b| {
+            build_residue_term(state, depth - 1, vocab, max_value, b)
+        }));
     }
     Term::Apply(Box::new(Term::Var(op)), args)
+}
+
+fn within(budget: &mut usize, reserve: usize, build: impl FnOnce(&mut usize) -> Term) -> Term {
+    let share = budget.saturating_sub(reserve);
+    let mut left = share;
+    let term = build(&mut left);
+    *budget -= share - left;
+    term
 }
 
 /// Collect pattern-variable ids (Var(≥100)) in a term, deduped.
@@ -204,14 +231,27 @@ fn instantiate_rule_lhs(
     depth: usize,
     vocab: &[u32],
     max_value: u64,
+    budget: &mut usize,
 ) -> Term {
     let mut lhs = rule.lhs.clone();
-    let mut vars: Vec<u32> = Vec::new();
-    collect_pattern_vars(&lhs, &mut vars);
+    let mut occurrences: Vec<u32> = Vec::new();
+    collect_pattern_vars(&lhs, &mut occurrences);
+    let mut vars = occurrences.clone();
     vars.sort();
     vars.dedup();
+    let count = |v: u32| occurrences.iter().filter(|o| **o == v).count();
+    if lhs.size() > *budget {
+        return build_residue_term(state, depth, vocab, max_value, budget);
+    }
+    *budget -= lhs.size() - occurrences.len();
+    let mut pending = occurrences.len();
     for v in vars {
-        let sub = build_residue_term(state, depth, vocab, max_value);
+        let copies = count(v);
+        pending -= copies;
+        let share = budget.saturating_sub(pending) / copies;
+        let mut left = share;
+        let sub = build_residue_term(state, depth, vocab, max_value, &mut left);
+        *budget -= (share - left) * copies;
         lhs = lhs.substitute(v, &sub);
     }
     lhs
@@ -226,32 +266,27 @@ fn build_shelled_term(
     depth: usize,
     vocab: &[u32],
     max_value: u64,
+    budget: &mut usize,
 ) -> Term {
-    if depth == 0 || substrate.is_empty() {
-        return build_residue_term(state, depth, vocab, max_value);
+    if depth == 0 || substrate.is_empty() || *budget < APPLY_FLOOR {
+        return build_residue_term(state, depth, vocab, max_value, budget);
     }
     let op = pick_operator(state, vocab);
     let arity = op_arity(op);
+    *budget -= 2;
     let mut args = Vec::with_capacity(arity);
-    for _ in 0..arity {
-        if xorshift_u64(state) % 2 == 0 {
+    for i in 0..arity {
+        let reserve = arity - i - 1;
+        if xorshift_u64(state).is_multiple_of(2) {
             let rule_idx =
                 (xorshift_u64(state) as usize) % substrate.len();
-            args.push(instantiate_rule_lhs(
-                &substrate[rule_idx],
-                state,
-                depth - 1,
-                vocab,
-                max_value,
-            ));
+            args.push(within(budget, reserve, |b| {
+                instantiate_rule_lhs(&substrate[rule_idx], state, depth - 1, vocab, max_value, b)
+            }));
         } else {
-            args.push(build_shelled_term(
-                substrate,
-                state,
-                depth - 1,
-                vocab,
-                max_value,
-            ));
+            args.push(within(budget, reserve, |b| {
+                build_shelled_term(substrate, state, depth - 1, vocab, max_value, b)
+            }));
         }
     }
     Term::Apply(Box::new(Term::Var(op)), args)
@@ -374,5 +409,47 @@ mod tests {
         let cg = AdaptiveCorpusGenerator::default();
         let terms = cg.generate(0, &[]);
         let _ = terms;
+    }
+
+    fn duplicating_rule() -> RewriteRule {
+        RewriteRule {
+            name: "dup".into(),
+            lhs: apply(var(2), vec![var(200), var(200)]),
+            rhs: var(200),
+        }
+    }
+
+    #[test]
+    fn a_large_library_cannot_grow_a_corpus_term_past_the_node_budget() {
+        let library: Vec<RewriteRule> = (0..90).map(|_| duplicating_rule()).collect();
+        for shells in [false, true] {
+            for seed in 0..6 {
+                let cg = AdaptiveCorpusGenerator {
+                    seed,
+                    term_count: 16,
+                    base_depth: 4,
+                    vocab: vec![2, 3, 5, 7, 6],
+                    max_value: 10,
+                    shells,
+                    max_nodes: 256,
+                };
+                for iteration in 0..2 {
+                    for t in cg.generate(iteration, &library) {
+                        assert!(t.size() <= 256, "seed {seed} shells {shells}: a {}-node term", t.size());
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_corpus_that_never_reaches_the_budget_is_the_unbounded_corpus() {
+        let library = vec![add_identity(), duplicating_rule()];
+        for seed in 0..16 {
+            let cg = AdaptiveCorpusGenerator::new(seed, 16, 3, vec![2, 3, 1], 10);
+            let unbounded = cg.clone().with_max_nodes(usize::MAX).generate(0, &library);
+            assert!(unbounded.iter().all(|t| t.size() < DEFAULT_MAX_NODES / 4));
+            assert_eq!(cg.generate(0, &library), unbounded);
+        }
     }
 }
