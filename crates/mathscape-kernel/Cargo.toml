@@ -1,0 +1,9 @@
+[package]
+name = "mathscape-kernel"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "The emergent substrate's trust base: de Bruijn lambda terms, a fuel-bounded normal-order normalizer, observation by eta-expansion"
+
+[dependencies]

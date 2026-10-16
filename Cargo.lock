@@ -2110,9 +2110,11 @@ name = "mathscape-config"
 version = "0.1.11"
 dependencies = [
  "mathscape-compress",
+ "mathscape-emergence",
  "mathscape-evolve",
  "mathscape-reward",
  "serde",
+ "serde_json",
  "shikumi",
 ]
 
@@ -2154,6 +2156,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "mathscape-emergence"
+version = "0.1.11"
+dependencies = [
+ "blake3",
+ "mathscape-core",
+ "mathscape-kernel",
+ "serde",
+ "tatara-lisp",
+]
+
+[[package]]
 name = "mathscape-entity"
 version = "0.1.11"
 dependencies = [
@@ -2179,6 +2192,10 @@ dependencies = [
  "serde",
  "serde_json",
 ]
+
+[[package]]
+name = "mathscape-kernel"
+version = "0.1.11"
 
 [[package]]
 name = "mathscape-mcp"
@@ -2293,6 +2310,7 @@ dependencies = [
  "mathscape-compress",
  "mathscape-config",
  "mathscape-core",
+ "mathscape-emergence",
  "mathscape-proof",
  "tatara-lisp",
  "tracing",

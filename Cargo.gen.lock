@@ -1,20 +1,22 @@
 {
   "schema_version": 2,
-  "cargo_lock_sha256": "eb46b7ec52b641f4b996d84695cb86d1a6f519ff92b474857abcaa213863af47",
+  "cargo_lock_sha256": "5ac16ae2bac763df6b34026e24acd6ad244c9c9689c0c8e21c916ad999e4fb97",
   "manifest_sha256": {
-    "Cargo.toml": "382508fe5e9125f211297aba064aa79531a4eea19ec47acd379f6945d313a2e4",
+    "Cargo.toml": "86e8f4200f0203606f79dde85094c38b208e39b5ea1024ea2e352e4489380b16",
     "crates/mathscape-acquisition/Cargo.toml": "5d9543090fad1cbb511b4d75b6b09bd1dd248359b9ad306ac98c1f827ca4afa7",
     "crates/mathscape-api/Cargo.toml": "180c3457b4fafa02d541a32144bfbca98163a7261e6999658802f0c20ab8c3a7",
     "crates/mathscape-axiom-bridge/Cargo.toml": "9ebe51c3c47013d46002b269d966b39def44a4d68dcd435eee5d949e3a7c26ee",
     "crates/mathscape-cli/Cargo.toml": "67da4a30890eabff4ed2338879b46fc741922c1483222201cc775795280d391a",
     "crates/mathscape-compress/Cargo.toml": "b6cd139b1608cf84d468c92ecc8f9b9e421b6788ab35efe9b97fcfe25653fcda",
-    "crates/mathscape-config/Cargo.toml": "867291ae226f899fb90a26b7f084fc4bd3f409af9d20351af1973b2c22ea0563",
+    "crates/mathscape-config/Cargo.toml": "d403b068d65fc2376348ae544bf6e7a7a06add1792ff30c04be5c876588b9e6d",
     "crates/mathscape-core/Cargo.toml": "a9260052ef16704e40978dfaeccf5af68312575f689fd50cdab0a2ff277961dd",
     "crates/mathscape-db/Cargo.toml": "a11339fa01d5a9ef3953d6a4a732aae02797cbf0c45dcee04a2566567459e204",
     "crates/mathscape-discovery/Cargo.toml": "1b5a542004889c9fd96b35857f4a0c8e650984e6999bf973aeec85610676740b",
+    "crates/mathscape-emergence/Cargo.toml": "0e1d92251e90c14c7688a81c4c70fcb98aae57c4858d510bc3c8319cf7fb7f70",
     "crates/mathscape-entity/Cargo.toml": "58303c96ca63b89e5898548988af3ff136cb29cb5927a40862f5209006b2358d",
     "crates/mathscape-evolve/Cargo.toml": "8388fc00456a41ff665466907bb35daeaf078cb8704617dbb4e76bfa9e6a8ac4",
     "crates/mathscape-inference-api/Cargo.toml": "cee07ff96e35ad9c2644e96d91acacd5ad38b6254d52ea7e2e28cd7c0b707730",
+    "crates/mathscape-kernel/Cargo.toml": "023fc725cc5329ae31665e84e31d96aeeddf8327d9413e429d5d88460347e4e2",
     "crates/mathscape-mcp/Cargo.toml": "b916bbce56a5edfb92430802fccd857cb2f74ca287a0a5ace7ea317193e4af1b",
     "crates/mathscape-migration/Cargo.toml": "471ad8934cb45751e7ef6f23300a78f9158295695a003acdcbc4636877b97be2",
     "crates/mathscape-policy/Cargo.toml": "0db06ce117fb552623d38e6c787ce57d6c4412b6176c5403fbe146623492f246",
@@ -22,7 +24,7 @@
     "crates/mathscape-reward/Cargo.toml": "650feef9ebf53d48632ba1d8573a4e3c803e9b59ada22853356c3c3585d3f98e",
     "crates/mathscape-service/Cargo.toml": "83ea40901eae6068883b1db4b4630f64023f22965bd1084bbd4fd012f9bbc45a",
     "crates/mathscape-store/Cargo.toml": "f1326ed0eeec105a53a11ade2100aae713eca4acf073900786ec85e6a318f32a",
-    "crates/mathscape-stream/Cargo.toml": "0c0c9d184372eac344c0b7cdeec2e8d51c2ccebc9629db9f410338fcc345d107"
+    "crates/mathscape-stream/Cargo.toml": "0484139aa07f0d00181a6a418483563213cfc8e16879eabb0574e1943f357739"
   },
   "target_resolves": {
     "base": {
@@ -6972,6 +6974,16 @@
             "tree": "target"
           },
           {
+            "name": "mathscape_emergence",
+            "package_key": "mathscape-emergence-0.1.11",
+            "kind": "normal",
+            "features": [],
+            "uses_default_features": true,
+            "optional": false,
+            "target": null,
+            "tree": "target"
+          },
+          {
             "name": "mathscape_evolve",
             "package_key": "mathscape-evolve-0.1.11",
             "kind": "normal",
@@ -7226,6 +7238,64 @@
         "build_dependencies": [],
         "features": []
       },
+      "mathscape-emergence-0.1.11": {
+        "runtime_dependencies": [
+          {
+            "name": "blake3",
+            "package_key": "blake3-1.8.3",
+            "kind": "normal",
+            "features": [],
+            "uses_default_features": true,
+            "optional": false,
+            "target": null,
+            "tree": "target"
+          },
+          {
+            "name": "mathscape_core",
+            "package_key": "mathscape-core-0.1.11",
+            "kind": "normal",
+            "features": [],
+            "uses_default_features": true,
+            "optional": false,
+            "target": null,
+            "tree": "target"
+          },
+          {
+            "name": "mathscape_kernel",
+            "package_key": "mathscape-kernel-0.1.11",
+            "kind": "normal",
+            "features": [],
+            "uses_default_features": true,
+            "optional": false,
+            "target": null,
+            "tree": "target"
+          },
+          {
+            "name": "serde",
+            "package_key": "serde-1.0.228",
+            "kind": "normal",
+            "features": [
+              "derive"
+            ],
+            "uses_default_features": true,
+            "optional": false,
+            "target": null,
+            "tree": "target"
+          },
+          {
+            "name": "tatara_lisp",
+            "package_key": "tatara-lisp-0.3.4",
+            "kind": "normal",
+            "features": [],
+            "uses_default_features": true,
+            "optional": false,
+            "target": null,
+            "tree": "target"
+          }
+        ],
+        "build_dependencies": [],
+        "features": []
+      },
       "mathscape-entity-0.1.11": {
         "runtime_dependencies": [
           {
@@ -7329,6 +7399,11 @@
             "tree": "target"
           }
         ],
+        "build_dependencies": [],
+        "features": []
+      },
+      "mathscape-kernel-0.1.11": {
+        "runtime_dependencies": [],
         "build_dependencies": [],
         "features": []
       },
@@ -8043,6 +8118,16 @@
           {
             "name": "mathscape_core",
             "package_key": "mathscape-core-0.1.11",
+            "kind": "normal",
+            "features": [],
+            "uses_default_features": true,
+            "optional": false,
+            "target": null,
+            "tree": "target"
+          },
+          {
+            "name": "mathscape_emergence",
+            "package_key": "mathscape-emergence-0.1.11",
             "kind": "normal",
             "features": [],
             "uses_default_features": true,
@@ -21382,6 +21467,13 @@
         "path": "src/lib.rs"
       }
     },
+    "mathscape-emergence-0.1.11": {
+      "edition": "2024",
+      "lib_target": {
+        "name": "mathscape_emergence",
+        "path": "src/lib.rs"
+      }
+    },
     "mathscape-entity-0.1.11": {
       "edition": "2024",
       "lib_target": {
@@ -21400,6 +21492,13 @@
       "edition": "2024",
       "lib_target": {
         "name": "mathscape_inference_api",
+        "path": "src/lib.rs"
+      }
+    },
+    "mathscape-kernel-0.1.11": {
+      "edition": "2024",
+      "lib_target": {
+        "name": "mathscape_kernel",
         "path": "src/lib.rs"
       }
     },

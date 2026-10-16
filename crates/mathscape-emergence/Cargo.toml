@@ -1,0 +1,14 @@
+[package]
+name = "mathscape-emergence"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Operators and laws emerging from bare lambda terms: enumerate, observe, name, conjecture, certify"
+
+[dependencies]
+mathscape-kernel.workspace = true
+mathscape-core.workspace = true
+serde.workspace = true
+blake3.workspace = true
+tatara-lisp.workspace = true
