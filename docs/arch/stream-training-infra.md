@@ -400,6 +400,19 @@ at minute 62. The v0.1.8 profile, no longer spending minutes on
 million-node corpora, reaches its 188 rules in 6.8 minutes instead of
 about 18. The chart now asks 768Mi and limits at 2Gi.
 
+**Live on ryn (2026-10-16 11:25Z).** ryn's writer moved to the default
+mechanism (nix `25c8d5a6`) and resumed from its HEAD at epoch 1530 with
+188 rules; the old context-free graveyard entries are retried in the
+new context. Its first plateau response (epoch 1581) found nothing and
+doubled the wait; the second (epoch 2093) adopted a size bump to 6,
+growing the frontier from 8,083 to 26,826 equations, and the library
+passed 188 at epoch 2145 (189 rules). RSS held 29-59 MiB throughout.
+The move surfaced an engenho server-side-apply defect: dropping the
+four mechanism env entries from the StatefulSet left `{value: …}`
+elements without a `name`, and the kubelet refused the pod ("env entry
+has no name"); deleting the StatefulSet let the node-manifests driver
+re-apply it whole.
+
 ## Build order
 
 Donated compute and the commit ledger the stream grows into: [model-ledger.md](model-ledger.md).
