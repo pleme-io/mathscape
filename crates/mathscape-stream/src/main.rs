@@ -60,6 +60,23 @@ fn main() -> ExitCode {
             first_steady.get_or_insert_with(Instant::now);
         }
         let (cursor, frontier) = r.frontier.unwrap_or_default();
+        if let Some(e) = r.emergence {
+            info!(
+                epoch = r.epoch,
+                size = e.size,
+                enumerated = e.enumerated,
+                screened = e.screened,
+                named = e.named,
+                laws = e.laws,
+                held = e.held,
+                certified = r.certified,
+                rejected = r.rejected,
+                library = r.library,
+                snapshot = r.snapshot.map(|h| h.to_hex()).unwrap_or_default(),
+                "epoch"
+            );
+            return;
+        }
         info!(
             epoch = r.epoch,
             candidates = r.candidates,

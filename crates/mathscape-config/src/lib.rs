@@ -89,6 +89,28 @@ pub struct StreamConfig {
     pub mechanism: StreamMechanism,
     #[serde(default)]
     pub health_addr: Option<String>,
+    #[serde(default)]
+    pub substrate: StreamSubstrate,
+    #[serde(default)]
+    pub emergence: mathscape_emergence::EmergenceConfig,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum StreamSubstrate {
+    #[default]
+    Emergent,
+    Builtin,
+}
+
+impl StreamSubstrate {
+    #[must_use]
+    pub fn tag(self) -> &'static str {
+        match self {
+            Self::Emergent => "emergent",
+            Self::Builtin => "builtin",
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -110,7 +132,7 @@ pub struct StreamFrontier {
 impl Default for StreamFrontier {
     fn default() -> Self {
         Self {
-            enabled: true,
+            enabled: false,
             per_epoch: 64,
             variables: 3,
         }
@@ -198,7 +220,26 @@ impl StreamConfig {
             frontier: StreamFrontier::default(),
             mechanism: StreamMechanism::default(),
             health_addr: None,
+            substrate: StreamSubstrate::default(),
+            emergence: mathscape_emergence::EmergenceConfig::default(),
         }
+    }
+
+    #[must_use]
+    pub fn builtin(seed: u64, data_dir: impl Into<String>) -> Self {
+        Self {
+            substrate: StreamSubstrate::Builtin,
+            frontier: StreamFrontier {
+                enabled: true,
+                ..StreamFrontier::default()
+            },
+            ..Self::seeded(seed, data_dir)
+        }
+    }
+
+    #[must_use]
+    pub fn emergent(&self) -> bool {
+        self.substrate == StreamSubstrate::Emergent
     }
 }
 
@@ -603,5 +644,29 @@ mod tests {
         assert!(config.engine.running);
         assert!(config.engine.max_epoch.is_none());
         assert_eq!(config.engine.epoch_delay_ms, 0);
+    }
+}
+
+#[cfg(test)]
+mod substrate {
+    use super::*;
+
+    #[test]
+    fn the_default_stream_grows_mathematics_from_the_primitives_and_keeps_builtins_and_the_frontier_off() {
+        let seeded = StreamConfig::seeded(7, "unused");
+        let from_yaml: StreamConfig = serde_json::from_str(r#"{"seed": 7}"#).unwrap();
+        for cfg in [seeded, from_yaml] {
+            assert_eq!(cfg.substrate, StreamSubstrate::Emergent);
+            assert!(!cfg.frontier.enabled);
+            assert_eq!(cfg.emergence, mathscape_emergence::EmergenceConfig::default());
+        }
+    }
+
+    #[test]
+    fn the_builtin_profile_is_kept_as_a_selectable_value() {
+        let cfg = StreamConfig::builtin(7, "unused");
+        assert_eq!(cfg.substrate, StreamSubstrate::Builtin);
+        assert!(cfg.frontier.enabled);
+        assert_eq!(cfg.mechanism, StreamMechanism::default());
     }
 }

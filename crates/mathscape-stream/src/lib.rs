@@ -8,4 +8,4 @@ pub use delta::{Discovery, EpochDelta, MechanismDelta, MechanismOutcome};
 pub use error::StreamError;
 pub use health::{Gauges, Health};
 pub use store::ObjectStore;
-pub use writer::{EpochReport, MechanismEvent, Writer, epoch_seed};
+pub use writer::{EmergenceStep, EpochReport, MechanismEvent, StreamCertifier, Writer, epoch_seed};

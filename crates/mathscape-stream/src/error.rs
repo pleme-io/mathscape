@@ -11,6 +11,7 @@ pub enum StreamError {
     BadHead { content: String },
     BadMetadata { object: String, key: &'static str },
     SeedMismatch { head: u64, config: u64 },
+    SubstrateMismatch { head: String, config: &'static str },
     Motor(String),
 }
 
@@ -26,6 +27,10 @@ impl fmt::Display for StreamError {
             Self::SeedMismatch { head, config } => write!(
                 f,
                 "HEAD was grown from seed {head} but the config says seed {config}; a stream never changes seed, start a new data dir instead"
+            ),
+            Self::SubstrateMismatch { head, config } => write!(
+                f,
+                "HEAD was grown on the `{head}` substrate but the config selects `{config}`; one model never changes substrate, archive this data dir and start a new one"
             ),
             Self::Motor(e) => write!(f, "motor: {e}"),
         }

@@ -2,7 +2,9 @@ use crate::delta::{Discovery, EpochDelta, MechanismDelta, MechanismOutcome};
 use crate::error::StreamError;
 use crate::store::ObjectStore;
 use mathscape_compress::{CorpusShape, Extractor, Frontier, FrontierSpec, Motor, entailed_by_library};
-use mathscape_config::{StreamClock, StreamConfig, StreamGraveyard, StreamMechanism, StreamNovelty, StreamTrialScale};
+use mathscape_config::{StreamClock, StreamConfig, StreamGraveyard, StreamMechanism, StreamNovelty, StreamSubstrate, StreamTrialScale};
+use mathscape_emergence::certify::KernelCertifier;
+use mathscape_emergence::Engine;
 use mathscape_core::certification::{CertificationVerdict, Certifier};
 use mathscape_core::policy::LinearPolicy;
 use mathscape_proof::mechanism::{
@@ -34,6 +36,7 @@ const META_MECHANISM: &str = "stream.mechanism";
 const META_CURSOR: &str = "stream.frontier-cursor";
 const META_DRY: &str = "stream.dry-epochs";
 const META_SATURATIONS: &str = "stream.saturations";
+const META_SUBSTRATE: &str = "stream.substrate";
 const MECHANISM_SALT: u64 = 0x4D45_4348_414E_4953;
 const CORPUS_TERMS: usize = 16;
 
@@ -53,6 +56,42 @@ pub struct EpochReport {
     pub snapshot: Option<TermRef>,
     pub frontier: Option<(usize, usize)>,
     pub mechanism: Option<MechanismEvent>,
+    pub emergence: Option<EmergenceStep>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EmergenceStep {
+    pub size: usize,
+    pub enumerated: u64,
+    pub screened: usize,
+    pub named: usize,
+    pub laws: usize,
+    pub held: usize,
+}
+
+#[derive(Debug, Clone)]
+pub enum StreamCertifier {
+    Builtin(DefaultCertifier),
+    Kernel(KernelCertifier),
+}
+
+impl StreamCertifier {
+    #[must_use]
+    pub fn of(cfg: &StreamConfig) -> Self {
+        match cfg.substrate {
+            StreamSubstrate::Builtin => Self::Builtin(DefaultCertifier::default()),
+            StreamSubstrate::Emergent => Self::Kernel(cfg.emergence.certifier(cfg.seed)),
+        }
+    }
+}
+
+impl Certifier for StreamCertifier {
+    fn try_certify(&self, rule: &RewriteRule, context: &[RewriteRule]) -> CertificationVerdict {
+        match self {
+            Self::Builtin(c) => c.try_certify(rule, context),
+            Self::Kernel(c) => c.try_certify(rule, context),
+        }
+    }
 }
 
 pub struct Writer {
@@ -61,7 +100,8 @@ pub struct Writer {
     library: Rc<RefCell<Vec<RewriteRule>>>,
     trainer: Rc<StreamingPolicyTrainer>,
     buffer: Rc<BufferedConsumer>,
-    gate: CertifyingConsumer<DefaultCertifier, EventHub>,
+    gate: CertifyingConsumer<StreamCertifier, EventHub>,
+    engine: Option<Engine>,
     known: BTreeSet<TermRef>,
     tombstones: BTreeSet<TermRef>,
     logged: BTreeSet<TermRef>,
@@ -292,6 +332,18 @@ impl Writer {
                 if seed != cfg.seed {
                     return Err(StreamError::SeedMismatch { head: seed, config: cfg.seed });
                 }
+                let grown = snap.metadata.get(META_SUBSTRATE).map_or(StreamSubstrate::Builtin.tag(), String::as_str);
+                if grown != cfg.substrate.tag() {
+                    return Err(StreamError::SubstrateMismatch {
+                        head: grown.to_string(),
+                        config: cfg.substrate.tag(),
+                    });
+                }
+                let engine = cfg
+                    .emergent()
+                    .then(|| Engine::resume(cfg.emergence.clone(), cfg.seed, &snap.library, |k| snap.metadata.get(k).cloned()))
+                    .transpose()
+                    .map_err(|reason| StreamError::Corrupt { object: head.to_hex(), reason })?;
                 let tombstones = meta(&snap, &head, META_TOMBSTONES)?
                     .split(',')
                     .filter(|s| !s.is_empty())
@@ -311,6 +363,7 @@ impl Writer {
                     tombstones,
                     head: Some(head),
                     resumed_from: Some(head),
+                    engine,
                     ..Self::empty(cfg.clone(), store.clone(), buffer.clone())
                 }
             }
@@ -318,29 +371,28 @@ impl Writer {
         };
         hub.subscribe(w.trainer.clone());
         hub.subscribe(buffer);
-        w.gate = CertifyingConsumer::new(DefaultCertifier::default(), hub);
+        w.gate = CertifyingConsumer::new(StreamCertifier::of(&w.cfg), hub);
         w.logged = store.read_lines(DELTA_LOG)?.iter().map(|l| TermRef::from_bytes(l.as_bytes())).collect();
         w.rebuild_frontier();
         Ok(w)
     }
 
     fn rebuild_frontier(&mut self) {
-        self.frontier = self
-            .cfg
-            .frontier
-            .enabled
+        self.frontier = (self.cfg.frontier.enabled && !self.cfg.emergent())
             .then(|| Frontier::build(frontier_spec(&self.cfg, &self.pool.current)));
     }
 
     fn empty(cfg: StreamConfig, store: ObjectStore, buffer: Rc<BufferedConsumer>) -> Self {
         let trainer = Rc::new(StreamingPolicyTrainer::new(cfg.learning_rate));
+        let engine = cfg.emergent().then(|| Engine::new(cfg.emergence.clone(), cfg.seed));
         Self {
+            engine,
+            gate: CertifyingConsumer::new(StreamCertifier::of(&cfg), EventHub::new()),
             cfg,
             store,
             library: Rc::new(RefCell::new(Vec::new())),
             trainer,
             buffer,
-            gate: CertifyingConsumer::new(DefaultCertifier::default(), EventHub::new()),
             known: BTreeSet::new(),
             tombstones: BTreeSet::new(),
             logged: BTreeSet::new(),
@@ -484,28 +536,7 @@ impl Writer {
             if self.cfg.novelty == StreamNovelty::Entailment && entailed_by_library(rule, &self.library.borrow()) {
                 continue;
             }
-            let size = self.library.borrow().len();
-            let mark = self.buffer.len();
-            self.gate.on_event(&MapEvent::CoreGrew {
-                prev_core_size: size,
-                new_core_size: size + 1,
-                added_rule: rule.clone(),
-            });
-            let verdict = self.buffer.events.borrow()[mark..].iter().find_map(|e| match e {
-                MapEvent::RuleCertified { .. } => Some(true),
-                MapEvent::RuleRejectedAtCertification { .. } => Some(false),
-                _ => None,
-            });
-            match verdict {
-                Some(true) => {
-                    self.library.borrow_mut().push(rule.clone());
-                    self.known.insert(h);
-                }
-                Some(false) => {
-                    self.tombstones.insert(h);
-                }
-                None => {}
-            }
+            self.admit(rule);
         }
         let events = self.buffer.drain();
         let changed = events
@@ -519,6 +550,80 @@ impl Writer {
             timestamp: self.stamp(),
             events,
         })
+    }
+
+    fn admit(&mut self, rule: &RewriteRule) -> bool {
+        let h = rule_content_hash(rule);
+        if self.known.contains(&h) {
+            return true;
+        }
+        if self.tombstones.contains(&h) {
+            return false;
+        }
+        let size = self.library.borrow().len();
+        if self.cfg.emergent() {
+            self.gate.context = self.library.borrow().clone();
+        }
+        let mark = self.buffer.len();
+        self.gate.on_event(&MapEvent::CoreGrew {
+            prev_core_size: size,
+            new_core_size: size + 1,
+            added_rule: rule.clone(),
+        });
+        let verdict = self.buffer.events.borrow()[mark..].iter().find_map(|e| match e {
+            MapEvent::RuleCertified { .. } => Some(true),
+            MapEvent::RuleRejectedAtCertification { .. } => Some(false),
+            _ => None,
+        });
+        match verdict {
+            Some(true) => {
+                self.library.borrow_mut().push(rule.clone());
+                self.known.insert(h);
+                true
+            }
+            Some(false) => {
+                self.tombstones.insert(h);
+                false
+            }
+            None => false,
+        }
+    }
+
+    fn emerge(&mut self) -> (Option<EpochDelta>, EmergenceStep) {
+        let parent_root = self.library_root();
+        drop(self.buffer.drain());
+        let mut engine = self.engine.take().expect("an emergent stream holds its engine");
+        let report = engine.step(&mut |rule| self.admit(&rule));
+        let step = EmergenceStep {
+            size: report.size,
+            enumerated: report.enumerated,
+            screened: report.screened,
+            named: report.named.len(),
+            laws: report.laws.len(),
+            held: engine.held().len(),
+        };
+        for name in &report.named {
+            tracing::info!(epoch = self.epoch, name = name.as_str(), "named");
+        }
+        self.engine = Some(engine);
+        let events = self.buffer.drain();
+        let changed = events
+            .iter()
+            .any(|e| matches!(e, MapEvent::RuleCertified { .. } | MapEvent::RuleRejectedAtCertification { .. }));
+        let delta = changed.then(|| EpochDelta {
+            epoch: self.epoch,
+            seed: epoch_seed(self.cfg.seed, self.epoch),
+            parent_root,
+            new_root: self.library_root(),
+            timestamp: self.stamp(),
+            events,
+        });
+        (delta, step)
+    }
+
+    #[must_use]
+    pub fn engine(&self) -> Option<&Engine> {
+        self.engine.as_ref()
     }
 
     pub fn merge(&mut self, delta: &EpochDelta) -> bool {
@@ -561,8 +666,14 @@ impl Writer {
     }
 
     pub fn step(&mut self) -> Result<EpochReport, StreamError> {
-        let discovery = self.discover(self.epoch)?;
-        let delta = self.apply(&discovery);
+        let (epoch, candidates, delta, emergence) = if self.cfg.emergent() {
+            let (delta, step) = self.emerge();
+            (self.epoch, step.enumerated as usize, delta, Some(step))
+        } else {
+            let discovery = self.discover(self.epoch)?;
+            let delta = self.apply(&discovery);
+            (discovery.epoch, discovery.candidates.len(), delta, None)
+        };
         let (certified, rejected) = delta
             .as_ref()
             .map_or((0, 0), |d| (d.certified_count(), d.rejected().count()));
@@ -580,19 +691,20 @@ impl Writer {
         } else {
             self.dry += 1;
         }
-        let mechanism = self.respond_if_saturated(discovery.epoch)?;
+        let mechanism = self.respond_if_saturated(epoch)?;
         let cadence = certified > 0 && self.since_snapshot >= self.cfg.snapshot_every.max(1);
         let checkpoint = self.cfg.checkpoint_epochs > 0 && self.epochs_since_snapshot >= self.cfg.checkpoint_epochs;
         let snapshot = if cadence || checkpoint { Some(self.snapshot()?) } else { None };
         Ok(EpochReport {
-            epoch: discovery.epoch,
-            candidates: discovery.candidates.len(),
+            epoch,
+            candidates,
             certified,
             rejected,
             library: self.library.borrow().len(),
             snapshot,
             frontier: self.frontier.as_ref().map(|f| (self.cursor, f.len())),
             mechanism,
+            emergence,
         })
     }
 
@@ -739,6 +851,14 @@ impl Writer {
         snap.metadata.insert(META_CURSOR.into(), self.cursor.to_string());
         snap.metadata.insert(META_DRY.into(), self.dry.to_string());
         snap.metadata.insert(META_SATURATIONS.into(), self.saturations.to_string());
+        if self.cfg.emergent() {
+            snap.metadata.insert(META_SUBSTRATE.into(), self.cfg.substrate.tag().into());
+        }
+        if let Some(engine) = &self.engine {
+            for (k, v) in engine.state() {
+                snap.metadata.insert(k.into(), v);
+            }
+        }
         snap.content_hash = snap.compute_content_hash();
         snap
     }

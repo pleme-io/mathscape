@@ -15,6 +15,7 @@ mathscape-core.workspace = true
 mathscape-compress.workspace = true
 mathscape-proof.workspace = true
 mathscape-config.workspace = true
+mathscape-emergence.workspace = true
 tatara-lisp.workspace = true
 blake3.workspace = true
 tracing.workspace = true

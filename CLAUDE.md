@@ -2,6 +2,44 @@
 
 pending-platform-mediated: mathscape, axiom-forge, pleme-linker and their -history repos — renamed and created by hand 2026-10-15 to open mathscape's whole closure with fresh history; the org catalog cannot express a rename without a destroy (pangea-architectures org.yaml, genkan entry). Clear once the reconciler has adopted all six.
 
+## Governing law: mathematics emerges, Rust only checks it
+
+The operator, 2026-10-16: *"the rust should be absolutely minimal and lisp
+fully emergent from only the 3 primitives"*; *"the laws should have been found
+emergently too even if they were found again"*; *"we only ever play with one
+model"*. Every change in this repo is read against these four rules.
+
+1. **Rust is a minimal kernel and is never a source of mathematics.** It holds
+   the primitives (`mathscape-kernel`: de Bruijn λ-terms), a fuel-bounded
+   normalizer, persistence (the stream's object store), and the certifier
+   (`KernelCertifier`). No Rust table, enum or match arm may name an operator
+   or a law. *Why:* a law that Rust states was looked up, not found, and the
+   machine learns nothing from finding it.
+2. **Every operator and law emerges from the smallest primitive set.**
+   Point/Number/Fn is the upper bound, not the target. The default is Fn alone
+   (pure λ). Numbers are Church numerals, and Points are the free variables
+   that observation introduces. A law counts only if the machine found it by
+   observing the behaviour of its own named terms. Enumerating a hand-given
+   signature does not count, and a hand-written law does not count either.
+   Rediscovering known mathematics is success. *Why:* AM's successes were
+   later credited to its representation, not its search (Lenat & Brown 1984).
+   We hold ourselves to the stricter test.
+3. **Builtin operators and the `Frontier` exist only as configured-off
+   profiles.** `stream.substrate: builtin` and `stream.frontier.enabled: true`
+   select them. They are never the default, and never deleted. *Why:* behaviour
+   is configured off, never deleted. A profile stays revivable as a baseline.
+4. **There is one model.** The stream's HEAD is the model. Every run advances
+   or forks that one ledger, and a HEAD never changes substrate (the writer
+   refuses). Scratch runs for measurement are throwaway and are never kept as
+   results. *Why:* parallel models split the evidence. A finding is real only
+   when the model that carries it can be replayed from its seed.
+
+Enforced by `mathscape-config`'s
+`the_default_stream_grows_mathematics_from_the_primitives_and_keeps_builtins_and_the_frontier_off`
+and `mathscape-stream`'s `tests/emergent.rs`. Every library rule of a default
+stream is primitive-only and re-certifies under the kernel. Design, decision
+record and measurements: [`docs/arch/emergent-substrate.md`](docs/arch/emergent-substrate.md).
+
 > **★★★ CSE / Knowable Construction.** This repo operates under
 > **Constructive Substrate Engineering** — canonical specification at
 > [`pleme-io/theory/CONSTRUCTIVE-SUBSTRATE-ENGINEERING.md`](https://github.com/pleme-io/theory/blob/main/CONSTRUCTIVE-SUBSTRATE-ENGINEERING.md).
@@ -115,10 +153,11 @@ machine produces the trajectory.
     triggers mechanism mutation, not halt. The machine diagnoses
     its own bottleneck, proposes mutations, keeps winners,
     resumes. Zero human intervention for parameter-bump
-    saturations. ML4.2 runs in `mathscape-stream` since
-    2026-10-15 (candidate + validator axes live through the
-    `Frontier`; corpus/extract axes not yet read there); see the
-    doc's Status section.
+    saturations. ML4.2 ran in `mathscape-stream` 2026-10-15 to
+    2026-10-16 through the `Frontier` over builtin operators; since
+    the emergent substrate became the default it drives only the
+    configured-off `builtin` profile (see the doc's Status section
+    and entry 29).
 24. `docs/arch/self-tuning-meta-loop.md` — **PHASE U + V LANDED**
     (2026-04-18). The outer orchestrator: observe → propose →
     execute → observe, ... Each component is a pure-Lisp value.
@@ -194,6 +233,15 @@ machine produces the trajectory.
     the writer never trusts a donor verdict and re-certifies on
     samples drawn after submission. Revert = demotion, merge =
     union + re-certify, branch = per-ref seed. Build order L1–L8.
+29. `docs/arch/emergent-substrate.md` — **EMERGENT SUBSTRATE**
+    (BUILT E1–E3, 2026-10-16; the default). The smallest primitive
+    set (Fn alone: pure λ, Church numerals, free variables as
+    atoms), chosen by measurement against SK, ι and λ+Nat; the
+    `mathscape-kernel` trust base; the `KernelCertifier` with
+    operator-sorted variables sampled from held definitions; the
+    emergent motor that names operators and laws from λ-terms
+    alone; measured runs; phases E4–E7 (library compression,
+    induction, Lisp driver, demotion) designed.
 
 The sections below (Core Thesis, Compression as Tractability, etc.)
 are preserved because they explain the *philosophy* the machine
@@ -1116,7 +1164,7 @@ capability.
 | `mathscape-migration` | SeaORM database migrations for PostgreSQL schema lifecycle |
 | `mathscape-db` | Database management CLI: migrate, rollback, status, verify, reset |
 | `mathscape-proof` | Proof construction, verification status tracking, proof composition, Lean 4 export |
-| `mathscape-compress` | Anti-unification, e-graph integration (`egg`), library extraction, rewriting; the `Motor` (the one `ScenarioExecutor`, seeded, with its `Extractor`); the `Frontier` (observational-equivalence equation enumerator) and `entailed_by_library` (novelty = not provable from the library) |
+| `mathscape-compress` | Anti-unification, e-graph integration (`egg`), library extraction, rewriting; the `Motor` (the one `ScenarioExecutor`, seeded, with its `Extractor`); the `Frontier` (observational-equivalence enumerator over the 22 builtin operators) and `entailed_by_library`. All of it serves only the configured-off `builtin` profile: the Frontier enumerates a hand-given signature, so it is never a law source of the default model |
 | `mathscape-evolve` | Genetic operators, population management, tournament selection |
 | `mathscape-reward` | Description length, compression ratio, novelty scoring, meta-compression, combined fitness |
 | `mathscape-policy` | Optional RL policy network for guided mutation (Phase 7+) |
@@ -1124,7 +1172,9 @@ capability.
 | `mathscape-mcp` | MCP server (stdio transport) — observe-only tools for agent interaction, `Arc<Engine>` read boundary |
 | `mathscape-service` | Long-running HTTP service — engine loop + health/metrics + read-only query API for K8s deployment |
 | `mathscape-discovery` | Discovery mining: epoch analysis, known-math pattern matching, representation data for React UI |
-| `mathscape-stream` | The one writer: grows the canonical model epoch by epoch (motor + frontier → entailment gate → certification → trainer), mutates its `MechanismConfig` on a plateau (ML4.2), persists content-addressed snapshots behind `HEAD`, resumes from `HEAD`; see `docs/arch/stream-training-infra.md` |
+| `mathscape-stream` | The one writer: grows the one model epoch by epoch, persists content-addressed snapshots behind `HEAD`, resumes from `HEAD`, refuses a HEAD grown on another substrate. Default `substrate: emergent` runs `mathscape-emergence` behind the `KernelCertifier` gate; `substrate: builtin` (with `frontier.enabled: true`) is the v0.1.11 motor + Frontier + ML4.2 profile, kept configured off; see `docs/arch/emergent-substrate.md` and `docs/arch/stream-training-infra.md` |
+| `mathscape-kernel` | The trust base: de Bruijn λ-terms, a call-by-need normal-order normalizer with fuel/node/depth budgets, numeral observation by η-expansion. No dependencies, `#![forbid(unsafe_code)]`, names no operator |
+| `mathscape-emergence` | The emergent motor over the kernel: unranked enumeration of closed normal forms, behaviour tables, naming (irreducible + law-bearing), QuickSpec-style conjecture over the model's own symbols with congruence-closure pruning, and the `KernelCertifier` (sorted variables; operator variables sampled from held definitions). The driver is Rust today; its destination is tatara-lisp (E6) |
 
 ## Service Mode
 
@@ -1139,7 +1189,7 @@ See [docs/arch/service.md](docs/arch/service.md) for full details.
 | `mathscape-mcp` | stdio (MCP protocol) | Local Claude Code agent interaction |
 | `mathscape-cli` | Terminal REPL | Interactive human exploration |
 | `mathscape-db` | CLI | Database migrations, status, verify, reset |
-| `mathscape-stream` | CLI, `stream:` config; `/healthz` `/readyz` `/metrics` on `stream.health_addr` | The one-writer stream: seed in, `objects/` + `HEAD` + `deltas.lisp` out, kill-9 safe. Deployed by the chart's `stream.enabled` (its own StatefulSet); on ryn's engenho by nix `pleme.mathscape.stream` |
+| `mathscape-stream` | CLI, `stream:` config; `/healthz` `/readyz` `/metrics` on `stream.health_addr` | The one-writer stream: seed in, `objects/` + `HEAD` + `deltas.lisp` out, kill-9 safe; grows the one model from the kernel primitives by default (`substrate: emergent`). Deployed by the chart's `stream.enabled` (its own StatefulSet); on ryn's engenho by nix `pleme.mathscape.stream` |
 
 The service binary auto-starts the engine loop and runs epochs
 continuously. All state persists to `/data/` (redb + SQLite).

@@ -16,6 +16,15 @@ This doc articulates the missing architectural layer: **the
 machine must self-mutate its OWN DISCOVERY MECHANISMS with the
 same autonomy that already applies to the apparatus.**
 
+## Status (2026-10-16): configured off with the builtin substrate
+
+Everything below drives the `builtin` stream profile
+(`stream.substrate: builtin`, `stream.frontier.enabled: true`), which is
+no longer the default. Its laws were enumerated over the 22 hand-written
+operators, not found (`emergent-substrate.md` §7). The default stream
+grows from the kernel primitives instead. Mechanism evolution for that
+substrate (mutating `EmergenceConfig` on a plateau) is not built yet.
+
 ## Status (2026-10-15, v0.1.9): ML4.2 runs in the stream, past its second plateau
 
 `mathscape-stream` answers a plateau by mutating its mechanism,

@@ -20,6 +20,11 @@ pub struct Gauges {
     saturations: AtomicU64,
     frontier_cursor: AtomicU64,
     frontier_size: AtomicU64,
+    emergent: AtomicBool,
+    enumeration_size: AtomicU64,
+    enumerated: AtomicU64,
+    held: AtomicU64,
+    named: AtomicU64,
     started_at: AtomicU64,
     last_epoch_at: AtomicU64,
     last_snapshot_at: AtomicU64,
@@ -61,6 +66,13 @@ impl Gauges {
             self.frontier_cursor.store(cursor as u64, Ordering::Relaxed);
             self.frontier_size.store(size as u64, Ordering::Relaxed);
         }
+        if let Some(e) = r.emergence {
+            self.emergent.store(true, Ordering::Relaxed);
+            self.enumeration_size.store(e.size as u64, Ordering::Relaxed);
+            self.enumerated.fetch_add(e.enumerated, Ordering::Relaxed);
+            self.held.store(e.held as u64, Ordering::Relaxed);
+            self.named.fetch_add(e.named as u64, Ordering::Relaxed);
+        }
         match r.mechanism {
             Some(MechanismEvent::Mutated) => {
                 self.mutations.fetch_add(1, Ordering::Relaxed);
@@ -88,7 +100,7 @@ impl Gauges {
     pub fn render(&self) -> String {
         let seed = self.seed;
         let get = |a: &AtomicU64| a.load(Ordering::Relaxed);
-        let rows: [(&str, &str, &str, u64); 15] = [
+        let rows: [(&str, &str, &str, u64); 20] = [
             ("mathscape_stream_up", "gauge", "1 once the writer has opened its HEAD", u64::from(self.ready())),
             ("mathscape_stream_resumed", "gauge", "1 when this process resumed from an existing HEAD", u64::from(self.resumed.load(Ordering::Relaxed))),
             ("mathscape_stream_epoch", "gauge", "last epoch the writer completed", get(&self.epoch)),
@@ -100,6 +112,11 @@ impl Gauges {
             ("mathscape_stream_mechanism_saturations_total", "counter", "plateau responses where no mutation helped", get(&self.saturations)),
             ("mathscape_stream_frontier_cursor", "gauge", "position in the equation frontier", get(&self.frontier_cursor)),
             ("mathscape_stream_frontier_size", "gauge", "equations the frontier currently holds", get(&self.frontier_size)),
+            ("mathscape_stream_emergent", "gauge", "1 when the model grows from the kernel primitives (the emergent substrate)", u64::from(self.emergent.load(Ordering::Relaxed))),
+            ("mathscape_stream_emergence_term_size", "gauge", "size of the lambda terms the emergent motor is enumerating", get(&self.enumeration_size)),
+            ("mathscape_stream_emergence_enumerated_total", "counter", "primitive terms the emergent motor has observed in this process", get(&self.enumerated)),
+            ("mathscape_stream_emergence_symbols", "gauge", "constants and operators the model holds", get(&self.held)),
+            ("mathscape_stream_emergence_named_total", "counter", "constants and operators named by this process", get(&self.named)),
             ("mathscape_stream_started_timestamp_seconds", "gauge", "when this process started", get(&self.started_at)),
             ("mathscape_stream_last_epoch_timestamp_seconds", "gauge", "when the last epoch completed (0 before the first)", get(&self.last_epoch_at)),
             ("mathscape_stream_last_snapshot_timestamp_seconds", "gauge", "when HEAD last moved (0 before the first snapshot)", get(&self.last_snapshot_at)),
@@ -212,6 +229,7 @@ mod tests {
             snapshot: snapshot.then(|| mathscape_core::hash::TermRef::from_bytes(b"head")),
             frontier: Some((7, 99)),
             mechanism: Some(MechanismEvent::Mutated),
+            emergence: None,
         }
     }
 

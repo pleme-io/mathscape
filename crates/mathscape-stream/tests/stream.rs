@@ -20,13 +20,14 @@ impl Dir {
             until_epoch: Some(until),
             snapshot_every: 1,
             checkpoint_epochs: 3,
-            ..StreamConfig::seeded(7, self.0.to_string_lossy())
+            ..StreamConfig::builtin(7, self.0.to_string_lossy())
         }
     }
 
     fn evolving(&self, until: u64) -> StreamConfig {
         StreamConfig {
             frontier: StreamFrontier {
+                enabled: true,
                 per_epoch: 128,
                 ..StreamFrontier::default()
             },

@@ -15,3 +15,7 @@ serde.workspace = true
 mathscape-reward.workspace = true
 mathscape-compress.workspace = true
 mathscape-evolve.workspace = true
+mathscape-emergence.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true

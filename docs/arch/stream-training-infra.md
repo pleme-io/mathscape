@@ -140,6 +140,12 @@ exhausted frontier plus `plateau_epochs` dry epochs triggers
 `mechanism.respond: false`, `novelty: off` is exactly 0.1.7
 (`tests/stream.rs` pins it).
 
+Since 2026-10-16 all of the above is the configured-off `builtin`
+profile (`substrate: builtin`, `frontier.enabled: true`; the 0.1.7 shape
+additionally needs `substrate: builtin`). The default writer runs the
+emergent substrate (`emergent-substrate.md`). A HEAD records its
+substrate, and a writer refuses to resume a HEAD under the other one.
+
 **Measurement** (this Mac, release, defaults, two seeds run
 concurrently, 30-minute cap; both hit the cap, so rates are from the
 epoch log via duckdb):
