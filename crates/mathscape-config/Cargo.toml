@@ -12,10 +12,11 @@ description = "Shared configuration: defaults → YAML → env vars (shikumi)"
 # env layering for mathscape matches shikumi's ProviderChain exactly.
 shikumi = "0.1"
 serde.workspace = true
+schemars.workspace = true
+serde_json.workspace = true
+helm-forge = { version = "0.1.2", default-features = false, features = ["values-schema"] }
 mathscape-reward.workspace = true
 mathscape-compress.workspace = true
 mathscape-evolve.workspace = true
 mathscape-emergence.workspace = true
 
-[dev-dependencies]
-serde_json.workspace = true

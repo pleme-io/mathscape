@@ -1,18 +1,18 @@
 {
   "schema_version": 2,
-  "cargo_lock_sha256": "f9e673dacf0167fbdede29ca9f5e859cdf3a82d0b9c20ed1f1530fbc5f57ab4d",
+  "cargo_lock_sha256": "5e164cca1738fbc8a6a2424135acf3d47e7a2a90ca336027f9db1c95b312cb8a",
   "manifest_sha256": {
     "Cargo.toml": "14511c5c5e89ee995eb522f0d6875dfeda1ee522ed82e1155886306e827ecf81",
     "crates/mathscape-acquisition/Cargo.toml": "5d9543090fad1cbb511b4d75b6b09bd1dd248359b9ad306ac98c1f827ca4afa7",
     "crates/mathscape-api/Cargo.toml": "180c3457b4fafa02d541a32144bfbca98163a7261e6999658802f0c20ab8c3a7",
     "crates/mathscape-axiom-bridge/Cargo.toml": "9ebe51c3c47013d46002b269d966b39def44a4d68dcd435eee5d949e3a7c26ee",
     "crates/mathscape-cli/Cargo.toml": "67da4a30890eabff4ed2338879b46fc741922c1483222201cc775795280d391a",
-    "crates/mathscape-compress/Cargo.toml": "b6cd139b1608cf84d468c92ecc8f9b9e421b6788ab35efe9b97fcfe25653fcda",
-    "crates/mathscape-config/Cargo.toml": "d403b068d65fc2376348ae544bf6e7a7a06add1792ff30c04be5c876588b9e6d",
+    "crates/mathscape-compress/Cargo.toml": "0308c52277de08b16d223b4659c39ff266a1bffb2da22103e9f1007f6869e9a7",
+    "crates/mathscape-config/Cargo.toml": "0cc967e00332bf6a0303054a45087af8f9d7a1ff9c7ebd304669ba207cad02a9",
     "crates/mathscape-core/Cargo.toml": "a9260052ef16704e40978dfaeccf5af68312575f689fd50cdab0a2ff277961dd",
     "crates/mathscape-db/Cargo.toml": "a11339fa01d5a9ef3953d6a4a732aae02797cbf0c45dcee04a2566567459e204",
     "crates/mathscape-discovery/Cargo.toml": "1b5a542004889c9fd96b35857f4a0c8e650984e6999bf973aeec85610676740b",
-    "crates/mathscape-emergence/Cargo.toml": "0e1d92251e90c14c7688a81c4c70fcb98aae57c4858d510bc3c8319cf7fb7f70",
+    "crates/mathscape-emergence/Cargo.toml": "530cac1017103f5de192202e51087edb6c1b82bf909b9454328034841a96e781",
     "crates/mathscape-entity/Cargo.toml": "58303c96ca63b89e5898548988af3ff136cb29cb5927a40862f5209006b2358d",
     "crates/mathscape-evolve/Cargo.toml": "8388fc00456a41ff665466907bb35daeaf078cb8704617dbb4e76bfa9e6a8ac4",
     "crates/mathscape-inference-api/Cargo.toml": "cee07ff96e35ad9c2644e96d91acacd5ad38b6254d52ea7e2e28cd7c0b707730",
@@ -5259,6 +5259,46 @@
         "build_dependencies": [],
         "features": []
       },
+      "helm-forge-0.1.2": {
+        "runtime_dependencies": [
+          {
+            "name": "schemars",
+            "package_key": "schemars-0.8.22",
+            "kind": "normal",
+            "features": [],
+            "uses_default_features": true,
+            "optional": true,
+            "target": null,
+            "tree": "target"
+          },
+          {
+            "name": "serde",
+            "package_key": "serde-1.0.228",
+            "kind": "normal",
+            "features": [
+              "derive"
+            ],
+            "uses_default_features": true,
+            "optional": false,
+            "target": null,
+            "tree": "target"
+          },
+          {
+            "name": "serde_json",
+            "package_key": "serde_json-1.0.149",
+            "kind": "normal",
+            "features": [],
+            "uses_default_features": true,
+            "optional": false,
+            "target": null,
+            "tree": "target"
+          }
+        ],
+        "build_dependencies": [],
+        "features": [
+          "values-schema"
+        ]
+      },
       "hex-0.4.3": {
         "runtime_dependencies": [],
         "build_dependencies": [],
@@ -6946,6 +6986,16 @@
             "tree": "target"
           },
           {
+            "name": "schemars",
+            "package_key": "schemars-0.8.22",
+            "kind": "normal",
+            "features": [],
+            "uses_default_features": true,
+            "optional": false,
+            "target": null,
+            "tree": "target"
+          },
+          {
             "name": "serde",
             "package_key": "serde-1.0.228",
             "kind": "normal",
@@ -6963,6 +7013,18 @@
       },
       "mathscape-config-0.1.12": {
         "runtime_dependencies": [
+          {
+            "name": "helm_forge",
+            "package_key": "helm-forge-0.1.2",
+            "kind": "normal",
+            "features": [
+              "values-schema"
+            ],
+            "uses_default_features": false,
+            "optional": false,
+            "target": null,
+            "tree": "target"
+          },
           {
             "name": "mathscape_compress",
             "package_key": "mathscape-compress-0.1.12",
@@ -7004,12 +7066,32 @@
             "tree": "target"
           },
           {
+            "name": "schemars",
+            "package_key": "schemars-0.8.22",
+            "kind": "normal",
+            "features": [],
+            "uses_default_features": true,
+            "optional": false,
+            "target": null,
+            "tree": "target"
+          },
+          {
             "name": "serde",
             "package_key": "serde-1.0.228",
             "kind": "normal",
             "features": [
               "derive"
             ],
+            "uses_default_features": true,
+            "optional": false,
+            "target": null,
+            "tree": "target"
+          },
+          {
+            "name": "serde_json",
+            "package_key": "serde_json-1.0.149",
+            "kind": "normal",
+            "features": [],
             "uses_default_features": true,
             "optional": false,
             "target": null,
@@ -7263,6 +7345,16 @@
           {
             "name": "mathscape_kernel",
             "package_key": "mathscape-kernel-0.1.12",
+            "kind": "normal",
+            "features": [],
+            "uses_default_features": true,
+            "optional": false,
+            "target": null,
+            "tree": "target"
+          },
+          {
+            "name": "schemars",
+            "package_key": "schemars-0.8.22",
             "kind": "normal",
             "features": [],
             "uses_default_features": true,
@@ -21249,6 +21341,9 @@
     "heck-0.5.0": {
       "edition": "2021"
     },
+    "helm-forge-0.1.2": {
+      "edition": "2024"
+    },
     "hex-0.4.3": {
       "edition": "2018"
     },
@@ -21442,7 +21537,13 @@
       "lib_target": {
         "name": "mathscape_config",
         "path": "src/lib.rs"
-      }
+      },
+      "binaries": [
+        {
+          "name": "mathscape-values-schema",
+          "path": "src/bin/mathscape-values-schema.rs"
+        }
+      ]
     },
     "mathscape-core-0.1.12": {
       "edition": "2024",

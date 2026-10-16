@@ -112,9 +112,8 @@ spec:
             - name: MATHSCAPE_STREAM__UNTIL_EPOCH
               value: {{ . | toString | quote }}
             {{- end }}
-            {{- range $k, $v := $s.config }}
-            - name: {{ printf "MATHSCAPE_STREAM__%s" (upper $k) }}
-              value: {{ $v | toString | quote }}
+            {{- with $s.config }}
+            {{- include "mathscape.streamEnv" (dict "prefix" "MATHSCAPE_STREAM" "config" .) | trim | nindent 12 }}
             {{- end }}
           {{- with $s.resources }}
           resources:

@@ -1,0 +1,405 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "additionalProperties": false,
+  "definitions": {
+    "Basis": {
+      "enum": [
+        "lambda",
+        "combinators"
+      ],
+      "type": "string"
+    },
+    "EmergenceConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "basis": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/Basis"
+            }
+          ]
+        },
+        "certify_exhaustive": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "certify_pool": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "certify_samples": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "definable_filter": {
+          "type": "boolean"
+        },
+        "fingerprint_pool": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "fingerprint_samples": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "fuel": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "generative": {
+          "type": "boolean"
+        },
+        "law_max_size": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "law_universe_max": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "law_vars": {
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "library_atoms": {
+          "type": "boolean"
+        },
+        "max_constants": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "max_depth": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "max_laws_per_name": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "max_nodes": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "max_term_size": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "min_image_binary": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "min_image_unary": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "min_laws": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "names_per_epoch": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "terms_per_epoch": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "Extractor": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "enum": [
+                "derived-laws"
+              ],
+              "type": "string"
+            },
+            "min_support": {
+              "format": "uint",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "step_limit": {
+              "format": "uint",
+              "minimum": 0.0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "kind",
+            "min_support",
+            "step_limit"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "k_samples": {
+              "format": "uint",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "kind": {
+              "enum": [
+                "validated"
+              ],
+              "type": "string"
+            },
+            "min_support": {
+              "format": "uint",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "seed": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "step_limit": {
+              "format": "uint",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "subterm_depth": {
+              "format": "uint",
+              "minimum": 0.0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "k_samples",
+            "kind",
+            "min_support",
+            "seed",
+            "step_limit",
+            "subterm_depth"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "StreamClock": {
+      "enum": [
+        "logical",
+        "wall"
+      ],
+      "type": "string"
+    },
+    "StreamFrontier": {
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "per_epoch": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "variables": {
+          "format": "uint32",
+          "maximum": 4294967295,
+          "minimum": 0.0,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "StreamGraveyard": {
+      "enum": [
+        "context",
+        "mutation"
+      ],
+      "type": "string"
+    },
+    "StreamMechanism": {
+      "additionalProperties": false,
+      "properties": {
+        "drive_motor": {
+          "type": "boolean"
+        },
+        "escalation_budget": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "graveyard": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/StreamGraveyard"
+            }
+          ]
+        },
+        "mutations_per_round": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "plateau_epochs": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "respond": {
+          "type": "boolean"
+        },
+        "trial_budget": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "trial_ceiling": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "trial_scale": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/StreamTrialScale"
+            }
+          ]
+        },
+        "trial_stop_after": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "StreamNovelty": {
+      "enum": [
+        "entailment",
+        "off"
+      ],
+      "type": "string"
+    },
+    "StreamSubstrate": {
+      "enum": [
+        "emergent",
+        "builtin"
+      ],
+      "type": "string"
+    },
+    "StreamTrialScale": {
+      "enum": [
+        "opened",
+        "fixed"
+      ],
+      "type": "string"
+    }
+  },
+  "properties": {
+    "adaptive_every": {
+      "format": "uint64",
+      "minimum": 0.0,
+      "type": "integer"
+    },
+    "checkpoint_epochs": {
+      "format": "uint64",
+      "minimum": 0.0,
+      "type": "integer"
+    },
+    "clock": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/StreamClock"
+        }
+      ]
+    },
+    "corpus_max_nodes": {
+      "format": "uint",
+      "minimum": 0.0,
+      "type": "integer"
+    },
+    "emergence": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/EmergenceConfig"
+        }
+      ]
+    },
+    "extractor": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/Extractor"
+        }
+      ]
+    },
+    "frontier": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/StreamFrontier"
+        }
+      ]
+    },
+    "iterations": {
+      "format": "uint",
+      "minimum": 0.0,
+      "type": "integer"
+    },
+    "learning_rate": {
+      "format": "double",
+      "type": "number"
+    },
+    "mechanism": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/StreamMechanism"
+        }
+      ]
+    },
+    "novelty": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/StreamNovelty"
+        }
+      ]
+    },
+    "phases_per_epoch": {
+      "format": "uint",
+      "minimum": 0.0,
+      "type": "integer"
+    },
+    "snapshot_every": {
+      "format": "uint64",
+      "minimum": 0.0,
+      "type": "integer"
+    },
+    "substrate": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/StreamSubstrate"
+        }
+      ]
+    }
+  },
+  "title": "StreamConfig",
+  "type": "object"
+}

@@ -1,0 +1,1188 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "additionalProperties": false,
+  "definitions": {
+    "Basis": {
+      "enum": [
+        "lambda",
+        "combinators"
+      ],
+      "type": "string"
+    },
+    "ContainerPort": {
+      "additionalProperties": false,
+      "properties": {
+        "containerPort": {
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "name": {
+          "type": "string"
+        },
+        "protocol": {
+          "$ref": "#/definitions/Protocol"
+        }
+      },
+      "required": [
+        "containerPort",
+        "name"
+      ],
+      "type": "object"
+    },
+    "EmergenceConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "basis": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/Basis"
+            }
+          ],
+          "default": "lambda"
+        },
+        "certify_exhaustive": {
+          "default": 4096,
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "certify_pool": {
+          "default": 7,
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "certify_samples": {
+          "default": 64,
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "definable_filter": {
+          "default": true,
+          "type": "boolean"
+        },
+        "fingerprint_pool": {
+          "default": 5,
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "fingerprint_samples": {
+          "default": 16,
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "fuel": {
+          "default": 20000,
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "generative": {
+          "default": true,
+          "type": "boolean"
+        },
+        "law_max_size": {
+          "default": 5,
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "law_universe_max": {
+          "default": 20000,
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "law_vars": {
+          "default": 3,
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "library_atoms": {
+          "default": false,
+          "type": "boolean"
+        },
+        "max_constants": {
+          "default": 2,
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "max_depth": {
+          "default": 1024,
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "max_laws_per_name": {
+          "default": 16,
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "max_nodes": {
+          "default": 4096,
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "max_term_size": {
+          "default": 24,
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "min_image_binary": {
+          "default": 4,
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "min_image_unary": {
+          "default": 6,
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "min_laws": {
+          "default": 2,
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "names_per_epoch": {
+          "default": 1,
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "terms_per_epoch": {
+          "default": 20000,
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "Extractor": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "enum": [
+                "derived-laws"
+              ],
+              "type": "string"
+            },
+            "min_support": {
+              "format": "uint",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "step_limit": {
+              "format": "uint",
+              "minimum": 0.0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "kind",
+            "min_support",
+            "step_limit"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "k_samples": {
+              "format": "uint",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "kind": {
+              "enum": [
+                "validated"
+              ],
+              "type": "string"
+            },
+            "min_support": {
+              "format": "uint",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "seed": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "step_limit": {
+              "format": "uint",
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            "subterm_depth": {
+              "format": "uint",
+              "minimum": 0.0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "k_samples",
+            "kind",
+            "min_support",
+            "seed",
+            "step_limit",
+            "subterm_depth"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "Health": {
+      "additionalProperties": false,
+      "properties": {
+        "livenessFailureThreshold": {
+          "format": "uint32",
+          "maximum": 4294967295,
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "livenessInitialDelay": {
+          "format": "uint32",
+          "maximum": 4294967295,
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "livenessPeriod": {
+          "format": "uint32",
+          "maximum": 4294967295,
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "path": {
+          "type": "string"
+        },
+        "port": {
+          "type": "string"
+        },
+        "readinessFailureThreshold": {
+          "format": "uint32",
+          "maximum": 4294967295,
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "readinessInitialDelay": {
+          "format": "uint32",
+          "maximum": 4294967295,
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "readinessPeriod": {
+          "format": "uint32",
+          "maximum": 4294967295,
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "readyPath": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "Image": {
+      "additionalProperties": false,
+      "properties": {
+        "pullPolicy": {
+          "$ref": "#/definitions/PullPolicy"
+        },
+        "repository": {
+          "type": "string"
+        },
+        "tag": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "Monitoring": {
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "interval": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "port": {
+          "type": "string"
+        },
+        "scrapeTimeout": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "NetworkPolicy": {
+      "additionalProperties": false,
+      "properties": {
+        "additionalEgress": {
+          "items": true,
+          "type": "array"
+        },
+        "additionalIngress": {
+          "items": true,
+          "type": "array"
+        },
+        "allowDns": {
+          "type": "boolean"
+        },
+        "allowPrometheus": {
+          "type": "boolean"
+        },
+        "enabled": {
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
+    "Pdb": {
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "minAvailable": {
+          "format": "uint32",
+          "maximum": 4294967295,
+          "minimum": 0.0,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "Persistence": {
+      "additionalProperties": false,
+      "properties": {
+        "accessModes": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "mountPath": {
+          "type": "string"
+        },
+        "size": {
+          "type": "string"
+        },
+        "storageClass": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "Protocol": {
+      "enum": [
+        "TCP",
+        "UDP",
+        "SCTP"
+      ],
+      "type": "string"
+    },
+    "PullPolicy": {
+      "enum": [
+        "Always",
+        "IfNotPresent",
+        "Never"
+      ],
+      "type": "string"
+    },
+    "Service": {
+      "additionalProperties": false,
+      "properties": {
+        "ports": {
+          "items": {
+            "$ref": "#/definitions/ServicePort"
+          },
+          "type": "array"
+        },
+        "type": {
+          "$ref": "#/definitions/ServiceType"
+        }
+      },
+      "type": "object"
+    },
+    "ServiceAccount": {
+      "additionalProperties": false,
+      "properties": {
+        "annotations": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "create": {
+          "type": "boolean"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "ServicePort": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "port": {
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "protocol": {
+          "$ref": "#/definitions/Protocol"
+        },
+        "targetPort": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "port"
+      ],
+      "type": "object"
+    },
+    "ServiceType": {
+      "enum": [
+        "ClusterIP",
+        "NodePort",
+        "LoadBalancer"
+      ],
+      "type": "string"
+    },
+    "StartupProbe": {
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "failureThreshold": {
+          "format": "uint32",
+          "maximum": 4294967295,
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "initialDelaySeconds": {
+          "format": "uint32",
+          "maximum": 4294967295,
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "path": {
+          "type": "string"
+        },
+        "periodSeconds": {
+          "format": "uint32",
+          "maximum": 4294967295,
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "port": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "StorageKind": {
+      "enum": [
+        "claimTemplate",
+        "hostPath"
+      ],
+      "type": "string"
+    },
+    "Stream": {
+      "additionalProperties": false,
+      "if": {
+        "properties": {
+          "enabled": {
+            "const": true
+          }
+        },
+        "required": [
+          "enabled"
+        ]
+      },
+      "properties": {
+        "alerts": {
+          "$ref": "#/definitions/StreamAlerts"
+        },
+        "breathe": {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        "command": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "config": {
+          "$ref": "#/definitions/StreamConfig"
+        },
+        "dataDir": {
+          "type": "string"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "health": {
+          "$ref": "#/definitions/StreamHealth"
+        },
+        "image": {
+          "$ref": "#/definitions/StreamImage"
+        },
+        "nodeSelector": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "resources": {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        "rustLog": {
+          "type": "string"
+        },
+        "scrape": {
+          "$ref": "#/definitions/StreamScrape"
+        },
+        "seed": {
+          "description": "Non-negative integer, as a string; required when stream.enabled",
+          "pattern": "^([0-9]+)?$",
+          "type": "string"
+        },
+        "storage": {
+          "$ref": "#/definitions/StreamStorage"
+        },
+        "terminationGracePeriodSeconds": {
+          "format": "uint32",
+          "maximum": 4294967295,
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "untilEpoch": {
+          "anyOf": [
+            {
+              "minimum": 0.0,
+              "type": "integer"
+            },
+            {
+              "pattern": "^([0-9]+)?$",
+              "type": "string"
+            }
+          ]
+        }
+      },
+      "required": [
+        "seed",
+        "untilEpoch"
+      ],
+      "then": {
+        "properties": {
+          "seed": {
+            "minLength": 1
+          }
+        },
+        "required": [
+          "seed"
+        ]
+      },
+      "type": "object"
+    },
+    "StreamAlerts": {
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "plateauHours": {
+          "format": "uint32",
+          "maximum": 4294967295,
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "snapshotStaleMinutes": {
+          "format": "uint32",
+          "maximum": 4294967295,
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "stalledMinutes": {
+          "format": "uint32",
+          "maximum": 4294967295,
+          "minimum": 0.0,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "StreamClock": {
+      "enum": [
+        "logical",
+        "wall"
+      ],
+      "type": "string"
+    },
+    "StreamConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "adaptive_every": {
+          "default": 1,
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "checkpoint_epochs": {
+          "default": 64,
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "clock": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/StreamClock"
+            }
+          ],
+          "default": "logical"
+        },
+        "corpus_max_nodes": {
+          "default": 2048,
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "emergence": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/EmergenceConfig"
+            }
+          ],
+          "default": {
+            "basis": "lambda",
+            "certify_exhaustive": 4096,
+            "certify_pool": 7,
+            "certify_samples": 64,
+            "definable_filter": true,
+            "fingerprint_pool": 5,
+            "fingerprint_samples": 16,
+            "fuel": 20000,
+            "generative": true,
+            "law_max_size": 5,
+            "law_universe_max": 20000,
+            "law_vars": 3,
+            "library_atoms": false,
+            "max_constants": 2,
+            "max_depth": 1024,
+            "max_laws_per_name": 16,
+            "max_nodes": 4096,
+            "max_term_size": 24,
+            "min_image_binary": 4,
+            "min_image_unary": 6,
+            "min_laws": 2,
+            "names_per_epoch": 1,
+            "terms_per_epoch": 20000
+          }
+        },
+        "extractor": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/Extractor"
+            }
+          ],
+          "default": {
+            "kind": "derived-laws",
+            "min_support": 2,
+            "step_limit": 300
+          }
+        },
+        "frontier": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/StreamFrontier"
+            }
+          ],
+          "default": {
+            "enabled": false,
+            "per_epoch": 64,
+            "variables": 3
+          }
+        },
+        "iterations": {
+          "default": 5,
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "learning_rate": {
+          "default": 0.1,
+          "format": "double",
+          "type": "number"
+        },
+        "mechanism": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/StreamMechanism"
+            }
+          ],
+          "default": {
+            "drive_motor": true,
+            "escalation_budget": 2,
+            "graveyard": "context",
+            "mutations_per_round": 6,
+            "plateau_epochs": 4,
+            "respond": true,
+            "trial_budget": 256,
+            "trial_ceiling": 32768,
+            "trial_scale": "opened",
+            "trial_stop_after": 1
+          }
+        },
+        "novelty": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/StreamNovelty"
+            }
+          ],
+          "default": "entailment"
+        },
+        "phases_per_epoch": {
+          "default": 2,
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "snapshot_every": {
+          "default": 4,
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "substrate": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/StreamSubstrate"
+            }
+          ],
+          "default": "emergent"
+        }
+      },
+      "type": "object"
+    },
+    "StreamFrontier": {
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "default": false,
+          "type": "boolean"
+        },
+        "per_epoch": {
+          "default": 64,
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "variables": {
+          "default": 3,
+          "format": "uint32",
+          "maximum": 4294967295,
+          "minimum": 0.0,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "StreamGraveyard": {
+      "enum": [
+        "context",
+        "mutation"
+      ],
+      "type": "string"
+    },
+    "StreamHealth": {
+      "additionalProperties": false,
+      "properties": {
+        "bindAddress": {
+          "type": "string"
+        },
+        "livenessFailureThreshold": {
+          "format": "uint32",
+          "maximum": 4294967295,
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "livenessPeriod": {
+          "format": "uint32",
+          "maximum": 4294967295,
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "port": {
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "readinessPeriod": {
+          "format": "uint32",
+          "maximum": 4294967295,
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "startupFailureThreshold": {
+          "format": "uint32",
+          "maximum": 4294967295,
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "startupPeriod": {
+          "format": "uint32",
+          "maximum": 4294967295,
+          "minimum": 0.0,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "StreamImage": {
+      "additionalProperties": false,
+      "properties": {
+        "repository": {
+          "type": "string"
+        },
+        "tag": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "StreamMechanism": {
+      "additionalProperties": false,
+      "properties": {
+        "drive_motor": {
+          "default": true,
+          "type": "boolean"
+        },
+        "escalation_budget": {
+          "default": 2,
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "graveyard": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/StreamGraveyard"
+            }
+          ],
+          "default": "context"
+        },
+        "mutations_per_round": {
+          "default": 6,
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "plateau_epochs": {
+          "default": 4,
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "respond": {
+          "default": true,
+          "type": "boolean"
+        },
+        "trial_budget": {
+          "default": 256,
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "trial_ceiling": {
+          "default": 32768,
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "trial_scale": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/StreamTrialScale"
+            }
+          ],
+          "default": "opened"
+        },
+        "trial_stop_after": {
+          "default": 1,
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "StreamNovelty": {
+      "enum": [
+        "entailment",
+        "off"
+      ],
+      "type": "string"
+    },
+    "StreamScrape": {
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "interval": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "StreamStorage": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "$ref": "#/definitions/StorageKind"
+        },
+        "mountPath": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "size": {
+          "type": "string"
+        },
+        "storageClass": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "StreamSubstrate": {
+      "enum": [
+        "emergent",
+        "builtin"
+      ],
+      "type": "string"
+    },
+    "StreamTrialScale": {
+      "enum": [
+        "opened",
+        "fixed"
+      ],
+      "type": "string"
+    },
+    "Toggle": {
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    }
+  },
+  "properties": {
+    "additionalLabels": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "type": "object"
+    },
+    "affinity": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "annotations": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "type": "object"
+    },
+    "args": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "attestation": {
+      "$ref": "#/definitions/Toggle"
+    },
+    "command": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "configMaps": {
+      "items": true,
+      "type": "array"
+    },
+    "downwardApi": {
+      "$ref": "#/definitions/Toggle"
+    },
+    "engine": {
+      "$ref": "#/definitions/Toggle"
+    },
+    "env": {
+      "items": true,
+      "type": "array"
+    },
+    "envFrom": {
+      "items": true,
+      "type": "array"
+    },
+    "fullnameOverride": {
+      "type": "string"
+    },
+    "global": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "health": {
+      "$ref": "#/definitions/Health"
+    },
+    "image": {
+      "$ref": "#/definitions/Image"
+    },
+    "imagePullSecrets": {
+      "items": true,
+      "type": "array"
+    },
+    "istio": {
+      "$ref": "#/definitions/Toggle"
+    },
+    "lifecycle": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "monitoring": {
+      "$ref": "#/definitions/Monitoring"
+    },
+    "nameOverride": {
+      "type": "string"
+    },
+    "networkPolicy": {
+      "$ref": "#/definitions/NetworkPolicy"
+    },
+    "nodeSelector": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "type": "object"
+    },
+    "pdb": {
+      "$ref": "#/definitions/Pdb"
+    },
+    "persistence": {
+      "$ref": "#/definitions/Persistence"
+    },
+    "pleme-lib": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "podAnnotations": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "type": "object"
+    },
+    "podSecurityContext": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "ports": {
+      "items": {
+        "$ref": "#/definitions/ContainerPort"
+      },
+      "type": "array"
+    },
+    "priorityClassName": {
+      "type": "string"
+    },
+    "replicaCount": {
+      "format": "uint32",
+      "maximum": 4294967295,
+      "minimum": 0.0,
+      "type": "integer"
+    },
+    "resources": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "securityContext": {
+      "additionalProperties": true,
+      "type": "object"
+    },
+    "service": {
+      "$ref": "#/definitions/Service"
+    },
+    "serviceAccount": {
+      "$ref": "#/definitions/ServiceAccount"
+    },
+    "startupProbe": {
+      "$ref": "#/definitions/StartupProbe"
+    },
+    "stream": {
+      "$ref": "#/definitions/Stream"
+    },
+    "terminationGracePeriodSeconds": {
+      "format": "uint32",
+      "maximum": 4294967295,
+      "minimum": 0.0,
+      "type": "integer"
+    },
+    "tolerations": {
+      "items": true,
+      "type": "array"
+    },
+    "topologySpreadConstraints": {
+      "items": true,
+      "type": "array"
+    },
+    "volumeMounts": {
+      "items": true,
+      "type": "array"
+    },
+    "volumes": {
+      "items": true,
+      "type": "array"
+    }
+  },
+  "title": "ChartValues",
+  "type": "object"
+}

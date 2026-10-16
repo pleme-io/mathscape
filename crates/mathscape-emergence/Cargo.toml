@@ -10,5 +10,6 @@ description = "Operators and laws emerging from bare lambda terms: enumerate, ob
 mathscape-kernel.workspace = true
 mathscape-core.workspace = true
 serde.workspace = true
+schemars.workspace = true
 blake3.workspace = true
 tatara-lisp.workspace = true

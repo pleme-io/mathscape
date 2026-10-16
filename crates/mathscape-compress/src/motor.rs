@@ -13,7 +13,7 @@ use mathscape_core::AdaptiveCorpusGenerator;
 use mathscape_core::adaptive_corpus::DEFAULT_MAX_NODES;
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "kind", rename_all = "kebab-case")]
 pub enum Extractor {
     DerivedLaws {

@@ -125,8 +125,9 @@
       mkMathscape = {
         pname,
         cargoBuildFlags ? ["--package" pname],
+        extra ? {},
       }:
-        rustPlatform.buildRustPackage {
+        rustPlatform.buildRustPackage ({
           inherit pname cargoBuildFlags;
           version = "0.1.0";
           src = self;
@@ -136,7 +137,13 @@
           };
           nativeBuildInputs = [pkgs.pkg-config pkgs.protobuf];
           buildInputs = commonBuildInputs;
-        };
+        }
+        // extra);
+
+      valuesSchemaTool = mkMathscape {
+        pname = "mathscape-config";
+        extra.cargoTestFlags = ["--package" "mathscape-config"];
+      };
 
       service = mkMathscape {pname = "mathscape-service";};
       cli = mkMathscape {pname = "mathscape-cli";};
@@ -264,6 +271,7 @@
           mathscape-mcp = mcp;
           mathscape-db = db;
           mathscape-stream = stream;
+          mathscape-values-schema = valuesSchemaTool;
           mathscape-frontend = frontend;
         }
         // lib.optionalAttrs (builtins.elem system linuxSystems) {
@@ -271,7 +279,11 @@
           image-web = mkWebImage system;
         };
 
-      # ── Apps ───────────────────────────────────────────────────────
+      checks.values-schema = pkgs.runCommand "mathscape-values-schema-fresh" {} ''
+        ${valuesSchemaTool}/bin/mathscape-values-schema --check ${self}
+        touch $out
+      '';
+
       apps =
         {
           default = {

@@ -89,7 +89,8 @@ stream:
   command: ["/bin/mathscape-stream"]
   # -- RUST_LOG for the writer
   rustLog: "info,egg=warn"
-  # -- Further stream settings as MATHSCAPE_STREAM__<KEY> env, e.g. {SNAPSHOT_EVERY: "8"}
+  # -- StreamConfig (mathscape-config) without seed, data_dir, until_epoch and health_addr, typed by values.schema.json;
+  # nested keys flatten to MATHSCAPE_STREAM__A__B env, e.g. {snapshot_every: 8, mechanism: {graveyard: mutation}}
   config: {}
   # -- Health and metrics endpoint (/healthz, /readyz, /metrics)
   health:

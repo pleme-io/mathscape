@@ -2,7 +2,7 @@ apiVersion: v2
 name: mathscape
 description: Evolutionary symbolic compression engine — discovers mathematical abstractions
 type: application
-version: 0.2.0
+version: 0.3.0
 appVersion: "0.1.0"
 
 dependencies:

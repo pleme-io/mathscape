@@ -15,7 +15,7 @@ tests:
       stream.enabled: true
     asserts:
       - failedTemplate:
-          errorPattern: "stream.enabled requires stream.seed"
+          errorPattern: "/stream/seed.*minLength"
 
   - it: refuses a seed that is not a non-negative integer
     set:
@@ -23,7 +23,7 @@ tests:
       stream.seed: "forty-two"
     asserts:
       - failedTemplate:
-          errorPattern: "a non-negative integer"
+          errorPattern: "/stream/seed.*does not match pattern"
 
   - it: renders one writer StatefulSet with its own selector
     set:
@@ -259,7 +259,7 @@ tests:
       stream.storage.kind: emptyDir
     asserts:
       - failedTemplate:
-          errorPattern: "must be claimTemplate or hostPath"
+          errorPattern: "/stream/storage/kind.*must be one of 'claimTemplate', 'hostPath'"
 
   - it: uses the engine image unless the writer names its own
     set:
@@ -368,3 +368,124 @@ tests:
       - equal:
           path: spec.floor
           value: 768Mi
+
+  - it: flattens nested stream config to MATHSCAPE_STREAM__A__B env
+    set:
+      stream.enabled: true
+      stream.seed: "42"
+      stream.config:
+        snapshot_every: 8
+        learning_rate: 0.25
+        mechanism:
+          graveyard: mutation
+          drive_motor: false
+          trial_ceiling: 1000000
+        extractor:
+          kind: validated
+          step_limit: 300
+          min_support: 2
+          subterm_depth: 3
+          k_samples: 8
+          seed: 7
+    documentIndex: 0
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: MATHSCAPE_STREAM__SNAPSHOT_EVERY
+            value: "8"
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: MATHSCAPE_STREAM__LEARNING_RATE
+            value: "0.25"
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: MATHSCAPE_STREAM__MECHANISM__GRAVEYARD
+            value: mutation
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: MATHSCAPE_STREAM__MECHANISM__DRIVE_MOTOR
+            value: "false"
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: MATHSCAPE_STREAM__MECHANISM__TRIAL_CEILING
+            value: "1000000"
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: MATHSCAPE_STREAM__EXTRACTOR__KIND
+            value: validated
+
+  - it: schema rejects a typo key in stream config
+    set:
+      stream.enabled: true
+      stream.seed: "42"
+      stream.config:
+        snapshot_evry: 8
+    asserts:
+      - failedTemplate:
+          errorPattern: "/stream/config.*additional properties 'snapshot_evry' not allowed"
+
+  - it: schema rejects a typo key at the top level
+    set:
+      replicaCont: 2
+    asserts:
+      - failedTemplate:
+          errorPattern: "additional properties 'replicaCont' not allowed"
+
+  - it: schema rejects a dedicated field restated inside stream config
+    set:
+      stream.enabled: true
+      stream.seed: "42"
+      stream.config:
+        seed: 7
+    asserts:
+      - failedTemplate:
+          errorPattern: "/stream/config.*additional properties 'seed' not allowed"
+
+  - it: schema rejects a wrong enum value
+    set:
+      stream.enabled: true
+      stream.seed: "42"
+      stream.config:
+        mechanism:
+          graveyard: cemetery
+    asserts:
+      - failedTemplate:
+          errorPattern: "/stream/config/mechanism/graveyard.*must be one of 'context', 'mutation'"
+
+  - it: schema rejects a wrong type
+    set:
+      stream.enabled: true
+      stream.seed: "42"
+      stream.config:
+        snapshot_every: eight
+    asserts:
+      - failedTemplate:
+          errorPattern: "/stream/config/snapshot_every.*got string, want integer"
+
+  - it: schema rejects an integer outside its Rust type
+    set:
+      stream.enabled: true
+      stream.seed: "42"
+      stream.config:
+        emergence:
+          law_vars: 300
+    asserts:
+      - failedTemplate:
+          errorPattern: "/stream/config/emergence/law_vars.*maximum"
+
+  - it: schema rejects a negative counter
+    set:
+      stream.enabled: true
+      stream.seed: "42"
+      stream.config:
+        frontier:
+          per_epoch: -1
+    asserts:
+      - failedTemplate:
+          errorPattern: "/stream/config/frontier/per_epoch.*minimum"

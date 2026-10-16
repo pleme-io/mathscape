@@ -21,6 +21,8 @@
 // Config loading goes through shikumi's ProviderChain — the pleme-io
 // standard. shikumi wraps figment behind a fluent API and owns the
 // figment dep on this crate's behalf.
+pub mod chart;
+
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, RwLock};
 
@@ -47,7 +49,7 @@ pub struct Config {
     pub stream: Option<StreamConfig>,
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum StreamClock {
     #[default]
@@ -55,7 +57,7 @@ pub enum StreamClock {
     Wall,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct StreamConfig {
     pub seed: u64,
@@ -95,7 +97,7 @@ pub struct StreamConfig {
     pub emergence: mathscape_emergence::EmergenceConfig,
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum StreamSubstrate {
     #[default]
@@ -113,7 +115,7 @@ impl StreamSubstrate {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum StreamNovelty {
     #[default]
@@ -121,7 +123,7 @@ pub enum StreamNovelty {
     Off,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub struct StreamFrontier {
     pub enabled: bool,
@@ -139,7 +141,7 @@ impl Default for StreamFrontier {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum StreamGraveyard {
     #[default]
@@ -147,7 +149,7 @@ pub enum StreamGraveyard {
     Mutation,
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum StreamTrialScale {
     #[default]
@@ -155,7 +157,7 @@ pub enum StreamTrialScale {
     Fixed,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub struct StreamMechanism {
     pub respond: bool,
@@ -593,6 +595,53 @@ mod tests {
         let s = c.stream.unwrap();
         assert_eq!((s.seed, s.data_dir.as_str()), (9, "/data/stream"));
         assert_eq!(s.health_addr.as_deref(), Some("127.0.0.1:9473"));
+    }
+
+    #[test]
+    fn nested_stream_keys_flattened_as_the_chart_does_reach_the_typed_config() {
+        let vars = [
+            ("MSCFGNESTED_STREAM__SEED", "9"),
+            ("MSCFGNESTED_STREAM__MECHANISM__GRAVEYARD", "mutation"),
+            ("MSCFGNESTED_STREAM__MECHANISM__DRIVE_MOTOR", "false"),
+            ("MSCFGNESTED_STREAM__EXTRACTOR__KIND", "validated"),
+            ("MSCFGNESTED_STREAM__EXTRACTOR__STEP_LIMIT", "300"),
+            ("MSCFGNESTED_STREAM__EXTRACTOR__MIN_SUPPORT", "2"),
+            ("MSCFGNESTED_STREAM__EXTRACTOR__SUBTERM_DEPTH", "3"),
+            ("MSCFGNESTED_STREAM__EXTRACTOR__K_SAMPLES", "8"),
+            ("MSCFGNESTED_STREAM__EXTRACTOR__SEED", "7"),
+            ("MSCFGNESTED_STREAM__EMERGENCE__BASIS", "combinators"),
+            ("MSCFGNESTED_STREAM__LEARNING_RATE", "0.25"),
+        ];
+        unsafe {
+            for (k, v) in vars {
+                std::env::set_var(k, v);
+            }
+        }
+        let c: Config = shikumi::ProviderChain::new()
+            .with_defaults(&Config::default())
+            .with_env("MSCFGNESTED_")
+            .extract()
+            .unwrap();
+        unsafe {
+            for (k, _) in vars {
+                std::env::remove_var(k);
+            }
+        }
+        let s = c.stream.unwrap();
+        assert_eq!(s.mechanism.graveyard, StreamGraveyard::Mutation);
+        assert!(!s.mechanism.drive_motor);
+        assert_eq!(
+            s.extractor,
+            mathscape_compress::Extractor::Validated {
+                step_limit: 300,
+                min_support: 2,
+                subterm_depth: 3,
+                k_samples: 8,
+                seed: 7,
+            }
+        );
+        assert_eq!(s.emergence.basis, mathscape_emergence::Basis::Combinators);
+        assert!((s.learning_rate - 0.25).abs() < f64::EPSILON);
     }
 
     #[test]
