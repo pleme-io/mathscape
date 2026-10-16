@@ -1,8 +1,8 @@
 {
   "schema_version": 2,
-  "cargo_lock_sha256": "5ac16ae2bac763df6b34026e24acd6ad244c9c9689c0c8e21c916ad999e4fb97",
+  "cargo_lock_sha256": "f9e673dacf0167fbdede29ca9f5e859cdf3a82d0b9c20ed1f1530fbc5f57ab4d",
   "manifest_sha256": {
-    "Cargo.toml": "86e8f4200f0203606f79dde85094c38b208e39b5ea1024ea2e352e4489380b16",
+    "Cargo.toml": "14511c5c5e89ee995eb522f0d6875dfeda1ee522ed82e1155886306e827ecf81",
     "crates/mathscape-acquisition/Cargo.toml": "5d9543090fad1cbb511b4d75b6b09bd1dd248359b9ad306ac98c1f827ca4afa7",
     "crates/mathscape-api/Cargo.toml": "180c3457b4fafa02d541a32144bfbca98163a7261e6999658802f0c20ab8c3a7",
     "crates/mathscape-axiom-bridge/Cargo.toml": "9ebe51c3c47013d46002b269d966b39def44a4d68dcd435eee5d949e3a7c26ee",
@@ -6619,7 +6619,7 @@
           "default"
         ]
       },
-      "mathscape-acquisition-0.1.11": {
+      "mathscape-acquisition-0.1.12": {
         "runtime_dependencies": [
           {
             "name": "bincode",
@@ -6633,7 +6633,7 @@
           },
           {
             "name": "mathscape_core",
-            "package_key": "mathscape-core-0.1.11",
+            "package_key": "mathscape-core-0.1.12",
             "kind": "normal",
             "features": [],
             "uses_default_features": true,
@@ -6667,7 +6667,7 @@
         "build_dependencies": [],
         "features": []
       },
-      "mathscape-api-0.1.11": {
+      "mathscape-api-0.1.12": {
         "runtime_dependencies": [
           {
             "name": "async_graphql",
@@ -6691,7 +6691,7 @@
           },
           {
             "name": "mathscape_entity",
-            "package_key": "mathscape-entity-0.1.11",
+            "package_key": "mathscape-entity-0.1.12",
             "kind": "normal",
             "features": [],
             "uses_default_features": true,
@@ -6756,7 +6756,7 @@
         ],
         "features": []
       },
-      "mathscape-axiom-bridge-0.1.11": {
+      "mathscape-axiom-bridge-0.1.12": {
         "runtime_dependencies": [
           {
             "name": "axiom_forge",
@@ -6770,7 +6770,7 @@
           },
           {
             "name": "mathscape_core",
-            "package_key": "mathscape-core-0.1.11",
+            "package_key": "mathscape-core-0.1.12",
             "kind": "normal",
             "features": [],
             "uses_default_features": true,
@@ -6782,7 +6782,7 @@
         "build_dependencies": [],
         "features": []
       },
-      "mathscape-cli-0.1.11": {
+      "mathscape-cli-0.1.12": {
         "runtime_dependencies": [
           {
             "name": "clap",
@@ -6798,7 +6798,7 @@
           },
           {
             "name": "mathscape_axiom_bridge",
-            "package_key": "mathscape-axiom-bridge-0.1.11",
+            "package_key": "mathscape-axiom-bridge-0.1.12",
             "kind": "normal",
             "features": [],
             "uses_default_features": true,
@@ -6808,7 +6808,7 @@
           },
           {
             "name": "mathscape_compress",
-            "package_key": "mathscape-compress-0.1.11",
+            "package_key": "mathscape-compress-0.1.12",
             "kind": "normal",
             "features": [],
             "uses_default_features": true,
@@ -6818,7 +6818,7 @@
           },
           {
             "name": "mathscape_config",
-            "package_key": "mathscape-config-0.1.11",
+            "package_key": "mathscape-config-0.1.12",
             "kind": "normal",
             "features": [],
             "uses_default_features": true,
@@ -6828,7 +6828,7 @@
           },
           {
             "name": "mathscape_core",
-            "package_key": "mathscape-core-0.1.11",
+            "package_key": "mathscape-core-0.1.12",
             "kind": "normal",
             "features": [],
             "uses_default_features": true,
@@ -6838,7 +6838,7 @@
           },
           {
             "name": "mathscape_evolve",
-            "package_key": "mathscape-evolve-0.1.11",
+            "package_key": "mathscape-evolve-0.1.12",
             "kind": "normal",
             "features": [],
             "uses_default_features": true,
@@ -6848,7 +6848,7 @@
           },
           {
             "name": "mathscape_proof",
-            "package_key": "mathscape-proof-0.1.11",
+            "package_key": "mathscape-proof-0.1.12",
             "kind": "normal",
             "features": [],
             "uses_default_features": true,
@@ -6858,7 +6858,7 @@
           },
           {
             "name": "mathscape_reward",
-            "package_key": "mathscape-reward-0.1.11",
+            "package_key": "mathscape-reward-0.1.12",
             "kind": "normal",
             "features": [],
             "uses_default_features": true,
@@ -6868,7 +6868,7 @@
           },
           {
             "name": "mathscape_store",
-            "package_key": "mathscape-store-0.1.11",
+            "package_key": "mathscape-store-0.1.12",
             "kind": "normal",
             "features": [],
             "uses_default_features": true,
@@ -6923,7 +6923,7 @@
         "build_dependencies": [],
         "features": []
       },
-      "mathscape-compress-0.1.11": {
+      "mathscape-compress-0.1.12": {
         "runtime_dependencies": [
           {
             "name": "egg",
@@ -6937,7 +6937,7 @@
           },
           {
             "name": "mathscape_core",
-            "package_key": "mathscape-core-0.1.11",
+            "package_key": "mathscape-core-0.1.12",
             "kind": "normal",
             "features": [],
             "uses_default_features": true,
@@ -6961,11 +6961,11 @@
         "build_dependencies": [],
         "features": []
       },
-      "mathscape-config-0.1.11": {
+      "mathscape-config-0.1.12": {
         "runtime_dependencies": [
           {
             "name": "mathscape_compress",
-            "package_key": "mathscape-compress-0.1.11",
+            "package_key": "mathscape-compress-0.1.12",
             "kind": "normal",
             "features": [],
             "uses_default_features": true,
@@ -6975,7 +6975,7 @@
           },
           {
             "name": "mathscape_emergence",
-            "package_key": "mathscape-emergence-0.1.11",
+            "package_key": "mathscape-emergence-0.1.12",
             "kind": "normal",
             "features": [],
             "uses_default_features": true,
@@ -6985,7 +6985,7 @@
           },
           {
             "name": "mathscape_evolve",
-            "package_key": "mathscape-evolve-0.1.11",
+            "package_key": "mathscape-evolve-0.1.12",
             "kind": "normal",
             "features": [],
             "uses_default_features": true,
@@ -6995,7 +6995,7 @@
           },
           {
             "name": "mathscape_reward",
-            "package_key": "mathscape-reward-0.1.11",
+            "package_key": "mathscape-reward-0.1.12",
             "kind": "normal",
             "features": [],
             "uses_default_features": true,
@@ -7029,7 +7029,7 @@
         "build_dependencies": [],
         "features": []
       },
-      "mathscape-core-0.1.11": {
+      "mathscape-core-0.1.12": {
         "runtime_dependencies": [
           {
             "name": "bincode",
@@ -7079,7 +7079,7 @@
           "test-helpers"
         ]
       },
-      "mathscape-db-0.1.11": {
+      "mathscape-db-0.1.12": {
         "runtime_dependencies": [
           {
             "name": "clap",
@@ -7095,7 +7095,7 @@
           },
           {
             "name": "mathscape_migration",
-            "package_key": "mathscape-migration-0.1.11",
+            "package_key": "mathscape-migration-0.1.12",
             "kind": "normal",
             "features": [],
             "uses_default_features": true,
@@ -7166,11 +7166,11 @@
         "build_dependencies": [],
         "features": []
       },
-      "mathscape-discovery-0.1.11": {
+      "mathscape-discovery-0.1.12": {
         "runtime_dependencies": [
           {
             "name": "mathscape_core",
-            "package_key": "mathscape-core-0.1.11",
+            "package_key": "mathscape-core-0.1.12",
             "kind": "normal",
             "features": [],
             "uses_default_features": true,
@@ -7180,7 +7180,7 @@
           },
           {
             "name": "mathscape_store",
-            "package_key": "mathscape-store-0.1.11",
+            "package_key": "mathscape-store-0.1.12",
             "kind": "normal",
             "features": [],
             "uses_default_features": true,
@@ -7238,7 +7238,7 @@
         "build_dependencies": [],
         "features": []
       },
-      "mathscape-emergence-0.1.11": {
+      "mathscape-emergence-0.1.12": {
         "runtime_dependencies": [
           {
             "name": "blake3",
@@ -7252,7 +7252,7 @@
           },
           {
             "name": "mathscape_core",
-            "package_key": "mathscape-core-0.1.11",
+            "package_key": "mathscape-core-0.1.12",
             "kind": "normal",
             "features": [],
             "uses_default_features": true,
@@ -7262,7 +7262,7 @@
           },
           {
             "name": "mathscape_kernel",
-            "package_key": "mathscape-kernel-0.1.11",
+            "package_key": "mathscape-kernel-0.1.12",
             "kind": "normal",
             "features": [],
             "uses_default_features": true,
@@ -7296,7 +7296,7 @@
         "build_dependencies": [],
         "features": []
       },
-      "mathscape-entity-0.1.11": {
+      "mathscape-entity-0.1.12": {
         "runtime_dependencies": [
           {
             "name": "sea_orm",
@@ -7328,11 +7328,11 @@
         "build_dependencies": [],
         "features": []
       },
-      "mathscape-evolve-0.1.11": {
+      "mathscape-evolve-0.1.12": {
         "runtime_dependencies": [
           {
             "name": "mathscape_core",
-            "package_key": "mathscape-core-0.1.11",
+            "package_key": "mathscape-core-0.1.12",
             "kind": "normal",
             "features": [],
             "uses_default_features": true,
@@ -7342,7 +7342,7 @@
           },
           {
             "name": "mathscape_store",
-            "package_key": "mathscape-store-0.1.11",
+            "package_key": "mathscape-store-0.1.12",
             "kind": "normal",
             "features": [],
             "uses_default_features": true,
@@ -7364,11 +7364,11 @@
         "build_dependencies": [],
         "features": []
       },
-      "mathscape-inference-api-0.1.11": {
+      "mathscape-inference-api-0.1.12": {
         "runtime_dependencies": [
           {
             "name": "mathscape_core",
-            "package_key": "mathscape-core-0.1.11",
+            "package_key": "mathscape-core-0.1.12",
             "kind": "normal",
             "features": [],
             "uses_default_features": true,
@@ -7402,16 +7402,16 @@
         "build_dependencies": [],
         "features": []
       },
-      "mathscape-kernel-0.1.11": {
+      "mathscape-kernel-0.1.12": {
         "runtime_dependencies": [],
         "build_dependencies": [],
         "features": []
       },
-      "mathscape-mcp-0.1.11": {
+      "mathscape-mcp-0.1.12": {
         "runtime_dependencies": [
           {
             "name": "mathscape_axiom_bridge",
-            "package_key": "mathscape-axiom-bridge-0.1.11",
+            "package_key": "mathscape-axiom-bridge-0.1.12",
             "kind": "normal",
             "features": [],
             "uses_default_features": true,
@@ -7421,7 +7421,7 @@
           },
           {
             "name": "mathscape_compress",
-            "package_key": "mathscape-compress-0.1.11",
+            "package_key": "mathscape-compress-0.1.12",
             "kind": "normal",
             "features": [],
             "uses_default_features": true,
@@ -7431,7 +7431,7 @@
           },
           {
             "name": "mathscape_config",
-            "package_key": "mathscape-config-0.1.11",
+            "package_key": "mathscape-config-0.1.12",
             "kind": "normal",
             "features": [],
             "uses_default_features": true,
@@ -7441,7 +7441,7 @@
           },
           {
             "name": "mathscape_core",
-            "package_key": "mathscape-core-0.1.11",
+            "package_key": "mathscape-core-0.1.12",
             "kind": "normal",
             "features": [],
             "uses_default_features": true,
@@ -7451,7 +7451,7 @@
           },
           {
             "name": "mathscape_discovery",
-            "package_key": "mathscape-discovery-0.1.11",
+            "package_key": "mathscape-discovery-0.1.12",
             "kind": "normal",
             "features": [],
             "uses_default_features": true,
@@ -7461,7 +7461,7 @@
           },
           {
             "name": "mathscape_evolve",
-            "package_key": "mathscape-evolve-0.1.11",
+            "package_key": "mathscape-evolve-0.1.12",
             "kind": "normal",
             "features": [],
             "uses_default_features": true,
@@ -7471,7 +7471,7 @@
           },
           {
             "name": "mathscape_proof",
-            "package_key": "mathscape-proof-0.1.11",
+            "package_key": "mathscape-proof-0.1.12",
             "kind": "normal",
             "features": [],
             "uses_default_features": true,
@@ -7481,7 +7481,7 @@
           },
           {
             "name": "mathscape_reward",
-            "package_key": "mathscape-reward-0.1.11",
+            "package_key": "mathscape-reward-0.1.12",
             "kind": "normal",
             "features": [],
             "uses_default_features": true,
@@ -7491,7 +7491,7 @@
           },
           {
             "name": "mathscape_store",
-            "package_key": "mathscape-store-0.1.11",
+            "package_key": "mathscape-store-0.1.12",
             "kind": "normal",
             "features": [],
             "uses_default_features": true,
@@ -7583,7 +7583,7 @@
         "build_dependencies": [],
         "features": []
       },
-      "mathscape-migration-0.1.11": {
+      "mathscape-migration-0.1.12": {
         "runtime_dependencies": [
           {
             "name": "sea_orm_migration",
@@ -7599,11 +7599,11 @@
         "build_dependencies": [],
         "features": []
       },
-      "mathscape-policy-0.1.11": {
+      "mathscape-policy-0.1.12": {
         "runtime_dependencies": [
           {
             "name": "mathscape_core",
-            "package_key": "mathscape-core-0.1.11",
+            "package_key": "mathscape-core-0.1.12",
             "kind": "normal",
             "features": [],
             "uses_default_features": true,
@@ -7625,11 +7625,11 @@
         "build_dependencies": [],
         "features": []
       },
-      "mathscape-proof-0.1.11": {
+      "mathscape-proof-0.1.12": {
         "runtime_dependencies": [
           {
             "name": "mathscape_core",
-            "package_key": "mathscape-core-0.1.11",
+            "package_key": "mathscape-core-0.1.12",
             "kind": "normal",
             "features": [],
             "uses_default_features": true,
@@ -7639,7 +7639,7 @@
           },
           {
             "name": "mathscape_store",
-            "package_key": "mathscape-store-0.1.11",
+            "package_key": "mathscape-store-0.1.12",
             "kind": "normal",
             "features": [],
             "uses_default_features": true,
@@ -7673,11 +7673,11 @@
         "build_dependencies": [],
         "features": []
       },
-      "mathscape-reward-0.1.11": {
+      "mathscape-reward-0.1.12": {
         "runtime_dependencies": [
           {
             "name": "mathscape_compress",
-            "package_key": "mathscape-compress-0.1.11",
+            "package_key": "mathscape-compress-0.1.12",
             "kind": "normal",
             "features": [],
             "uses_default_features": true,
@@ -7687,7 +7687,7 @@
           },
           {
             "name": "mathscape_core",
-            "package_key": "mathscape-core-0.1.11",
+            "package_key": "mathscape-core-0.1.12",
             "kind": "normal",
             "features": [],
             "uses_default_features": true,
@@ -7697,7 +7697,7 @@
           },
           {
             "name": "mathscape_store",
-            "package_key": "mathscape-store-0.1.11",
+            "package_key": "mathscape-store-0.1.12",
             "kind": "normal",
             "features": [],
             "uses_default_features": true,
@@ -7719,7 +7719,7 @@
         "build_dependencies": [],
         "features": []
       },
-      "mathscape-service-0.1.11": {
+      "mathscape-service-0.1.12": {
         "runtime_dependencies": [
           {
             "name": "async_graphql",
@@ -7763,7 +7763,7 @@
           },
           {
             "name": "mathscape_api",
-            "package_key": "mathscape-api-0.1.11",
+            "package_key": "mathscape-api-0.1.12",
             "kind": "normal",
             "features": [],
             "uses_default_features": true,
@@ -7773,7 +7773,7 @@
           },
           {
             "name": "mathscape_compress",
-            "package_key": "mathscape-compress-0.1.11",
+            "package_key": "mathscape-compress-0.1.12",
             "kind": "normal",
             "features": [],
             "uses_default_features": true,
@@ -7783,7 +7783,7 @@
           },
           {
             "name": "mathscape_config",
-            "package_key": "mathscape-config-0.1.11",
+            "package_key": "mathscape-config-0.1.12",
             "kind": "normal",
             "features": [],
             "uses_default_features": true,
@@ -7793,7 +7793,7 @@
           },
           {
             "name": "mathscape_core",
-            "package_key": "mathscape-core-0.1.11",
+            "package_key": "mathscape-core-0.1.12",
             "kind": "normal",
             "features": [],
             "uses_default_features": true,
@@ -7803,7 +7803,7 @@
           },
           {
             "name": "mathscape_evolve",
-            "package_key": "mathscape-evolve-0.1.11",
+            "package_key": "mathscape-evolve-0.1.12",
             "kind": "normal",
             "features": [],
             "uses_default_features": true,
@@ -7813,7 +7813,7 @@
           },
           {
             "name": "mathscape_proof",
-            "package_key": "mathscape-proof-0.1.11",
+            "package_key": "mathscape-proof-0.1.12",
             "kind": "normal",
             "features": [],
             "uses_default_features": true,
@@ -7823,7 +7823,7 @@
           },
           {
             "name": "mathscape_reward",
-            "package_key": "mathscape-reward-0.1.11",
+            "package_key": "mathscape-reward-0.1.12",
             "kind": "normal",
             "features": [],
             "uses_default_features": true,
@@ -7833,7 +7833,7 @@
           },
           {
             "name": "mathscape_store",
-            "package_key": "mathscape-store-0.1.11",
+            "package_key": "mathscape-store-0.1.12",
             "kind": "normal",
             "features": [],
             "uses_default_features": true,
@@ -7969,7 +7969,7 @@
         "build_dependencies": [],
         "features": []
       },
-      "mathscape-store-0.1.11": {
+      "mathscape-store-0.1.12": {
         "runtime_dependencies": [
           {
             "name": "bincode",
@@ -7993,7 +7993,7 @@
           },
           {
             "name": "mathscape_core",
-            "package_key": "mathscape-core-0.1.11",
+            "package_key": "mathscape-core-0.1.12",
             "kind": "normal",
             "features": [],
             "uses_default_features": true,
@@ -8003,7 +8003,7 @@
           },
           {
             "name": "mathscape_migration",
-            "package_key": "mathscape-migration-0.1.11",
+            "package_key": "mathscape-migration-0.1.12",
             "kind": "normal",
             "features": [],
             "uses_default_features": true,
@@ -8083,7 +8083,7 @@
         "build_dependencies": [],
         "features": []
       },
-      "mathscape-stream-0.1.11": {
+      "mathscape-stream-0.1.12": {
         "runtime_dependencies": [
           {
             "name": "blake3",
@@ -8097,7 +8097,7 @@
           },
           {
             "name": "mathscape_compress",
-            "package_key": "mathscape-compress-0.1.11",
+            "package_key": "mathscape-compress-0.1.12",
             "kind": "normal",
             "features": [],
             "uses_default_features": true,
@@ -8107,7 +8107,7 @@
           },
           {
             "name": "mathscape_config",
-            "package_key": "mathscape-config-0.1.11",
+            "package_key": "mathscape-config-0.1.12",
             "kind": "normal",
             "features": [],
             "uses_default_features": true,
@@ -8117,7 +8117,7 @@
           },
           {
             "name": "mathscape_core",
-            "package_key": "mathscape-core-0.1.11",
+            "package_key": "mathscape-core-0.1.12",
             "kind": "normal",
             "features": [],
             "uses_default_features": true,
@@ -8127,7 +8127,7 @@
           },
           {
             "name": "mathscape_emergence",
-            "package_key": "mathscape-emergence-0.1.11",
+            "package_key": "mathscape-emergence-0.1.12",
             "kind": "normal",
             "features": [],
             "uses_default_features": true,
@@ -8137,7 +8137,7 @@
           },
           {
             "name": "mathscape_proof",
-            "package_key": "mathscape-proof-0.1.11",
+            "package_key": "mathscape-proof-0.1.12",
             "kind": "normal",
             "features": [],
             "uses_default_features": true,
@@ -21399,14 +21399,14 @@
     "matchit-0.8.4": {
       "edition": "2021"
     },
-    "mathscape-acquisition-0.1.11": {
+    "mathscape-acquisition-0.1.12": {
       "edition": "2024",
       "lib_target": {
         "name": "mathscape_acquisition",
         "path": "src/lib.rs"
       }
     },
-    "mathscape-api-0.1.11": {
+    "mathscape-api-0.1.12": {
       "edition": "2024",
       "build_script": "build.rs",
       "lib_target": {
@@ -21414,14 +21414,14 @@
         "path": "src/lib.rs"
       }
     },
-    "mathscape-axiom-bridge-0.1.11": {
+    "mathscape-axiom-bridge-0.1.12": {
       "edition": "2024",
       "lib_target": {
         "name": "mathscape_axiom_bridge",
         "path": "src/lib.rs"
       }
     },
-    "mathscape-cli-0.1.11": {
+    "mathscape-cli-0.1.12": {
       "edition": "2024",
       "binaries": [
         {
@@ -21430,28 +21430,28 @@
         }
       ]
     },
-    "mathscape-compress-0.1.11": {
+    "mathscape-compress-0.1.12": {
       "edition": "2024",
       "lib_target": {
         "name": "mathscape_compress",
         "path": "src/lib.rs"
       }
     },
-    "mathscape-config-0.1.11": {
+    "mathscape-config-0.1.12": {
       "edition": "2024",
       "lib_target": {
         "name": "mathscape_config",
         "path": "src/lib.rs"
       }
     },
-    "mathscape-core-0.1.11": {
+    "mathscape-core-0.1.12": {
       "edition": "2024",
       "lib_target": {
         "name": "mathscape_core",
         "path": "src/lib.rs"
       }
     },
-    "mathscape-db-0.1.11": {
+    "mathscape-db-0.1.12": {
       "edition": "2024",
       "binaries": [
         {
@@ -21460,49 +21460,49 @@
         }
       ]
     },
-    "mathscape-discovery-0.1.11": {
+    "mathscape-discovery-0.1.12": {
       "edition": "2024",
       "lib_target": {
         "name": "mathscape_discovery",
         "path": "src/lib.rs"
       }
     },
-    "mathscape-emergence-0.1.11": {
+    "mathscape-emergence-0.1.12": {
       "edition": "2024",
       "lib_target": {
         "name": "mathscape_emergence",
         "path": "src/lib.rs"
       }
     },
-    "mathscape-entity-0.1.11": {
+    "mathscape-entity-0.1.12": {
       "edition": "2024",
       "lib_target": {
         "name": "mathscape_entity",
         "path": "src/lib.rs"
       }
     },
-    "mathscape-evolve-0.1.11": {
+    "mathscape-evolve-0.1.12": {
       "edition": "2024",
       "lib_target": {
         "name": "mathscape_evolve",
         "path": "src/lib.rs"
       }
     },
-    "mathscape-inference-api-0.1.11": {
+    "mathscape-inference-api-0.1.12": {
       "edition": "2024",
       "lib_target": {
         "name": "mathscape_inference_api",
         "path": "src/lib.rs"
       }
     },
-    "mathscape-kernel-0.1.11": {
+    "mathscape-kernel-0.1.12": {
       "edition": "2024",
       "lib_target": {
         "name": "mathscape_kernel",
         "path": "src/lib.rs"
       }
     },
-    "mathscape-mcp-0.1.11": {
+    "mathscape-mcp-0.1.12": {
       "edition": "2024",
       "binaries": [
         {
@@ -21511,35 +21511,35 @@
         }
       ]
     },
-    "mathscape-migration-0.1.11": {
+    "mathscape-migration-0.1.12": {
       "edition": "2024",
       "lib_target": {
         "name": "mathscape_migration",
         "path": "src/lib.rs"
       }
     },
-    "mathscape-policy-0.1.11": {
+    "mathscape-policy-0.1.12": {
       "edition": "2024",
       "lib_target": {
         "name": "mathscape_policy",
         "path": "src/lib.rs"
       }
     },
-    "mathscape-proof-0.1.11": {
+    "mathscape-proof-0.1.12": {
       "edition": "2024",
       "lib_target": {
         "name": "mathscape_proof",
         "path": "src/lib.rs"
       }
     },
-    "mathscape-reward-0.1.11": {
+    "mathscape-reward-0.1.12": {
       "edition": "2024",
       "lib_target": {
         "name": "mathscape_reward",
         "path": "src/lib.rs"
       }
     },
-    "mathscape-service-0.1.11": {
+    "mathscape-service-0.1.12": {
       "edition": "2024",
       "binaries": [
         {
@@ -21548,14 +21548,14 @@
         }
       ]
     },
-    "mathscape-store-0.1.11": {
+    "mathscape-store-0.1.12": {
       "edition": "2024",
       "lib_target": {
         "name": "mathscape_store",
         "path": "src/lib.rs"
       }
     },
-    "mathscape-stream-0.1.11": {
+    "mathscape-stream-0.1.12": {
       "edition": "2024",
       "lib_target": {
         "name": "mathscape_stream",

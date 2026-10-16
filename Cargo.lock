@@ -2043,7 +2043,7 @@ checksum = "47e1ffaa40ddd1f3ed91f717a33c8c0ee23fff369e3aa8772b9605cc1d22f4c3"
 
 [[package]]
 name = "mathscape-acquisition"
-version = "0.1.11"
+version = "0.1.12"
 dependencies = [
  "bincode",
  "mathscape-core",
@@ -2053,7 +2053,7 @@ dependencies = [
 
 [[package]]
 name = "mathscape-api"
-version = "0.1.11"
+version = "0.1.12"
 dependencies = [
  "async-graphql",
  "async-trait",
@@ -2067,7 +2067,7 @@ dependencies = [
 
 [[package]]
 name = "mathscape-axiom-bridge"
-version = "0.1.11"
+version = "0.1.12"
 dependencies = [
  "axiom-forge",
  "mathscape-compress",
@@ -2079,7 +2079,7 @@ dependencies = [
 
 [[package]]
 name = "mathscape-cli"
-version = "0.1.11"
+version = "0.1.12"
 dependencies = [
  "clap",
  "mathscape-axiom-bridge",
@@ -2098,7 +2098,7 @@ dependencies = [
 
 [[package]]
 name = "mathscape-compress"
-version = "0.1.11"
+version = "0.1.12"
 dependencies = [
  "egg",
  "mathscape-core",
@@ -2107,7 +2107,7 @@ dependencies = [
 
 [[package]]
 name = "mathscape-config"
-version = "0.1.11"
+version = "0.1.12"
 dependencies = [
  "mathscape-compress",
  "mathscape-emergence",
@@ -2120,7 +2120,7 @@ dependencies = [
 
 [[package]]
 name = "mathscape-core"
-version = "0.1.11"
+version = "0.1.12"
 dependencies = [
  "bincode",
  "blake3",
@@ -2132,7 +2132,7 @@ dependencies = [
 
 [[package]]
 name = "mathscape-db"
-version = "0.1.11"
+version = "0.1.12"
 dependencies = [
  "clap",
  "mathscape-migration",
@@ -2145,7 +2145,7 @@ dependencies = [
 
 [[package]]
 name = "mathscape-discovery"
-version = "0.1.11"
+version = "0.1.12"
 dependencies = [
  "mathscape-core",
  "mathscape-store",
@@ -2157,7 +2157,7 @@ dependencies = [
 
 [[package]]
 name = "mathscape-emergence"
-version = "0.1.11"
+version = "0.1.12"
 dependencies = [
  "blake3",
  "mathscape-core",
@@ -2168,7 +2168,7 @@ dependencies = [
 
 [[package]]
 name = "mathscape-entity"
-version = "0.1.11"
+version = "0.1.12"
 dependencies = [
  "sea-orm",
  "serde",
@@ -2177,7 +2177,7 @@ dependencies = [
 
 [[package]]
 name = "mathscape-evolve"
-version = "0.1.11"
+version = "0.1.12"
 dependencies = [
  "mathscape-core",
  "mathscape-store",
@@ -2186,7 +2186,7 @@ dependencies = [
 
 [[package]]
 name = "mathscape-inference-api"
-version = "0.1.11"
+version = "0.1.12"
 dependencies = [
  "mathscape-core",
  "serde",
@@ -2195,11 +2195,11 @@ dependencies = [
 
 [[package]]
 name = "mathscape-kernel"
-version = "0.1.11"
+version = "0.1.12"
 
 [[package]]
 name = "mathscape-mcp"
-version = "0.1.11"
+version = "0.1.12"
 dependencies = [
  "mathscape-axiom-bridge",
  "mathscape-compress",
@@ -2221,14 +2221,14 @@ dependencies = [
 
 [[package]]
 name = "mathscape-migration"
-version = "0.1.11"
+version = "0.1.12"
 dependencies = [
  "sea-orm-migration",
 ]
 
 [[package]]
 name = "mathscape-policy"
-version = "0.1.11"
+version = "0.1.12"
 dependencies = [
  "mathscape-core",
  "rand 0.8.5",
@@ -2236,7 +2236,7 @@ dependencies = [
 
 [[package]]
 name = "mathscape-proof"
-version = "0.1.11"
+version = "0.1.12"
 dependencies = [
  "mathscape-core",
  "mathscape-store",
@@ -2246,7 +2246,7 @@ dependencies = [
 
 [[package]]
 name = "mathscape-reward"
-version = "0.1.11"
+version = "0.1.12"
 dependencies = [
  "mathscape-compress",
  "mathscape-core",
@@ -2256,7 +2256,7 @@ dependencies = [
 
 [[package]]
 name = "mathscape-service"
-version = "0.1.11"
+version = "0.1.12"
 dependencies = [
  "async-graphql",
  "async-graphql-axum",
@@ -2285,7 +2285,7 @@ dependencies = [
 
 [[package]]
 name = "mathscape-store"
-version = "0.1.11"
+version = "0.1.12"
 dependencies = [
  "bincode",
  "blake3",
@@ -2304,7 +2304,7 @@ dependencies = [
 
 [[package]]
 name = "mathscape-stream"
-version = "0.1.11"
+version = "0.1.12"
 dependencies = [
  "blake3",
  "mathscape-compress",
