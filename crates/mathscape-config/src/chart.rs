@@ -198,6 +198,8 @@ pub struct Stream {
     pub data_dir: Option<String>,
     #[schemars(schema_with = "until_epoch_schema")]
     pub until_epoch: Option<String>,
+    #[schemars(schema_with = "stream_replicas_schema")]
+    pub replicas: Option<u32>,
     pub image: Option<StreamImage>,
     pub command: Option<Vec<String>>,
     pub rust_log: Option<String>,
@@ -269,6 +271,11 @@ fn seed_schema(_: &mut SchemaGenerator) -> Schema {
         "description": "Non-negative integer, as a string; required when stream.enabled"
     }))
     .expect("a literal schema parses")
+}
+
+fn stream_replicas_schema(_: &mut SchemaGenerator) -> Schema {
+    serde_json::from_value(json!({ "type": "integer", "minimum": 0, "maximum": 1 }))
+        .expect("a literal schema parses")
 }
 
 fn until_epoch_schema(_: &mut SchemaGenerator) -> Schema {

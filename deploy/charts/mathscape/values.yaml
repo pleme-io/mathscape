@@ -81,6 +81,8 @@ stream:
   dataDir: /data/stream
   # -- Epoch to stop at; empty runs without a bound
   untilEpoch: ""
+  # -- Writers: 1, or 0 to keep the StatefulSet declared and stopped (one model has one writer)
+  replicas: 1
   # -- Image for the writer; empty repository uses image.*
   image:
     repository: ""

@@ -566,6 +566,11 @@
           },
           "type": "object"
         },
+        "replicas": {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "type": "integer"
+        },
         "resources": {
           "additionalProperties": true,
           "type": "object"
@@ -604,6 +609,7 @@
         }
       },
       "required": [
+        "replicas",
         "seed",
         "untilEpoch"
       ],

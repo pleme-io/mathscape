@@ -489,3 +489,24 @@ tests:
     asserts:
       - failedTemplate:
           errorPattern: "/stream/config/frontier/per_epoch.*minimum"
+
+  - it: keeps the writer declared and stopped at zero replicas
+    set:
+      stream.enabled: true
+      stream.seed: "7"
+      stream.replicas: 0
+    asserts:
+      - isKind:
+          of: StatefulSet
+      - equal:
+          path: spec.replicas
+          value: 0
+
+  - it: refuses a second writer
+    set:
+      stream.enabled: true
+      stream.seed: "7"
+      stream.replicas: 2
+    asserts:
+      - failedTemplate:
+          errorPattern: "/stream/replicas.*maximum"

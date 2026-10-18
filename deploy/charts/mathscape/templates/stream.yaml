@@ -59,7 +59,7 @@ metadata:
     app.kubernetes.io/component: stream
 spec:
   serviceName: {{ $full }}
-  replicas: 1
+  replicas: {{ if hasKey $s "replicas" }}{{ $s.replicas }}{{ else }}1{{ end }}
   podManagementPolicy: OrderedReady
   updateStrategy:
     type: RollingUpdate
