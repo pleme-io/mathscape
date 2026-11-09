@@ -1,6 +1,6 @@
 //! # mathscape-acquisition — the garimpo acquisition-space typescape
 //!
-//! Realizes [`theory/GARIMPO.md §3.5`](https://github.com/pleme-io/theory/blob/main/GARIMPO.md)
+//! Realizes the garimpo acquisition space
 //! as a real **TYPED-SPEC + INTERPRETER TRIPLET**: a typed Rust border
 //! (`types`), a `(defacquisition …)` tatara-lisp authoring surface
 //! (`spec` + `spec_lisp`), and a working interpreter behind a mockable

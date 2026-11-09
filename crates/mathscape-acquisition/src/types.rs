@@ -1,6 +1,6 @@
 //! The typed border of the garimpo acquisition space.
 //!
-//! This module realizes `theory/GARIMPO.md §3.5` as real Rust: the
+//! This module realizes it as real Rust: the
 //! acquisition space is **fully known because it is fully typed** — you
 //! know exactly what a valid acquisition is, and every invalid one has
 //! no constructor. Per `UNREPRESENTABILITY.md §II`, each primitive

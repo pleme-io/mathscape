@@ -59,7 +59,7 @@ search can be handed to anyone, and the check never is.
 | Merkle tree with proofs | tameshi `Blake3Algorithm` (RFC 9162 domain separation) `src/merkle.rs:45`, `merkle_proof` `:232`, `verify_proof` `:256` | BUILT | Inclusion proofs: "rule r is in the model at commit c" |
 | Public-key signatures | tameshi `LocalSigner` (Ed25519) `src/signing.rs:133`, `verify_signed_root` `:101` (pubkey-only, `verify_strict`) | BUILT | Writer and donor signatures that anyone can check without a secret |
 | Git-shaped typed DAG | galho `GalhoTree` `galho-storage/src/galho_tree.rs:101`, `advance_ref` `:164` refusing a non-descendant with a typed `Divergence` `:45`; `OutcomeChain` `outcome_chain.rs:106`; `three_way_merge` `galho-types/src/merge.rs:46`; `TypedConflict` `conflict.rs:15` | BUILT for IaC, private repo | The commit DAG, compare-and-swap ref moves and a typed conflict algebra, already written once |
-| Donated-compute substrate | `theory/MUTIRAO.md` §VI (quinhão, the donated share), §VII (trust and abuse), §III.4 (eito, distributed jobs); `mutirao-convergent` `GrowSet` | DESIGN, with BUILT CRDT core (private repo) | The swarm, identity, quotas and attested give/take ledger donors run under |
+| Donated-compute substrate | the mutirão design: quinhão (the donated share), trust and abuse, eito (distributed jobs); `mutirao-convergent` `GrowSet` | DESIGN, with BUILT CRDT core (private repo) | The swarm, identity, quotas and attested give/take ledger donors run under |
 
 The short version: the object store, the tree, the delta log, the hash
 chain and the signatures all exist. What does not exist is the thing that
@@ -172,7 +172,7 @@ because one entry in it is bad.
 | Subtle poisoning | A false rule that survives sampling anyway | It sits at Sampled, below Verified, and cannot reach Canonical; a later counterexample demotes it, and every receipt whose context contained it is re-checked (section 5) | That rule and what was certified on top of it |
 | Replay | The same proposal sent again, by anyone | Idempotent by rule hash: a known or tombstoned rule is a no-op before any work is done | That entry |
 | Spam | Many proposals to burn writer CPU | Per-donor rate limit at ingress (samba `LeakyBucket`), and a bounded step limit per check | That donor's excess; other donors unaffected |
-| Sybil | Many identities | Identity buys **credit**, never **acceptance**: a rule is accepted on its own check, whoever sent it. So sybils can only inflate credit or spread spam across keys; the answer is invitation-gated swarms first, as `theory/MUTIRAO.md` §VII states | Credit accounting, and per-identity quotas at admission |
+| Sybil | Many identities | Identity buys **credit**, never **acceptance**: a rule is accepted on its own check, whoever sent it. So sybils can only inflate credit or spread spam across keys; the answer is invitation-gated swarms first | Credit accounting, and per-identity quotas at admission |
 | Forged identity | A proposal signed with a key that does not verify | Refused before parsing its rules (`verify_signed_root` returns false, never errors) | That proposal |
 | Writer misbehaviour | The writer rewrites history | Any holder of an older head gets a failing `ConsistencyProof` | Detection, by anyone |
 
@@ -269,7 +269,7 @@ whole proposal if it fails), drop known or tombstoned hashes, drop entailed
 rules, re-certify on post-submission samples, then commit the survivors with
 receipts and the donor's key in `:donors`. Credit, meaning which donor
 contributed which accepted rule, is read straight off the commit history,
-which is the attested give/take ledger `theory/MUTIRAO.md` §VI describes.
+which is the attested give/take ledger.
 
 **How it maps onto what exists:** today's scout is a donor that happens to be
 local and trusted. The stream design's scout mode
