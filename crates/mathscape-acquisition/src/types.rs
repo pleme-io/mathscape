@@ -3,7 +3,7 @@
 //! This module realizes it as real Rust: the
 //! acquisition space is **fully known because it is fully typed** — you
 //! know exactly what a valid acquisition is, and every invalid one has
-//! no constructor. Per `UNREPRESENTABILITY.md §II`, each primitive
+//! no constructor. Each primitive
 //! carries its honest seal-tier, and where the tier is
 //! `only-mitigated` today the type makes the floor **visible** (both a
 //! weak `Sample`/`TrustedPrimitive` constructor and a destination
@@ -141,8 +141,7 @@ impl SealWitness {
         matches!(self, SealWitness::Proof { .. })
     }
 
-    /// The honest tier label for this witness, per
-    /// `UNREPRESENTABILITY.md §II`.
+    /// The honest tier label for this witness.
     #[must_use]
     pub fn tier(&self) -> Tier {
         match self {
@@ -153,7 +152,7 @@ impl SealWitness {
     }
 }
 
-/// The honest three-tier ladder (`UNREPRESENTABILITY.md §II`). Ordered
+/// The honest three-tier ladder. Ordered
 /// weakest → strongest so a consumer can `>=`-compare a floor against a
 /// required minimum.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]

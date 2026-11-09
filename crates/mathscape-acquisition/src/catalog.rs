@@ -23,7 +23,7 @@ pub struct AcquisitionPrimitive {
     /// The destination tier once the typed gap closes, or `None` if the
     /// primitive is already at its ceiling.
     pub destination: Option<Tier>,
-    /// The GARIMPO §3.5 sub-section that specifies it.
+    /// The design sub-section that specifies it.
     pub spec_ref: &'static str,
 }
 

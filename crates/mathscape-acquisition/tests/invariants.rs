@@ -1,5 +1,5 @@
-//! Regression tests — one per typed invariant of the acquisition space
-//! (`GARIMPO.md §3.5`), driving the interpreter through a **mocked**
+//! Regression tests — one per typed invariant of the acquisition space,
+//! driving the interpreter through a **mocked**
 //! `AcquisitionEnvironment` so no real e-graph / Lean / migration engine
 //! is needed. The trait IS the testability contract.
 
