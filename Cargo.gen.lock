@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "cargo_lock_sha256": "a35557e3b6126aec3ac36139c2d755f9360403c4ae7f2c6a090011bc5472d01f",
+  "cargo_lock_sha256": "c246735992861fef6664636e4b4dd1cf48fc4e2e24d466c02e31c0d3d068d2d2",
   "manifest_sha256": {
     "Cargo.toml": "6d621840088f9ff1df61141ee69ef3fbf207e5696e42f410cd6b06dae24cb4b2",
     "crates/mathscape-acquisition/Cargo.toml": "5d9543090fad1cbb511b4d75b6b09bd1dd248359b9ad306ac98c1f827ca4afa7",
@@ -4473,7 +4473,7 @@
         "build_dependencies": [],
         "features": []
       },
-      "gen-macros-0.1.51": {
+      "gen-macros-0.1.55": {
         "runtime_dependencies": [
           {
             "name": "proc_macro2",
@@ -4512,11 +4512,11 @@
         "build_dependencies": [],
         "features": []
       },
-      "gen-platform-0.1.51": {
+      "gen-platform-0.1.55": {
         "runtime_dependencies": [
           {
             "name": "gen_macros",
-            "package_key": "gen-macros-0.1.51",
+            "package_key": "gen-macros-0.1.55",
             "kind": "normal",
             "features": [],
             "uses_default_features": true,
@@ -4526,7 +4526,7 @@
           },
           {
             "name": "gen_types",
-            "package_key": "gen-types-0.1.51",
+            "package_key": "gen-types-0.1.55",
             "kind": "normal",
             "features": [],
             "uses_default_features": true,
@@ -4580,7 +4580,7 @@
         "build_dependencies": [],
         "features": []
       },
-      "gen-types-0.1.51": {
+      "gen-types-0.1.55": {
         "runtime_dependencies": [
           {
             "name": "blake3",
@@ -5259,7 +5259,7 @@
         "build_dependencies": [],
         "features": []
       },
-      "helm-forge-0.1.2": {
+      "helm-forge-0.1.4": {
         "runtime_dependencies": [
           {
             "name": "schemars",
@@ -7015,7 +7015,7 @@
         "runtime_dependencies": [
           {
             "name": "helm_forge",
-            "package_key": "helm-forge-0.1.2",
+            "package_key": "helm-forge-0.1.4",
             "kind": "normal",
             "features": [
               "values-schema"
@@ -13154,7 +13154,7 @@
           },
           {
             "name": "gen_platform",
-            "package_key": "gen-platform-0.1.51",
+            "package_key": "gen-platform-0.1.55",
             "kind": "normal",
             "features": [],
             "uses_default_features": true,
@@ -13164,7 +13164,7 @@
           },
           {
             "name": "gen_types",
-            "package_key": "gen-types-0.1.51",
+            "package_key": "gen-types-0.1.55",
             "kind": "normal",
             "features": [],
             "uses_default_features": true,
@@ -21280,14 +21280,14 @@
         "path": "lib.rs"
       }
     },
-    "gen-macros-0.1.51": {
+    "gen-macros-0.1.55": {
       "edition": "2024",
       "proc_macro": true
     },
-    "gen-platform-0.1.51": {
+    "gen-platform-0.1.55": {
       "edition": "2024"
     },
-    "gen-types-0.1.51": {
+    "gen-types-0.1.55": {
       "edition": "2024"
     },
     "generic-array-0.14.7": {
@@ -21341,7 +21341,7 @@
     "heck-0.5.0": {
       "edition": "2021"
     },
-    "helm-forge-0.1.2": {
+    "helm-forge-0.1.4": {
       "edition": "2024"
     },
     "hex-0.4.3": {

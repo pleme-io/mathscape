@@ -1334,9 +1334,9 @@ dependencies = [
 
 [[package]]
 name = "gen-macros"
-version = "0.1.51"
+version = "0.1.55"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b981d6e23ae392923db98dc5a96fd8f42a3a44c6ce4c7681461a6f0881ed59c0"
+checksum = "522e8f4d0f4af82ee13c37507c12907c0587a982f8a17c8b378b14ae81ac24c8"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1345,9 +1345,9 @@ dependencies = [
 
 [[package]]
 name = "gen-platform"
-version = "0.1.51"
+version = "0.1.55"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f2ce1c250a8f7e6e026d731fdeee7ae0fdb7d882f899a076b8c1558eef6ddce3"
+checksum = "c2626761d01e0f872bb5ab92aa45fcfd1f820904a4da36f96b1b9a101ffa44fd"
 dependencies = [
  "gen-macros",
  "gen-types",
@@ -1359,9 +1359,9 @@ dependencies = [
 
 [[package]]
 name = "gen-types"
-version = "0.1.51"
+version = "0.1.55"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "25c13fba2c9360c684e7f068deddba4ae436111441285d7b54e0facb3ebe3bc5"
+checksum = "f6d5dd9f013ffd978542607400199cf39f3fdff3feb36e52d13a4f7c20b6b0bd"
 dependencies = [
  "blake3",
  "chrono",
@@ -1518,9 +1518,9 @@ checksum = "2304e00983f87ffb38b55b444b5e3b60a884b5d30c0fca7d82fe33449bbe55ea"
 
 [[package]]
 name = "helm-forge"
-version = "0.1.2"
+version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "edaea5d0c7df25b02b36b785729a08fdbd40fb15d4bb1be7729df2e36f74adfb"
+checksum = "fb199a1b1d199cd30ba30978b90a45320922ee470bca9ceacc838f137e989614"
 dependencies = [
  "schemars 0.8.22",
  "serde",
